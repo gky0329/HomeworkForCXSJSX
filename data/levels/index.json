@@ -1,0 +1,21 @@
+{
+  "version": "2.1",
+  "levels": [
+    {
+      "id": "oop_001",
+      "title": "定义你的第一个类",
+      "type": "challenge",
+      "unit": 1,
+      "order": 1,
+      "prerequisites": []
+    },
+    {
+      "id": "oop_002",
+      "title": "多类多实例",
+      "type": "challenge",
+      "unit": 1,
+      "order": 2,
+      "prerequisites": ["oop_001"]
+    }
+  ]
+}

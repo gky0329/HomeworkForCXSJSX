@@ -1,11 +1,24 @@
 {
   "id": "oop_002",
   "title": "多类多实例",
+  "type": "challenge",
   "unit": 1,
-  "concept": "多类声明与对象操作",
   "order": 2,
   "prerequisites": ["oop_001"],
-  "theory": "C++ 中可以在同一个作用域里定义多个类，每个类都可以创建多个对象实例。不同的类通过类名区分，对象通过变量名区分。",
+
+  "npc_dialogue": [
+    {"npc": "villager", "text": "村里不止有村民，还有铁傀儡、僵尸和骷髅。每种生物都是一类对象。"},
+    {"npc": "iron_golem", "text": "不同的类可以同时存在，每个类都能创建多个实例。"}
+  ],
+
+  "theory": "C++ 中可以在同一个作用域里定义多个类，每个类都可以创建多个对象实例。不同的类通过类名区分，对象通过变量名区分。就像村里同时有村民和铁傀儡，每种都有各自的数量和属性。",
+
+  "key_points": [
+    "同一作用域可定义多个类",
+    "每个类可创建多个独立的对象实例",
+    "不同对象的成员值互不影响"
+  ],
+
   "initial_code": [
     "class Creeper {",
     "public:",
@@ -20,11 +33,13 @@
     "c.health = 30;",
     "g.health = 50;"
   ],
+
   "blanks": [
     { "line": 0, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
     { "line": 4, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
     { "line": 10, "type": "text_input", "placeholder": "30", "width_chars": 6, "validator": "number" }
   ],
+
   "goal": {
     "checks": [
       { "type": "class_exists", "name": "Creeper" },
@@ -38,10 +53,30 @@
       { "type": "no_errors" }
     ]
   },
+
   "hints": [
     "用 class 关键字定义类",
     "Creeper 的 health 应该设为 30",
     "IronGolem 的 health 应该设为 50"
   ],
-  "success_message": "完美！你同时创建了两个类的实例，并正确设置了各自的 health 值。"
+
+  "success_message": "完美！你同时创建了 Creeper 和 IronGolem 两个类的实例，并正确设置了各自的 health 值。",
+  "failure_guidance": "检查两个类的 class 关键字是否都正确，health 值是否分别设置为 30 和 50。",
+
+  "code_line_notes": [
+    "定义 Creeper 类",
+    "",
+    "Creeper 的 health 成员",
+    "",
+    "定义 IronGolem 类",
+    "",
+    "",
+    "",
+    "创建 Creeper 实例 c",
+    "创建 IronGolem 实例 g",
+    "设置 c 的 health 为 30",
+    "设置 g 的 health 为 50"
+  ],
+
+  "estimated_time_min": 5
 }

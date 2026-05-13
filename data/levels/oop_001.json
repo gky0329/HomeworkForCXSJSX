@@ -1,24 +1,39 @@
 {
   "id": "oop_001",
   "title": "定义你的第一个类",
+  "type": "challenge",
   "unit": 1,
-  "concept": "class 声明与成员变量",
   "order": 1,
   "prerequisites": [],
-  "theory": "在 C++ 中，class 是用来描述一类对象的蓝图。class 内部可以声明成员变量（数据）和成员函数（行为）。public: 表示下面的成员可以被外部代码访问。",
+
+  "npc_dialogue": [
+    {"npc": "villager", "text": "欢迎来到方块村。类就像蓝图，告诉我们一类方块应该有哪些数据和行为。"},
+    {"npc": "iron_golem", "text": "对象是按照蓝图生成出来的具体实例。像每一个铁傀儡都有自己的生命值和位置。"},
+    {"npc": "villager", "text": "通过这一关，你会识别 class、成员变量和对象创建。"}
+  ],
+
+  "theory": "在 C++ 中，class 是用来描述一类对象的蓝图。class 内部可以声明成员变量（数据）和成员函数（行为）。public: 表示下面的成员可以被外部代码访问。通过 class 关键字，我们可以创建自定义的类型，就像 Minecraft 里铁傀儡有自己的生命值和行为一样。",
+
+  "key_points": [
+    "class 关键字声明一个类",
+    ". 运算符访问对象的成员变量"
+  ],
+
   "initial_code": [
-    "class Player {",
-    "public:",
+    "____ Player {",
+    "____:",
     "    int health;",
     "};",
     "Player p;",
-    "p.health = 20;"
+    "p.____ = 20;"
   ],
+
   "blanks": [
     { "line": 0, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
     { "line": 1, "type": "text_input", "placeholder": "public", "width_chars": 10, "validator": "cpp_access" },
     { "line": 5, "type": "text_input", "placeholder": "health", "width_chars": 10, "validator": "identifier" }
   ],
+
   "goal": {
     "checks": [
       { "type": "class_exists", "name": "Player" },
@@ -28,10 +43,24 @@
       { "type": "no_errors" }
     ]
   },
+
   "hints": [
     "声明类的关键字是 class",
     "要让类外能访问成员，用 public:",
     "health 是 Player 的成员变量名"
   ],
-  "success_message": "很好！你定义了第一个类，并创建了一个 Player 对象，设置 health 为 20。"
+
+  "success_message": "很好！你定义了第一个类，并创建了一个 Player 对象，设置 health 为 20。",
+  "failure_guidance": "检查 class 关键字是否拼写正确，public 后是否有冒号，health 是否赋值给了正确的对象。",
+
+  "code_line_notes": [
+    "定义一个名为 Player 的类 ← 本关新概念",
+    "以下成员可被外部访问",
+    "Player 有一个 int 类型的 health 成员",
+    "",
+    "根据 Player 蓝图创建一个实例 p",
+    "设置 p 的 health 为 20"
+  ],
+
+  "estimated_time_min": 5
 }

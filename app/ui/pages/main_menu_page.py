@@ -16,6 +16,7 @@ def _menu_button(text: str) -> McButton:
 class MainMenuPage(PanoramaBackground):
     single_player_requested = Signal()
     multiplayer_requested = Signal()
+    sandbox_requested = Signal()
     exit_requested = Signal()
 
     def __init__(self, audio: AudioManager) -> None:
@@ -64,6 +65,12 @@ class MainMenuPage(PanoramaBackground):
             btn.clicked.connect(audio.play_button)
             btn.clicked.connect(sig.emit)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        sandbox_btn = _menu_button("⛏ 沙盒模式 (Fill-in-Blank)")
+        sandbox_btn.setMinimumWidth(pw)
+        sandbox_btn.clicked.connect(audio.play_button)
+        sandbox_btn.clicked.connect(self.sandbox_requested.emit)
+        layout.addWidget(sandbox_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         sec = QGridLayout()
         sec.setHorizontalSpacing(gap)

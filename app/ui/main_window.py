@@ -3,10 +3,13 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMainWindow, QStackedWidget
 
 from app.core.session import AppSession, GameMode, WorldMeta, WorldType
+from app.core.challenge_loader import ChallengeLoader
+from app.core.engine import Engine
 from app.nav import NavigationManager
 from app.services.audio_manager import AudioManager
 from app.services.lesson_service import LessonService
 from app.services.storage_service import StorageService
+from app.ui.pages.challenge_page import ChallengePage
 from app.ui.pages.create_world_page import CreateWorldPage
 from app.ui.pages.creating_world_page import CreatingWorldPage
 from app.ui.pages.lesson_intro_page import LessonIntroPage
@@ -28,6 +31,8 @@ class MainWindow(QMainWindow):
         storage: StorageService,
         lesson_service: LessonService,
         audio: AudioManager,
+        loader: ChallengeLoader,
+        engine: Engine,
     ) -> None:
         super().__init__()
         self.nav = nav
@@ -47,11 +52,13 @@ class MainWindow(QMainWindow):
         self.lesson_intro = LessonIntroPage(audio)
         self.quiz = QuizPage(audio)
         self.result = ResultPage(audio)
+        self.challenge = ChallengePage(loader, engine)
 
         for page in (
             self.splash, self.main_menu, self.world_select,
             self.create_world, self.creating_world,
             self.lesson_intro, self.quiz, self.result,
+            self.challenge,
         ):
             self.stack.addWidget(page)
 
@@ -67,6 +74,8 @@ class MainWindow(QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl(TEACHING_URL))
         )
         m.exit_requested.connect(self.close)
+
+        m.sandbox_requested.connect(lambda: self.stack.setCurrentWidget(self.challenge))
 
         ws = self.world_select
         ws.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
@@ -90,6 +99,9 @@ class MainWindow(QMainWindow):
         re = self.result
         re.back_to_worlds_requested.connect(self._show_world_select)
         re.retry_requested.connect(self._start_quiz)
+
+        ch = self.challenge
+        ch.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
 
     def _show_world_select(self) -> None:
         self.world_select.refresh()
