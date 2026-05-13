@@ -1,0 +1,54 @@
+{
+  "id": "ptr_004",
+  "title": "第四关：new —— 在堆上申请内存",
+  "unit": 2,
+  "concept": "new 动态分配",
+  "order": 4,
+  "prerequisites": ["ptr_003"],
+  "learning_objectives": [
+    "理解堆（Heap）与栈（Stack）的本质区别",
+    "掌握 new 运算符在堆上动态创建变量",
+    "观察 Canvas 堆区出现新的内存块"
+  ],
+  "theory": "之前所有变量都在栈上。栈上变量好是好，但有局限：大小在编译时确定，函数结束就自动销毁。\n\n堆就像仓库的长期存储区。你可以任何时候申请一块空间（new），用多久都行，但用完必须主动归还（delete），否则成「内存泄漏」。\n\n类比：栈是酒店前台暂存行李（人来人往，自动管理），堆是租一个仓库隔间（要签合同 new，搬走要退租 delete）。\n\n写下 p = new int(5) 时：\n1. 在堆上分配 4 字节，写入值 5\n2. 返回这块内存的地址\n3. 把地址存入 p\n\nCanvas 的堆区会出现一个橙色方块，箭头从 p 指向它。",
+  "key_points": [
+    "new 类型(初值) 在堆上分配内存并返回地址",
+    "堆内存不会自动释放——忘记 delete = 内存泄漏",
+    "堆区方块为橙色，栈区为蓝色，方便区分"
+  ],
+  "task": "第 2 行声明了指针 p。请在第 3 行用 new 在堆上分配一个 int，值为 5，并把地址存到 p 中。",
+  "initial_code": [
+    "int main() {",
+    "    int* p;",
+    "    __BLANK__",
+    "}"
+  ],
+  "code_line_notes": {
+    "0": "进入 main()，创建栈帧",
+    "1": "栈帧中创建指针变量 p（准备接收地址）",
+    "2": "← 用 new 在堆上申请内存，把地址存入 p",
+    "3": "main() 结束"
+  },
+  "blanks": [
+    {
+      "line": 2,
+      "type": "text_input",
+      "placeholder": "__BLANK__",
+      "width_chars": 24
+    }
+  ],
+  "goal": {
+    "checks": [
+      { "type": "heap_block_exists", "type_name": "int", "value": "5" },
+      { "type": "edge_count", "count": 1 },
+      { "type": "no_errors" }
+    ]
+  },
+  "hints": [
+    "在堆上分配内存用 new 关键字，后面跟类型和初始值",
+    "写法是：p = new int(5);  —— 注意 new int(5) 而不是 new int = 5",
+    "在第 3 行输入：p = new int(5);"
+  ],
+  "success_message": "堆区出现了一个橙色方块 [int = 5]，一条箭头从栈上的 p 指向这块堆内存。注意堆区和栈区的颜色不同——橙色代表「这块内存是你在堆上申请的，需要你负责释放」。",
+  "failure_guidance": "检查：1) 是否用了 new 关键字？2) 类型是不是 int？3) new int(5) 用圆括号给初值，不是方括号。常见的错误是把 new 写在左边（new p = int(5);）或忘记括号。"
+}

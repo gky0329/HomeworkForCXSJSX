@@ -1,0 +1,37 @@
+{
+  "id": "oop_001",
+  "title": "定义你的第一个类",
+  "unit": 1,
+  "concept": "class 声明与成员变量",
+  "order": 1,
+  "prerequisites": [],
+  "theory": "在 C++ 中，class 是用来描述一类对象的蓝图。class 内部可以声明成员变量（数据）和成员函数（行为）。public: 表示下面的成员可以被外部代码访问。",
+  "initial_code": [
+    "class Player {",
+    "public:",
+    "    int health;",
+    "};",
+    "Player p;",
+    "p.health = 20;"
+  ],
+  "blanks": [
+    { "line": 0, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
+    { "line": 1, "type": "text_input", "placeholder": "public", "width_chars": 10, "validator": "cpp_access" },
+    { "line": 5, "type": "text_input", "placeholder": "health", "width_chars": 10, "validator": "identifier" }
+  ],
+  "goal": {
+    "checks": [
+      { "type": "class_exists", "name": "Player" },
+      { "type": "class_has_member", "class_name": "Player", "member_name": "health" },
+      { "type": "instance_exists", "var_name": "p", "class_name": "Player" },
+      { "type": "member_value_equals", "var_name": "p", "member": "health", "value": 20 },
+      { "type": "no_errors" }
+    ]
+  },
+  "hints": [
+    "声明类的关键字是 class",
+    "要让类外能访问成员，用 public:",
+    "health 是 Player 的成员变量名"
+  ],
+  "success_message": "很好！你定义了第一个类，并创建了一个 Player 对象，设置 health 为 20。"
+}

@@ -1,0 +1,52 @@
+2026-05-10 20:45:28 [INFO] cpplab: C++ 内存实验室 启动
+2026-05-10 20:45:28 [INFO] cpplab.main_window: Navigation: MAIN_MENU
+2026-05-10 20:45:28 [INFO] cpplab: 主窗口已显示
+2026-05-10 20:45:29 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 20:45:32 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 20:45:32 [INFO] cpplab.challenge: Loaded challenge: ptr_001 (声明你的第一根指针)
+2026-05-10 20:45:44 [INFO] cpplab.challenge_page: Goal check: 变量 p 不存在于 main
+2026-05-10 20:45:44 [INFO] cpplab.challenge_page: Goal check: 指针 p 没有指向预期的目标
+2026-05-10 20:45:44 [INFO] cpplab.challenge_page: Goal check: 堆区无活跃块
+2026-05-10 20:45:44 [INFO] cpplab.challenge_page: Goal check: 无错误
+2026-05-10 20:46:10 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 20:46:50 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 20:46:54 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 20:46:56 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 20:47:07 [INFO] cpplab.challenge_page: Goal check: 变量 p 不存在于 main
+2026-05-10 20:47:07 [INFO] cpplab.challenge_page: Goal check: 指针 p 没有指向预期的目标
+2026-05-10 20:47:07 [INFO] cpplab.challenge_page: Goal check: 堆区无活跃块
+2026-05-10 20:47:07 [INFO] cpplab.challenge_page: Goal check: 无错误
+2026-05-10 20:47:24 [INFO] cpplab.challenge_page: Goal check: 变量 p 存在
+2026-05-10 20:47:24 [INFO] cpplab.challenge_page: Goal check: 指针 p 没有指向预期的目标
+2026-05-10 20:47:24 [INFO] cpplab.challenge_page: Goal check: 堆区无活跃块
+2026-05-10 20:47:24 [INFO] cpplab.challenge_page: Goal check: 无错误
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 变量 p 不存在于 main
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 指针 p 没有指向预期的目标
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 堆区无活跃块
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 无错误
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 变量 p 不存在于 main
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 指针 p 没有指向预期的目标
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 堆区无活跃块
+2026-05-10 20:47:27 [INFO] cpplab.challenge_page: Goal check: 无错误
+2026-05-10 20:47:43 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 20:47:46 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 20:47:46 [INFO] cpplab.challenge: Loaded challenge: ptr_002 (用指针修改变量)
+2026-05-10 20:48:12 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 21:12:17 [INFO] cpplab: C++ 内存实验室 启动
+2026-05-10 21:12:18 [INFO] cpplab.main_window: Navigation: MAIN_MENU
+2026-05-10 21:12:18 [INFO] cpplab: 主窗口已显示
+2026-05-10 21:12:19 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 21:12:21 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 21:12:21 [INFO] cpplab.challenge: Loaded challenge: welcome (欢迎来到内存世界)
+2026-05-10 21:12:51 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 21:12:54 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 21:12:54 [INFO] cpplab.challenge: Loaded challenge: ptr_001 (第一关：声明指针变量)
+2026-05-10 21:13:56 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 21:13:59 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 21:13:59 [INFO] cpplab.challenge: Loaded challenge: ptr_002 (第二关：取地址 & —— 建立连线)
+2026-05-10 21:15:26 [INFO] cpplab.main_window: Navigation: LEVEL_SELECT
+2026-05-10 21:15:28 [INFO] cpplab.main_window: Navigation: CHALLENGE
+2026-05-10 21:15:28 [INFO] cpplab.challenge: Loaded challenge: ptr_005 (第五关：delete —— 归还内存，避免泄漏)
+2026-05-13 10:46:33 [INFO] cpplab: C++ 内存实验室 启动
+2026-05-13 10:46:33 [INFO] cpplab.main_window: Navigation: MAIN_MENU
+2026-05-13 10:46:33 [INFO] cpplab: 主窗口已显示

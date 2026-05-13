@@ -1,0 +1,53 @@
+{
+  "id": "ptr_001",
+  "title": "第一关：声明指针变量",
+  "unit": 1,
+  "concept": "int* 指针声明",
+  "order": 1,
+  "prerequisites": [],
+  "learning_objectives": [
+    "理解指针是一个存「地址」的变量",
+    "掌握 int* 语法声明一个指向 int 的指针"
+  ],
+  "theory": "普通变量：int a = 42。a 是个盒子，里面放了数字 42。\n\n指针变量：int* p。p 也是个盒子，但里面不放数字——放的是另一个盒子的**门牌号**。\n\n为什么需要指针？因为有时候你不想直接碰那个盒子（比如盒子在别的地方、或者盒子特别大），你只需要知道它在哪，然后通过门牌号找到它。\n\nint* 中的星号是声明的一部分：它告诉编译器「p 不是普通变量，是指针」。",
+  "key_points": [
+    "int* p 声明一个能存地址的变量 p",
+    "int* 中的 * 是类型的一部分，不是乘法符号",
+    "刚声明的指针不指向任何有效地址（值为 0）"
+  ],
+  "task": "第 2 行已经声明了 int a = 42。请在第 3 行声明一个 int* 类型的指针变量，名字叫 p。",
+  "initial_code": [
+    "int main() {",
+    "    int a = 42;",
+    "    __BLANK__",
+    "}"
+  ],
+  "code_line_notes": {
+    "0": "进入 main()，栈帧出现",
+    "1": "栈帧中创建 int 变量 a，值 42",
+    "2": "← 在这行声明指针 p（类型 int*）",
+    "3": "main() 结束"
+  },
+  "blanks": [
+    {
+      "line": 2,
+      "type": "text_input",
+      "placeholder": "__BLANK__",
+      "width_chars": 16
+    }
+  ],
+  "goal": {
+    "checks": [
+      { "type": "variable_exists", "frame": "main", "name": "p", "is_pointer": true },
+      { "type": "no_heap_blocks" },
+      { "type": "no_errors" }
+    ]
+  },
+  "hints": [
+    "指针的声明方式：先写类型，再加一个 *，然后是变量名。比如指向 int 的指针写成 int*",
+    "你要声明一个名为 p、类型为 int* 的指针：int* p;",
+    "在第 3 行输入：int* p;"
+  ],
+  "success_message": "看右边 Canvas，栈帧里出现了 p。注意它和 a 的显示不一样——p 被标记为「指针类型」，因为它存的不是普通数字，是一个地址。只不过现在还指着 0，哪都没去。",
+  "failure_guidance": "检查：1) 用了 int* 类型吗？2) 变量名是 p 吗？3) 别忘了分号。"
+}

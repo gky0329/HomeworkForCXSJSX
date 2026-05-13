@@ -1,0 +1,57 @@
+{
+  "id": "ptr_002",
+  "title": "第二关：取地址 & —— 建立连线",
+  "unit": 1,
+  "concept": "& 取地址运算符",
+  "order": 2,
+  "prerequisites": ["ptr_001"],
+  "learning_objectives": [
+    "理解 & 运算符：获取变量的内存地址",
+    "掌握将地址赋值给指针变量的语法",
+    "观察 Canvas 上指针连线的建立"
+  ],
+  "theory": "每个变量在内存中都有两个属性：值（里面放的数据）和地址（它住在哪里）。\n\n& 运算符读作「取地址」。&a 就是「变量 a 的地址」。\n\n类比：a 是一个货架（里面摆了 42），&a 是这个货架的编号。把编号写在纸条 p 上，p 就知道 a 在哪了。\n\n当你写下 p = &a; 时，Canvas 上会从 p 画出一条蓝色箭头，指向 a —— 这叫「指针连线」。箭头的方向表示 p 的内容（地址值）指向了 a 的位置。",
+  "key_points": [
+    "& 取地址：&a 返回变量 a 的内存地址",
+    "p = &a 把 a 的地址存进指针 p 中",
+    "指针连线可视化「p 指向 a」的引用关系"
+  ],
+  "task": "第 2 行声明了指针 p。请在第 3 行让 p 指向变量 a（用 & 运算符）。",
+  "initial_code": [
+    "int main() {",
+    "    int a = 42;",
+    "    int* p;",
+    "    __BLANK__",
+    "}"
+  ],
+  "code_line_notes": {
+    "0": "进入 main()，创建栈帧",
+    "1": "栈帧中创建 a = 42",
+    "2": "栈帧中创建指针变量 p（尚未指向任何东西）",
+    "3": "← 在这里让 p 指向 a（取 a 的地址存入 p）",
+    "4": "main() 结束"
+  },
+  "blanks": [
+    {
+      "line": 3,
+      "type": "text_input",
+      "placeholder": "__BLANK__",
+      "width_chars": 16
+    }
+  ],
+  "goal": {
+    "checks": [
+      { "type": "variable_exists", "frame": "main", "name": "p", "is_pointer": true },
+      { "type": "edge_exists", "from_var": "p", "from_frame": "main", "to_var": "a" },
+      { "type": "no_heap_blocks" },
+      { "type": "no_errors" }
+    ]
+  },
+  "hints": [
+    "你需要让 p 存储 a 的地址。获取地址的运算符是 &（写在变量名前面）",
+    "把地址赋值给指针 p 的写法是：p = &a;",
+    "在第 4 行输入：p = &a;"
+  ],
+  "success_message": "看 Canvas！从 p 到 a 出现了一条蓝色箭头。这个箭头在内存中真实的样子就是：p 里存着一个数字（a 的地址），通过这个数字可以找到 a。指针就是靠这个地址值来「指向」另一个变量的。",
+  "failure_guidance": "检查：1) 是否用了 & 运算符？2) 取地址的目标是不是变量 a？3) 赋值是不是给了指针 p？常见的错误是写成 a = &p 或者忘记写 &。"
+}

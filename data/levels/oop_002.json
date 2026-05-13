@@ -1,0 +1,47 @@
+{
+  "id": "oop_002",
+  "title": "多类多实例",
+  "unit": 1,
+  "concept": "多类声明与对象操作",
+  "order": 2,
+  "prerequisites": ["oop_001"],
+  "theory": "C++ 中可以在同一个作用域里定义多个类，每个类都可以创建多个对象实例。不同的类通过类名区分，对象通过变量名区分。",
+  "initial_code": [
+    "class Creeper {",
+    "public:",
+    "    int health;",
+    "};",
+    "class IronGolem {",
+    "public:",
+    "    int health;",
+    "};",
+    "Creeper c;",
+    "IronGolem g;",
+    "c.health = 30;",
+    "g.health = 50;"
+  ],
+  "blanks": [
+    { "line": 0, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
+    { "line": 4, "type": "text_input", "placeholder": "class", "width_chars": 8, "validator": "cpp_keyword" },
+    { "line": 10, "type": "text_input", "placeholder": "30", "width_chars": 6, "validator": "number" }
+  ],
+  "goal": {
+    "checks": [
+      { "type": "class_exists", "name": "Creeper" },
+      { "type": "class_exists", "name": "IronGolem" },
+      { "type": "instance_exists", "var_name": "c", "class_name": "Creeper" },
+      { "type": "instance_exists", "var_name": "g", "class_name": "IronGolem" },
+      { "type": "member_value_equals", "var_name": "c", "member": "health", "value": 30 },
+      { "type": "member_value_equals", "var_name": "g", "member": "health", "value": 50 },
+      { "type": "instance_count", "class_name": "Creeper", "count": 1 },
+      { "type": "instance_count", "class_name": "IronGolem", "count": 1 },
+      { "type": "no_errors" }
+    ]
+  },
+  "hints": [
+    "用 class 关键字定义类",
+    "Creeper 的 health 应该设为 30",
+    "IronGolem 的 health 应该设为 50"
+  ],
+  "success_message": "完美！你同时创建了两个类的实例，并正确设置了各自的 health 值。"
+}

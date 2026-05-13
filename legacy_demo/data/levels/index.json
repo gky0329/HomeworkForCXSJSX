@@ -1,0 +1,52 @@
+[
+  {
+    "id": "welcome",
+    "title": "欢迎来到内存世界",
+    "unit": 0,
+    "order": 0,
+    "is_demo": true,
+    "prerequisites": []
+  },
+  {
+    "id": "ptr_001",
+    "title": "第一关：声明指针变量",
+    "unit": 1,
+    "order": 1,
+    "prerequisites": []
+  },
+  {
+    "id": "ptr_002",
+    "title": "第二关：取地址 & —— 建立连线",
+    "unit": 1,
+    "order": 2,
+    "prerequisites": ["ptr_001"]
+  },
+  {
+    "id": "ptr_003",
+    "title": "第三关：解引用 * —— 间接修改",
+    "unit": 1,
+    "order": 3,
+    "prerequisites": ["ptr_002"]
+  },
+  {
+    "id": "ptr_004",
+    "title": "第四关：new —— 在堆上申请内存",
+    "unit": 2,
+    "order": 4,
+    "prerequisites": ["ptr_003"]
+  },
+  {
+    "id": "ptr_005",
+    "title": "第五关：delete —— 归还内存",
+    "unit": 2,
+    "order": 5,
+    "prerequisites": ["ptr_004"]
+  },
+  {
+    "id": "ptr_006",
+    "title": "第六关：综合挑战",
+    "unit": 2,
+    "order": 6,
+    "prerequisites": ["ptr_005"]
+  }
+]

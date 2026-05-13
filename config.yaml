@@ -1,0 +1,35 @@
+window:
+  width: 1400
+  height: 820
+  title: "C++ OOP 教学工具"
+
+splash:
+  duration_ms: 900
+
+audio:
+  enabled: true
+  music_volume: 0.28
+  sfx_volume: 0.7
+  music_dir: "Minecraft Sound Pack 1.17 - Sound Effects/music"
+
+levels:
+  dir: "data/levels"
+  index_file: "index.json"
+
+saves:
+  dir: "data/saves"
+
+canvas:
+  class_color: "#4A90D9"
+  instance_color: "#E8A840"
+  member_color: "#AAAAAA"
+  error_color: "#FF4444"
+  warning_color: "#FF8844"
+  animation_duration_ms: 300
+  class_column_x: 80
+  instance_column_x: 500
+  row_height: 60
+  column_width: 200
+
+urls:
+  teaching: "https://..."

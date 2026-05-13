@@ -1,0 +1,48 @@
+[
+  {
+    "id": "db70222ec53c4f12b343da0779fe373b",
+    "world_name": "李其禛的cpp世界",
+    "world_type": "cpp",
+    "game_mode": "survival",
+    "difficulty": "easy",
+    "completed_lessons": [
+      "cpp_oop_001"
+    ]
+  },
+  {
+    "id": "3277ffe7dbf44fed98389b88ada408cc",
+    "world_name": "新的世界",
+    "world_type": "minecraft",
+    "game_mode": "survival",
+    "difficulty": "peaceful",
+    "completed_lessons": []
+  },
+  {
+    "id": "22db5eb3c228425087640a93adb392cb",
+    "world_name": "新的世界",
+    "world_type": "cpp",
+    "game_mode": "survival",
+    "difficulty": "easy",
+    "completed_lessons": []
+  },
+  {
+    "id": "43a6b5b4b49649178fcb41cb2017cdde",
+    "world_name": "李其禛",
+    "world_type": "cpp",
+    "game_mode": "survival",
+    "difficulty": "peaceful",
+    "completed_lessons": [
+      "cpp_oop_001"
+    ]
+  },
+  {
+    "id": "c9ff0ba6116542c8b89e3f1ebf8b432a",
+    "world_name": "李清照",
+    "world_type": "cpp",
+    "game_mode": "survival",
+    "difficulty": "peaceful",
+    "completed_lessons": [
+      "cpp_oop_001"
+    ]
+  }
+]
