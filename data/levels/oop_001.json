@@ -12,6 +12,42 @@
     {"npc": "villager", "text": "通过这一关，你会识别 class、成员变量和对象创建。"}
   ],
 
+  "questions": [
+    {
+      "id": "q1", "type": "single_choice",
+      "prompt": "在 C++ 中，class 最接近 Minecraft 里的哪一种概念？",
+      "options": [
+        {"id": "A", "text": "一个具体放在地上的方块"},
+        {"id": "B", "text": "描述一类对象如何生成和行动的蓝图"},
+        {"id": "C", "text": "游戏窗口的分辨率"},
+        {"id": "D", "text": "玩家背包里的随机物品"}
+      ],
+      "answer": "B"
+    },
+    {
+      "id": "q2", "type": "single_choice",
+      "prompt": "下面哪一项是对象？",
+      "options": [
+        {"id": "A", "text": "class Zombie"},
+        {"id": "B", "text": "int health;"},
+        {"id": "C", "text": "Zombie z1;"},
+        {"id": "D", "text": "public:"}
+      ],
+      "answer": "C"
+    },
+    {
+      "id": "q3", "type": "single_choice",
+      "prompt": "public 访问控制通常表示什么？",
+      "options": [
+        {"id": "A", "text": "只能在类内部访问"},
+        {"id": "B", "text": "可以被类外代码访问"},
+        {"id": "C", "text": "对象不能创建"},
+        {"id": "D", "text": "变量会自动变成字符串"}
+      ],
+      "answer": "B"
+    }
+  ],
+
   "theory": "在 C++ 中，class 是用来描述一类对象的蓝图。class 内部可以声明成员变量（数据）和成员函数（行为）。public: 表示下面的成员可以被外部代码访问。通过 class 关键字，我们可以创建自定义的类型，就像 Minecraft 里铁傀儡有自己的生命值和行为一样。",
 
   "key_points": [

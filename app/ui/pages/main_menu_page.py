@@ -66,7 +66,7 @@ class MainMenuPage(PanoramaBackground):
             btn.clicked.connect(sig.emit)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        sandbox_btn = _menu_button("⛏ 沙盒模式 (Fill-in-Blank)")
+        sandbox_btn = _menu_button("⛏ 关卡挑战")
         sandbox_btn.setMinimumWidth(pw)
         sandbox_btn.clicked.connect(audio.play_button)
         sandbox_btn.clicked.connect(self.sandbox_requested.emit)

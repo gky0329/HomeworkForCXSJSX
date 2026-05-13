@@ -13,6 +13,7 @@ from app.ui.pages.challenge_page import ChallengePage
 from app.ui.pages.create_world_page import CreateWorldPage
 from app.ui.pages.creating_world_page import CreatingWorldPage
 from app.ui.pages.lesson_intro_page import LessonIntroPage
+from app.ui.pages.level_select_page import LevelSelectPage
 from app.ui.pages.main_menu_page import MainMenuPage
 from app.ui.pages.quiz_page import QuizPage
 from app.ui.pages.result_page import ResultPage
@@ -39,6 +40,7 @@ class MainWindow(QMainWindow):
         self.storage = storage
         self.lesson_service = lesson_service
         self.audio = audio
+        self.loader = loader
         self.session = AppSession()
 
         self.stack = QStackedWidget()
@@ -52,13 +54,14 @@ class MainWindow(QMainWindow):
         self.lesson_intro = LessonIntroPage(audio)
         self.quiz = QuizPage(audio)
         self.result = ResultPage(audio)
+        self.level_select = LevelSelectPage(loader)
         self.challenge = ChallengePage(loader, engine)
 
         for page in (
             self.splash, self.main_menu, self.world_select,
             self.create_world, self.creating_world,
             self.lesson_intro, self.quiz, self.result,
-            self.challenge,
+            self.level_select, self.challenge,
         ):
             self.stack.addWidget(page)
 
@@ -75,7 +78,7 @@ class MainWindow(QMainWindow):
         )
         m.exit_requested.connect(self.close)
 
-        m.sandbox_requested.connect(lambda: self.stack.setCurrentWidget(self.challenge))
+        m.sandbox_requested.connect(self._show_level_select)
 
         ws = self.world_select
         ws.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
@@ -103,6 +106,18 @@ class MainWindow(QMainWindow):
         ch = self.challenge
         ch.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
 
+        ls = self.level_select
+        ls.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
+        ls.level_selected.connect(self._start_challenge)
+
+    def _show_level_select(self) -> None:
+        self.level_select.refresh()
+        self.stack.setCurrentWidget(self.level_select)
+
+    def _start_challenge(self, level_id: str) -> None:
+        self.challenge.load_level(level_id)
+        self.stack.setCurrentWidget(self.challenge)
+
     def _show_world_select(self) -> None:
         self.world_select.refresh()
         self.stack.setCurrentWidget(self.world_select)
@@ -125,11 +140,10 @@ class MainWindow(QMainWindow):
             self._show_world_select()
             return
         if w.world_type == WorldType.CPP:
-            lesson = self.lesson_service.load("cpp_oop_001")
-            if lesson:
-                self.session.start_lesson(lesson)
-                self.lesson_intro.set_lesson(lesson)
-                self.stack.setCurrentWidget(self.lesson_intro)
+            ids = self.loader.list_ids()
+            if ids:
+                self.challenge.load_level(ids[0])
+                self.stack.setCurrentWidget(self.challenge)
                 return
         self._show_world_select()
 

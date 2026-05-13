@@ -1,56 +1,48 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QRegularExpression, QTimer, Signal
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from app.core.challenge_loader import ChallengeLoader
 from app.core.engine import Engine
+from app.ui.canvas.oop_canvas import OopCanvas
 from app.ui.theme.config import Colors
 from app.ui.theme.styles import APP_STYLE
 from app.ui.widgets.mc_button import McButton
 
 
-_STYLE_INPUT = (
-    f"QLineEdit {{"
-    f" background: {Colors.CODE_BG}; color: {Colors.GOLD}; "
-    f" font-family: Consolas; font-size: 16px; font-weight: 900; "
-    f" border: 2px solid {Colors.GOLD}; border-radius: 3px; "
-    f" padding: 4px 10px;"
-    f"}}"
-    f"QLineEdit:focus {{"
-    f" border-color: {Colors.GRASS_LIGHT}; "
-    f" background: {Colors.BEDROCK};"
-    f"}}"
+_VALIDATORS = {
+    "cpp_keyword": QRegularExpression(r"^[A-Za-z_]+$"),
+    "cpp_access":  QRegularExpression(r"^(public|private|protected)$"),
+    "identifier":  QRegularExpression(r"^[A-Za-z_][A-Za-z0-9_]*$"),
+    "number":      QRegularExpression(r"^\d+$"),
+    "any":         QRegularExpression(r"^.+$"),
+}
+
+_S_INPUT = (
+    f"QLineEdit {{ background: {Colors.CODE_BG}; color: {Colors.GOLD}; "
+    f"font-family: Consolas; font-size: 16px; font-weight: 900; "
+    f"border: 2px solid {Colors.GOLD}; border-radius: 3px; padding: 4px 10px; }}"
 )
-
-_STYLE_INPUT_DISABLED = (
-    f"QLineEdit {{"
-    f" background: {Colors.DISABLED_BG}; color: {Colors.DISABLED_TEXT}; "
-    f" font-family: Consolas; font-size: 16px; font-weight: 900; "
-    f" border: 2px solid {Colors.DISABLED_BORDER}; border-radius: 3px; "
-    f" padding: 4px 10px;"
-    f"}}"
+_S_INPUT_OFF = (
+    f"QLineEdit {{ background: {Colors.DISABLED_BG}; color: {Colors.DISABLED_TEXT}; "
+    f"font-family: Consolas; font-size: 16px; font-weight: 900; "
+    f"border: 2px solid {Colors.DISABLED_BORDER}; border-radius: 3px; padding: 4px 10px; }}"
 )
-
-_STYLE_CODE_LABEL = (
-    f"color: #98FB98; font-family: Consolas; font-size: 16px; "
-    f"background: transparent; padding: 2px 0;"
+_S_CODE = (
+    f"color: #98FB98; font-family: Consolas; font-size: 16px; background: transparent; padding: 2px 0;"
 )
-
-_STYLE_PLACEHOLDER = (
-    f"color: rgba(255,255,255,100); font-size: 14px; "
-    f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
-    f"padding: 16px; border-radius: 4px; min-height: 100px;"
-)
+_NPC_COLORS = {"villager": "#C8A96E", "iron_golem": "#C0C0C0", "steve": "#5B8FB7"}
 
 
-def _btn(color: str) -> str:
+def _btn_c(color: str) -> str:
     return (
         f"QPushButton {{ background: {color}; color: white; font-weight: 700; "
-        f"font-size: 14px; padding: 8px 18px; border: 2px solid {Colors.BLACK}; "
-        f"border-radius: 3px; }}"
+        f"font-size: 14px; padding: 8px 18px; border: 2px solid {Colors.BLACK}; border-radius: 3px; }}"
         f"QPushButton:hover {{ background: {Colors.GOLD}; color: {Colors.BLACK}; }}"
         f"QPushButton:disabled {{ background: {Colors.DISABLED_BG}; color: {Colors.DISABLED_TEXT}; }}"
     )
@@ -64,139 +56,44 @@ class ChallengePage(QWidget):
         self.loader = loader
         self.engine = engine
         self._level: dict | None = None
+        self._level_id: str = ""
         self._inputs: list[QLineEdit] = []
         self._blank_count = 0
         self._current_blank = 0
-
+        self._q_idx = 0
+        self._q_correct = 0
         self.setStyleSheet(APP_STYLE)
 
-        root = QHBoxLayout(self)
+        root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setSpacing(0)
 
-        left = self._build_left()
-        right = self._build_right()
-        root.addWidget(left, stretch=3)
-        root.addWidget(right, stretch=4)
+        self._phases = QStackedWidget()
+        root.addWidget(self._phases)
 
-        self._load_level("oop_001")
+        self._intro_w = self._build_intro()
+        self._quiz_w = QWidget()
+        self._quiz_layout = QVBoxLayout(self._quiz_w)
+        self._quiz_layout.setContentsMargins(30, 20, 30, 20)
+        self._quiz_layout.setSpacing(12)
+        self._code_w = self._build_code_panel()
 
-    def _build_left(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        self._phases.addWidget(self._intro_w)
+        self._phases.addWidget(self._quiz_w)
+        self._phases.addWidget(self._code_w)
 
-        self._title_lb = QLabel()
-        self._title_lb.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self._title_lb.setStyleSheet(
-            f"font-size: 26px; font-weight: 900; color: {Colors.CREAM}; padding: 4px 0;"
-        )
+        ids = self.loader.list_ids()
+        if ids:
+            self.load_level(ids[0])
+        else:
+            self._title_lb.setText("暂无关卡")
 
-        self._theory_lb = QLabel()
-        self._theory_lb.setWordWrap(True)
-        self._theory_lb.setStyleSheet(
-            f"font-size: 14px; color: {Colors.MUTED}; "
-            f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
-            f"padding: 12px; border-radius: 4px;"
-        )
-
-        self._key_points_lb = QLabel()
-        self._key_points_lb.setWordWrap(True)
-        self._key_points_lb.setStyleSheet(
-            f"font-size: 13px; color: {Colors.GOLD}; padding: 4px 8px; font-weight: 700;"
-        )
-
-        self._hint_lb = QLabel()
-        self._hint_lb.setWordWrap(True)
-        self._hint_lb.setStyleSheet(
-            f"font-size: 13px; color: {Colors.GOLD}; "
-            f"background: rgba(0,0,0,120); padding: 8px; border-radius: 2px;"
-        )
-        self._hint_lb.setVisible(False)
-        self._hint_index = 0
-
-        code_frame = QWidget()
-        code_frame.setStyleSheet(
-            f"background: {Colors.CODE_BG}; "
-            f"border: 3px solid {Colors.STONE_DARK}; border-radius: 4px; padding: 12px;"
-        )
-        self._code_layout = QVBoxLayout(code_frame)
-        self._code_layout.setContentsMargins(12, 12, 12, 12)
-        self._code_layout.setSpacing(3)
-
-        self._status_lb = QLabel()
-        self._status_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_lb.setStyleSheet(
-            f"font-size: 14px; font-weight: 700; color: {Colors.MUTED}; padding: 4px;"
-        )
-
-        self._result_lb = QLabel()
-        self._result_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._result_lb.setStyleSheet(
-            "font-size: 16px; font-weight: 900; padding: 8px; border-radius: 4px;"
-        )
-        self._result_lb.setVisible(False)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-
-        back = QPushButton("← 返回")
-        back.setStyleSheet(_btn(Colors.STONE))
-        back.clicked.connect(self.back_requested.emit)
-
-        hint_btn = QPushButton("? 提示")
-        hint_btn.setStyleSheet(_btn(Colors.OAK))
-        hint_btn.clicked.connect(self._show_next_hint)
-
-        self._check_btn = McButton("✓ 检查")
-        self._check_btn.clicked.connect(self._on_check)
-        self._check_btn.setEnabled(False)
-
-        self._step_btn = McButton("▶ 下一步")
-        self._step_btn.clicked.connect(self._on_step)
-        self._step_btn.setEnabled(False)
-
-        reset_btn = McButton("↺ 重置")
-        reset_btn.clicked.connect(self._on_reset)
-
-        btn_row.addWidget(back)
-        btn_row.addWidget(hint_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(reset_btn)
-        btn_row.addWidget(self._check_btn)
-        btn_row.addWidget(self._step_btn)
-
-        layout.addWidget(self._title_lb)
-        layout.addWidget(self._theory_lb)
-        layout.addWidget(self._key_points_lb)
-        layout.addWidget(self._hint_lb)
-        layout.addWidget(code_frame)
-        layout.addWidget(self._status_lb)
-        layout.addWidget(self._result_lb)
-        layout.addStretch()
-        layout.addLayout(btn_row)
-
-        return panel
-
-    def _build_right(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        label = QLabel("OopCanvas\n(Phase 2 实现)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet(_STYLE_PLACEHOLDER)
-
-        layout.addWidget(label)
-        return panel
-
-    def _load_level(self, level_id: str) -> None:
+    def load_level(self, level_id: str) -> None:
+        self._level_id = level_id
         self._level = self.loader.load(level_id)
         if not self._level:
             self._title_lb.setText("关卡加载失败")
             return
-
         lv = self._level
         self._title_lb.setText(f"⛏ {lv['title']}")
         self._theory_lb.setText(lv.get("theory", ""))
@@ -206,13 +103,307 @@ class ChallengePage(QWidget):
         self._hint_index = 0
         self._result_lb.setVisible(False)
         self._current_blank = 0
+        self._canvas.reset()
+        self.engine.reset()
 
+        dialogue = lv.get("npc_dialogue")
+        if dialogue:
+            self._show_intro(lv)
+        elif lv.get("questions"):
+            self._start_quiz()
+        else:
+            self._start_code()
+        self._update_nav_btns()
+
+    def _show_intro(self, lv: dict) -> None:
+        dialogue = lv.get("npc_dialogue", [])
+        if dialogue:
+            self._intro_title.setText(lv["title"])
+            lines = []
+            for d in dialogue:
+                npc = d.get("npc", "???")
+                color = _NPC_COLORS.get(npc, Colors.CREAM)
+                lines.append(
+                    f'<span style="color:{color};font-weight:900;">[{npc}]</span> '
+                    f'<span style="color:{Colors.CREAM};">{d.get("text", "")}</span>'
+                )
+            self._intro_dialogue.setText("<br><br>".join(lines))
+        self._phases.setCurrentWidget(self._intro_w)
+
+    def _on_start_challenge(self) -> None:
+        lv = self._level or {}
+        if lv.get("questions"):
+            self._start_quiz()
+        else:
+            self._start_code()
+
+    def _start_quiz(self) -> None:
+        self._q_idx = 0
+        self._q_correct = 0
+        self._render_quiz_question()
+        self._phases.setCurrentWidget(self._quiz_w)
+
+    def _start_code(self) -> None:
         self._clear_code()
         self._inputs = []
-        self._render_code(lv["initial_code"])
+        lv = self._level
+        if lv and lv.get("initial_code"):
+            self._render_code(lv["initial_code"], lv.get("blanks", []))
         self._blank_count = len(self._inputs)
+        self._current_blank = 0
+        self._canvas.reset()
+        self.engine.reset()
         self._update_blanks_state()
         self._update_status()
+        self._phases.setCurrentWidget(self._code_w)
+
+    def _clear_quiz_panel(self) -> None:
+        while self._quiz_layout.count():
+            item = self._quiz_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def _render_quiz_question(self) -> None:
+        self._clear_quiz_panel()
+        lv = self._level or {}
+        qs = lv.get("questions", [])
+        if self._q_idx >= len(qs):
+            self._start_code()
+            return
+
+        q = qs[self._q_idx]
+        title = QLabel(f"选择题 {self._q_idx + 1}/{len(qs)}")
+        title.setStyleSheet(f"font-size: 22px; font-weight: 900; color: {Colors.CREAM};")
+        self._quiz_layout.addWidget(title)
+
+        prompt = QLabel(q["prompt"])
+        prompt.setWordWrap(True)
+        prompt.setStyleSheet(
+            f"font-size: 16px; color: {Colors.CREAM}; "
+            f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
+            f"padding: 14px; border-radius: 4px;"
+        )
+        self._quiz_layout.addWidget(prompt)
+
+        self._q_group = QButtonGroup(self)
+        self._q_opts = []
+        for opt in q.get("options", []):
+            rb = QRadioButton(f"{opt['id']}. {opt['text']}")
+            rb.setStyleSheet(f"font-size: 15px; color: {Colors.CREAM}; padding: 6px;")
+            self._q_group.addButton(rb)
+            self._q_opts.append(rb)
+            self._quiz_layout.addWidget(rb)
+
+        self._quiz_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        confirm = McButton("确认")
+        confirm.clicked.connect(self._on_quiz_confirm)
+        btn_row.addStretch()
+        btn_row.addWidget(confirm)
+        self._quiz_layout.addLayout(btn_row)
+
+        self._q_feedback = QLabel()
+        self._q_feedback.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._q_feedback.setStyleSheet("font-size: 16px; font-weight: 900; padding: 8px;")
+        self._q_feedback.setVisible(False)
+        self._quiz_layout.addWidget(self._q_feedback)
+
+    def _on_quiz_confirm(self) -> None:
+        if self._q_group is None:
+            return
+        checked = self._q_group.checkedButton()
+        if checked is None:
+            return
+        lv = self._level or {}
+        qs = lv.get("questions", [])
+        q = qs[self._q_idx]
+        given = checked.text()[0]
+        correct = given == q["answer"]
+
+        if correct:
+            self._q_correct += 1
+            self._q_feedback.setText("✅ 正确！")
+            self._q_feedback.setStyleSheet(
+                f"font-size: 16px; font-weight: 900; padding: 8px; color: {Colors.GRASS_LIGHT};"
+            )
+        else:
+            self._q_feedback.setText(f"❌ 错误，正确答案是 {q['answer']}")
+            self._q_feedback.setStyleSheet(
+                f"font-size: 16px; font-weight: 900; padding: 8px; color: {Colors.HEART};"
+            )
+        self._q_feedback.setVisible(True)
+        for rb in self._q_opts:
+            rb.setEnabled(False)
+        self._q_idx += 1
+
+        if self._q_idx >= len(qs):
+            QTimer.singleShot(900, self._start_code)
+        else:
+            QTimer.singleShot(900, self._render_quiz_question)
+
+    def _update_nav_btns(self) -> None:
+        ids = self.loader.list_ids()
+        idx = ids.index(self._level_id) if self._level_id in ids else -1
+        self._prev_level_btn.setEnabled(idx > 0)
+        self._next_level_btn.setEnabled(idx >= 0 and idx < len(ids) - 1)
+        if idx > 0:
+            prev = self.loader.load_index()[idx - 1]
+            self._prev_level_btn.setToolTip(f"上一关: {prev.get('title', ids[idx-1])}")
+        else:
+            self._prev_level_btn.setToolTip("")
+        if idx >= 0 and idx < len(ids) - 1:
+            nxt = self.loader.load_index()[idx + 1]
+            self._next_level_btn.setToolTip(f"下一关: {nxt.get('title', ids[idx+1])}")
+        else:
+            self._next_level_btn.setToolTip("")
+
+    def _prev_level(self) -> None:
+        ids = self.loader.list_ids()
+        idx = ids.index(self._level_id) if self._level_id in ids else -1
+        if idx > 0:
+            self.load_level(ids[idx - 1])
+
+    def _next_level(self) -> None:
+        ids = self.loader.list_ids()
+        idx = ids.index(self._level_id) if self._level_id in ids else -1
+        if idx >= 0 and idx < len(ids) - 1:
+            self.load_level(ids[idx + 1])
+
+    def _build_intro(self) -> QWidget:
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(30, 20, 30, 20)
+        l.setSpacing(12)
+        self._intro_title = QLabel()
+        self._intro_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._intro_title.setStyleSheet(f"font-size: 28px; font-weight: 900; color: {Colors.CREAM};")
+        self._intro_dialogue = QLabel()
+        self._intro_dialogue.setWordWrap(True)
+        self._intro_dialogue.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._intro_dialogue.setStyleSheet(
+            f"font-size: 15px; color: {Colors.CREAM}; "
+            f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
+            f"padding: 16px; border-radius: 6px;"
+        )
+        btn = QPushButton("开始挑战 →")
+        btn.setStyleSheet(_btn_c(Colors.GRASS))
+        btn.clicked.connect(self._on_start_challenge)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn)
+        l.addWidget(self._intro_title)
+        l.addWidget(self._intro_dialogue)
+        l.addLayout(btn_row)
+        return w
+
+    def _build_code_panel(self) -> QWidget:
+        w = QWidget()
+        pair = QHBoxLayout(w)
+        pair.setContentsMargins(0, 0, 0, 0)
+        pair.setSpacing(12)
+        self._left = self._build_left()
+        self._right = self._build_right()
+        pair.addWidget(self._left, stretch=3)
+        pair.addWidget(self._right, stretch=4)
+        return w
+
+    def _build_left(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        top_bar = QHBoxLayout()
+        self._prev_level_btn = QPushButton("<")
+        self._prev_level_btn.setStyleSheet(_btn_c(Colors.STONE) + "font-size:18px;padding:4px 12px;")
+        self._prev_level_btn.setFixedWidth(60)
+        self._prev_level_btn.clicked.connect(self._prev_level)
+        self._next_level_btn = QPushButton(">")
+        self._next_level_btn.setStyleSheet(_btn_c(Colors.STONE) + "font-size:18px;padding:4px 12px;")
+        self._next_level_btn.setFixedWidth(60)
+        self._next_level_btn.clicked.connect(self._next_level)
+        self._title_lb = QLabel()
+        self._title_lb.setStyleSheet(f"font-size: 24px; font-weight: 900; color: {Colors.CREAM}; padding: 4px 0;")
+        top_bar.addWidget(self._prev_level_btn)
+        top_bar.addWidget(self._title_lb)
+        top_bar.addStretch()
+        top_bar.addWidget(self._next_level_btn)
+
+        self._theory_lb = QLabel()
+        self._theory_lb.setWordWrap(True)
+        self._theory_lb.setStyleSheet(
+            f"font-size: 14px; color: {Colors.MUTED}; "
+            f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
+            f"padding: 10px; border-radius: 4px;"
+        )
+        self._key_points_lb = QLabel()
+        self._key_points_lb.setWordWrap(True)
+        self._key_points_lb.setStyleSheet(f"font-size: 13px; color: {Colors.GOLD}; padding: 2px 8px; font-weight: 700;")
+        self._hint_lb = QLabel()
+        self._hint_lb.setWordWrap(True)
+        self._hint_lb.setStyleSheet(
+            f"font-size: 13px; color: {Colors.GOLD}; background: rgba(0,0,0,120); "
+            f"padding: 8px; border-radius: 2px;"
+        )
+        self._hint_lb.setVisible(False)
+        self._hint_index = 0
+
+        code_frame = QWidget()
+        code_frame.setStyleSheet(
+            f"background: {Colors.CODE_BG}; border: 3px solid {Colors.STONE_DARK}; "
+            f"border-radius: 4px; padding: 10px;"
+        )
+        self._code_layout = QVBoxLayout(code_frame)
+        self._code_layout.setContentsMargins(10, 10, 10, 10)
+        self._code_layout.setSpacing(2)
+
+        self._status_lb = QLabel()
+        self._status_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_lb.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {Colors.MUTED}; padding: 4px;")
+        self._result_lb = QLabel()
+        self._result_lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._result_lb.setStyleSheet("font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px;")
+        self._result_lb.setVisible(False)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        back = QPushButton("← 返回")
+        back.setStyleSheet(_btn_c(Colors.STONE))
+        back.clicked.connect(self.back_requested.emit)
+        hint_btn = QPushButton("? 提示")
+        hint_btn.setStyleSheet(_btn_c(Colors.OAK))
+        hint_btn.clicked.connect(self._show_next_hint)
+        self._step_btn = McButton("▶ 下一步")
+        self._step_btn.setEnabled(False)
+        self._step_btn.clicked.connect(self._on_step)
+        reset_btn = McButton("↺ 重置")
+        reset_btn.clicked.connect(self._on_reset)
+        btn_row.addWidget(back)
+        btn_row.addWidget(hint_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(reset_btn)
+        btn_row.addWidget(self._step_btn)
+
+        layout.addLayout(top_bar)
+        layout.addWidget(self._theory_lb)
+        layout.addWidget(self._key_points_lb)
+        layout.addWidget(self._hint_lb)
+        layout.addWidget(code_frame)
+        layout.addWidget(self._status_lb)
+        layout.addWidget(self._result_lb)
+        layout.addStretch()
+        layout.addLayout(btn_row)
+        return panel
+
+    def _build_right(self) -> QWidget:
+        panel = QWidget()
+        l = QVBoxLayout(panel)
+        l.setContentsMargins(0, 0, 0, 0)
+        self._canvas = OopCanvas()
+        l.addWidget(self._canvas)
+        return panel
 
     def _clear_code(self) -> None:
         while self._code_layout.count():
@@ -228,117 +419,119 @@ class ChallengePage(QWidget):
                     if sw:
                         sw.deleteLater()
 
-    def _render_code(self, code_lines: list[str]) -> None:
+    def _render_code(self, code_lines: list[str], blanks: list[dict]) -> None:
         for line_num, line in enumerate(code_lines):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(2)
-
             lineno = QLabel(f"{line_num:2d} ")
             lineno.setStyleSheet(
                 f"color: {Colors.STONE_LIGHT}; font-family: Consolas; font-size: 13px; "
                 f"background: transparent; min-width: 24px;"
             )
             row.addWidget(lineno)
-
             while "____" in line:
                 idx = line.index("____")
                 if idx > 0:
                     prefix = QLabel(line[:idx])
-                    prefix.setStyleSheet(_STYLE_CODE_LABEL)
+                    prefix.setStyleSheet(_S_CODE)
                     row.addWidget(prefix)
                 inp = QLineEdit()
-                inp.setStyleSheet(_STYLE_INPUT_DISABLED)
                 inp.setPlaceholderText("___")
                 inp.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 inp.setFixedWidth(120)
                 inp.setEnabled(False)
+                inp.setStyleSheet(_S_INPUT_OFF)
                 inp.returnPressed.connect(self._on_step)
+                bd = blanks[len(self._inputs)] if len(self._inputs) < len(blanks) else {}
+                vtype = bd.get("validator", "any")
+                rx = _VALIDATORS.get(vtype)
+                if rx:
+                    inp.setValidator(QRegularExpressionValidator(rx))
                 self._inputs.append(inp)
                 row.addWidget(inp)
                 line = line[idx + 4:]
-
             if line:
                 suffix = QLabel(line)
-                suffix.setStyleSheet(_STYLE_CODE_LABEL)
+                suffix.setStyleSheet(_S_CODE)
                 row.addWidget(suffix)
-
             row.addStretch()
             self._code_layout.addLayout(row)
 
     def _update_blanks_state(self) -> None:
+        all_done = self._current_blank >= self._blank_count
         for i, inp in enumerate(self._inputs):
-            if i == self._current_blank and self._current_blank < self._blank_count:
+            if i == self._current_blank and not all_done:
                 inp.setEnabled(True)
-                inp.setStyleSheet(_STYLE_INPUT)
+                inp.setStyleSheet(_S_INPUT)
                 inp.setFocus()
             else:
                 inp.setEnabled(False)
-                inp.setStyleSheet(_STYLE_INPUT_DISABLED)
-
-        self._step_btn.setEnabled(self._current_blank > 0 or self._blank_count == 0)
-        self._check_btn.setEnabled(self._current_blank >= self._blank_count)
+                inp.setStyleSheet(_S_INPUT_OFF)
+        self._step_btn.setEnabled(self._blank_count > 0 or all_done)
+        self._step_btn.setText("⛏ 执行" if all_done else "▶ 下一步")
 
     def _update_status(self) -> None:
         if self._blank_count == 0:
-            self._status_lb.setText("本关无填空，按 '检查' 运行代码")
+            self._status_lb.setText("本关无填空 — 按 '执行'")
         elif self._current_blank < self._blank_count:
-            self._status_lb.setText(
-                f"填空 {self._current_blank + 1}/{self._blank_count}  "
-                f"— 请输入第 {self._current_blank + 1} 个空白处的内容"
-            )
+            self._status_lb.setText(f"空白 {self._current_blank + 1}/{self._blank_count}")
         else:
-            correct, total = 0, self._blank_count
-            for i, inp in enumerate(self._inputs):
-                blank = self._level["blanks"][i] if i < len(self._level.get("blanks", [])) else {}
-                expected = blank.get("placeholder", "")
-                if inp.text().strip().lower() == expected.lower():
-                    correct += 1
-            self._status_lb.setText(f"所有空白已填写就绪 ({correct}/{total} 与预期匹配) — 按 '检查' 验证")
+            self._status_lb.setText("已就绪 — 点 '执行' 运行")
 
     def _on_step(self) -> None:
-        if self._current_blank < self._blank_count:
+        all_done = self._current_blank >= self._blank_count
+        if not all_done:
+            inp = self._inputs[self._current_blank]
+            if not inp.text().strip():
+                return
             self._current_blank += 1
-        self._update_blanks_state()
-        self._update_status()
-
-    def _on_check(self) -> None:
-        if not self._level:
-            return
-
-        lv = self._level
-        code = self._assemble_code()
-        lines = code.split("\n")
-
-        self.engine.reset()
-        diffs = self.engine.execute(lines)
-        ok, msg = self.loader.check_goal(lv, self.engine.last_model())
-
-        if ok:
-            self._result_lb.setText(f"✅ 通关！{lv.get('success_message', '')}")
-            self._result_lb.setStyleSheet(
-                f"font-size: 16px; font-weight: 900; padding: 8px; border-radius: 4px; "
-                f"background: {Colors.GRASS}; color: white;"
-            )
+            self._update_blanks_state()
+            self._update_status()
         else:
-            self._result_lb.setText(f"❌ {msg}")
-            self._result_lb.setStyleSheet(
-                f"font-size: 16px; font-weight: 900; padding: 8px; border-radius: 4px; "
-                f"background: {Colors.HEART}; color: white;"
-            )
-        self._result_lb.setVisible(True)
+            self._run_engine()
 
     def _on_reset(self) -> None:
         self._current_blank = 0
         for inp in self._inputs:
             inp.clear()
         self._result_lb.setVisible(False)
+        self._canvas.reset()
+        self.engine.reset()
         self._update_blanks_state()
         self._update_status()
+
+    def _run_engine(self) -> None:
+        code = self._assemble_code()
+        lines = code.split("\n")
         self.engine.reset()
+        self._canvas.reset()
+        diffs = self.engine.execute(lines)
+        for diff in diffs:
+            if not diff.is_empty:
+                self._canvas.apply(diff)
+        lv = self._level or {}
+        ok, msg = self.loader.check_goal(lv, self.engine.last_model())
+        if ok:
+            self._result_lb.setText(f"✅ 通关！{lv.get('success_message', '')}")
+            self._result_lb.setStyleSheet(
+                f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
+                f"background: {Colors.GRASS}; color: white;"
+            )
+        else:
+            extra = lv.get("failure_guidance", "")
+            full = f"❌ {msg}"
+            if extra:
+                full += f"\n💡 {extra}"
+            self._result_lb.setText(full)
+            self._result_lb.setStyleSheet(
+                f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
+                f"background: {Colors.HEART}; color: white;"
+            )
+        self._result_lb.setVisible(True)
 
     def _assemble_code(self) -> str:
-        code = self._level["initial_code"]
+        code = self._level.get("initial_code", []) if self._level else []
         lines = [str(line) for line in code]
         input_idx = 0
         result: list[str] = []
