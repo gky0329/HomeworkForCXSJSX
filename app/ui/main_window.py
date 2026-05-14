@@ -4,10 +4,12 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget
 
 from app.core.challenge_loader import ChallengeLoader
 from app.core.engine import Engine
+from app.services.app_settings import AppSettings
 from app.services.audio_manager import AudioManager
 from app.ui.pages.challenge_page import ChallengePage
 from app.ui.pages.level_select_page import LevelSelectPage
 from app.ui.pages.main_menu_page import MainMenuPage
+from app.ui.pages.settings_page import SettingsPage
 from app.ui.pages.splash_screen import SplashScreen
 
 TEACHING_URL = "http://cxsjsx.openjudge.cn/"
@@ -20,19 +22,22 @@ class MainWindow(QMainWindow):
         audio: AudioManager,
         loader: ChallengeLoader,
         engine: Engine,
+        settings: AppSettings,
     ) -> None:
         super().__init__()
         self.audio = audio
         self.loader = loader
+        self.settings = settings
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
         self.splash = SplashScreen()
         self.main_menu = MainMenuPage(audio)
         self.level_select = LevelSelectPage(loader)
-        self.challenge = ChallengePage(loader, engine, audio)
+        self.challenge = ChallengePage(loader, engine, audio, settings)
+        self.settings = SettingsPage(settings)
 
-        for page in (self.splash, self.main_menu, self.level_select, self.challenge):
+        for page in (self.splash, self.main_menu, self.level_select, self.challenge, self.settings):
             self.stack.addWidget(page)
 
         self._wire()
@@ -44,6 +49,7 @@ class MainWindow(QMainWindow):
         m = self.main_menu
         m.single_player_requested.connect(self._show_level_select)
         m.multiplayer_requested.connect(lambda: QDesktopServices.openUrl(QUrl(TEACHING_URL)))
+        m.settings_requested.connect(lambda: self.stack.setCurrentWidget(self.settings))
         m.exit_requested.connect(self.close)
 
         ls = self.level_select
@@ -52,6 +58,9 @@ class MainWindow(QMainWindow):
 
         ch = self.challenge
         ch.back_requested.connect(self._show_level_select)
+
+        st = self.settings
+        st.back_requested.connect(lambda: self.stack.setCurrentWidget(self.main_menu))
 
     def _show_level_select(self) -> None:
         self.level_select.refresh()

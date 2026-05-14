@@ -1,11 +1,13 @@
 import sys
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from app.config import ConfigLoader
 from app.log import setup_logging
 from app.core.engine import Engine
 from app.core.challenge_loader import ChallengeLoader
+from app.services.app_settings import AppSettings
 from app.services.audio_manager import AudioManager
 from app.ui.main_window import MainWindow
 
@@ -17,12 +19,14 @@ def main() -> int:
 
     qapp = QApplication(sys.argv)
     qapp.setApplicationName(config.window.title)
+    qapp.setFont(QFont("Microsoft YaHei", 16))
 
     audio = AudioManager()
     loader = ChallengeLoader(config.levels.dir)
     engine = Engine()
+    settings = AppSettings()
 
-    window = MainWindow(audio, loader, engine)
+    window = MainWindow(audio, loader, engine, settings)
     window.setWindowTitle(config.window.title)
     window.resize(config.window.width, config.window.height)
     window.show()

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 
 from app.core.challenge_loader import ChallengeLoader
 from app.core.engine import Engine
+from app.services.app_settings import AppSettings
 from app.services.audio_manager import AudioManager
 from app.ui.canvas.oop_canvas import OopCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
@@ -16,6 +17,7 @@ from app.ui.theme.config import Colors
 from app.ui.theme.styles import APP_STYLE
 from app.ui.widgets.health_bar import HealthBar
 from app.ui.widgets.mc_button import McButton
+from app.ui.widgets.ai_help_dialog import AiHelpDialog, AiHelpPayload
 
 
 _VALIDATORS = {
@@ -54,15 +56,18 @@ def _btn_c(color: str) -> str:
 class ChallengePage(QWidget):
     back_requested = Signal()
 
-    def __init__(self, loader: ChallengeLoader, engine: Engine, audio: AudioManager) -> None:
+    def __init__(self, loader: ChallengeLoader, engine: Engine, audio: AudioManager, settings: AppSettings) -> None:
         super().__init__()
         self.loader = loader
         self.engine = engine
         self.audio = audio
+        self.settings = settings
         self._animator = CanvasAnimator()
         self._level: dict | None = None
         self._level_id: str = ""
         self._inputs: list[QLineEdit] = []
+        self._hint_lines: list[str] = []
+        self._ai_dialog = AiHelpDialog(self)
         self._blank_count = 0
         self._current_blank = 0
         self.hearts = 5
@@ -100,6 +105,7 @@ class ChallengePage(QWidget):
         self._key_points_lb.setText("\n".join(f"• {p}" for p in pts) if pts else "")
         self._hint_lb.setVisible(False)
         self._hint_index = 0
+        self._hint_lines = []
         self._result_lb.setVisible(False)
         self._result_btns.setVisible(False)
         self._step_btn.setVisible(True)
@@ -268,6 +274,7 @@ class ChallengePage(QWidget):
         )
         self._hint_lb.setVisible(False)
         self._hint_index = 0
+        self._hint_lines = []
 
         code_frame = QWidget()
         code_frame.setStyleSheet(
@@ -548,6 +555,44 @@ class ChallengePage(QWidget):
             return
         hints = lv.get("hints", [])
         if self._hint_index < len(hints):
-            self._hint_lb.setText(f"💡 提示 #{self._hint_index + 1}: {hints[self._hint_index]}")
+            self._hint_lines.append(f"💡 提示 #{self._hint_index + 1}: {hints[self._hint_index]}")
+            self._hint_lb.setText("\n".join(self._hint_lines))
             self._hint_lb.setVisible(True)
             self._hint_index += 1
+            return
+        self._open_ai_help()
+
+    def _open_ai_help(self) -> None:
+        lv = self._level or {}
+        if not self.settings.api_url or not self.settings.model:
+            self._hint_lb.setText("⚠ 请先在设置中填写 URL 和 Model")
+            self._hint_lb.setVisible(True)
+            return
+        if not self.settings.api_key:
+            self._hint_lb.setText("⚠ 请先在设置中填写 API Key")
+            self._hint_lb.setVisible(True)
+            return
+        initial_code = lv.get("initial_code", [])
+        question = "\n".join(str(line) for line in initial_code)
+        answer = self._current_answer_text()
+        system_prompt = (
+            "请帮助学生学习C++程序设计，给他合适的提示和详细的讲解，但不要直接给出答案。"
+            "这是一道填空题，题目为{question}"
+        ).replace("{question}", question)
+        user_prompt = (
+            "我当前在题目中填的空为{answer}（每空之间用@分割），我的困惑为{problem}"
+        ).replace("{answer}", answer)
+        payload = AiHelpPayload(
+            api_url=self.settings.api_url,
+            api_key=self.settings.api_key,
+            model=self.settings.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            question_type="fill_blank",
+        )
+        self._ai_dialog.start(payload)
+        self._ai_dialog.exec()
+
+    def _current_answer_text(self) -> str:
+        answers = [inp.text().strip() or "___" for inp in self._inputs]
+        return "@".join(answers)

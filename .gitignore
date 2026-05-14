@@ -7,4 +7,5 @@ data/logs/
 data/saves/
 *.egg-info/
 .venv/
-venv/
+.vscode/
+

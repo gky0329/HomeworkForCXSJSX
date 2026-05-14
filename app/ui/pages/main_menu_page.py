@@ -16,6 +16,7 @@ def _menu_button(text: str) -> McButton:
 class MainMenuPage(PanoramaBackground):
     single_player_requested = Signal()
     multiplayer_requested = Signal()
+    settings_requested = Signal()
     exit_requested = Signal()
 
     def __init__(self, audio: AudioManager) -> None:
@@ -76,12 +77,13 @@ class MainMenuPage(PanoramaBackground):
         mod_btn = _menu_button("Mod")
         mod_btn.setMinimumWidth(sw)
         mod_btn.setEnabled(False)
-        realms_btn = _menu_button("Minecraft Realms")
-        realms_btn.setMinimumWidth(sw)
-        realms_btn.setEnabled(False)
+        settings_btn = _menu_button("设置")
+        settings_btn.setMinimumWidth(sw)
+        settings_btn.clicked.connect(audio.play_button)
+        settings_btn.clicked.connect(self.settings_requested.emit)
 
         sec.addWidget(mod_btn, 0, 0)
-        sec.addWidget(realms_btn, 0, 1)
+        sec.addWidget(settings_btn, 0, 1)
         sec.addWidget(exit_btn, 1, 0, 1, 2)
 
         layout.addLayout(sec)
