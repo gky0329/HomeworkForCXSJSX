@@ -3,15 +3,18 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QRegularExpression, QTimer, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QRadioButton, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from app.core.challenge_loader import ChallengeLoader
 from app.core.engine import Engine
+from app.services.audio_manager import AudioManager
 from app.ui.canvas.oop_canvas import OopCanvas
+from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.ui.theme.config import Colors
 from app.ui.theme.styles import APP_STYLE
+from app.ui.widgets.health_bar import HealthBar
 from app.ui.widgets.mc_button import McButton
 
 
@@ -51,17 +54,19 @@ def _btn_c(color: str) -> str:
 class ChallengePage(QWidget):
     back_requested = Signal()
 
-    def __init__(self, loader: ChallengeLoader, engine: Engine) -> None:
+    def __init__(self, loader: ChallengeLoader, engine: Engine, audio: AudioManager) -> None:
         super().__init__()
         self.loader = loader
         self.engine = engine
+        self.audio = audio
+        self._animator = CanvasAnimator()
         self._level: dict | None = None
         self._level_id: str = ""
         self._inputs: list[QLineEdit] = []
         self._blank_count = 0
         self._current_blank = 0
-        self._q_idx = 0
-        self._q_correct = 0
+        self.hearts = 5
+        self.streak = 0
         self.setStyleSheet(APP_STYLE)
 
         root = QVBoxLayout(self)
@@ -72,14 +77,8 @@ class ChallengePage(QWidget):
         root.addWidget(self._phases)
 
         self._intro_w = self._build_intro()
-        self._quiz_w = QWidget()
-        self._quiz_layout = QVBoxLayout(self._quiz_w)
-        self._quiz_layout.setContentsMargins(30, 20, 30, 20)
-        self._quiz_layout.setSpacing(12)
         self._code_w = self._build_code_panel()
-
         self._phases.addWidget(self._intro_w)
-        self._phases.addWidget(self._quiz_w)
         self._phases.addWidget(self._code_w)
 
         ids = self.loader.list_ids()
@@ -102,15 +101,21 @@ class ChallengePage(QWidget):
         self._hint_lb.setVisible(False)
         self._hint_index = 0
         self._result_lb.setVisible(False)
+        self._result_btns.setVisible(False)
+        self._step_btn.setVisible(True)
+        self._reset_btn.setVisible(True)
+        self._hint_btn.setVisible(True)
         self._current_blank = 0
+        self.hearts = 5
+        self.streak = 0
+        self._hearts.set_hearts(self.hearts, 5)
         self._canvas.reset()
         self.engine.reset()
+        self._animator.reset()
 
         dialogue = lv.get("npc_dialogue")
         if dialogue:
             self._show_intro(lv)
-        elif lv.get("questions"):
-            self._start_quiz()
         else:
             self._start_code()
         self._update_nav_btns()
@@ -131,17 +136,7 @@ class ChallengePage(QWidget):
         self._phases.setCurrentWidget(self._intro_w)
 
     def _on_start_challenge(self) -> None:
-        lv = self._level or {}
-        if lv.get("questions"):
-            self._start_quiz()
-        else:
-            self._start_code()
-
-    def _start_quiz(self) -> None:
-        self._q_idx = 0
-        self._q_correct = 0
-        self._render_quiz_question()
-        self._phases.setCurrentWidget(self._quiz_w)
+        self._start_code()
 
     def _start_code(self) -> None:
         self._clear_code()
@@ -153,99 +148,18 @@ class ChallengePage(QWidget):
         self._current_blank = 0
         self._canvas.reset()
         self.engine.reset()
+        self._animator.reset()
+        self.hearts = 5
+        self.streak = 0
+        self._hearts.set_hearts(self.hearts, 5)
+        self._result_lb.setVisible(False)
+        self._result_btns.setVisible(False)
+        self._step_btn.setVisible(True)
+        self._reset_btn.setVisible(True)
+        self._hint_btn.setVisible(True)
         self._update_blanks_state()
         self._update_status()
         self._phases.setCurrentWidget(self._code_w)
-
-    def _clear_quiz_panel(self) -> None:
-        old = self._quiz_w
-        self._quiz_w = QWidget()
-        self._quiz_layout = QVBoxLayout(self._quiz_w)
-        self._quiz_layout.setContentsMargins(30, 20, 30, 20)
-        self._quiz_layout.setSpacing(12)
-        self._phases.removeWidget(old)
-        self._phases.insertWidget(1, self._quiz_w)
-        self._phases.setCurrentWidget(self._quiz_w)
-
-    def _render_quiz_question(self) -> None:
-        self._clear_quiz_panel()
-        lv = self._level or {}
-        qs = lv.get("questions", [])
-        if self._q_idx >= len(qs):
-            self._start_code()
-            return
-
-        q = qs[self._q_idx]
-        title = QLabel(f"选择题 {self._q_idx + 1}/{len(qs)}")
-        title.setStyleSheet(f"font-size: 22px; font-weight: 900; color: {Colors.CREAM};")
-        self._quiz_layout.addWidget(title)
-
-        prompt = QLabel(q["prompt"])
-        prompt.setWordWrap(True)
-        prompt.setStyleSheet(
-            f"font-size: 16px; color: {Colors.CREAM}; "
-            f"background: {Colors.PANEL_BG}; border: 3px solid {Colors.STONE_DARK}; "
-            f"padding: 14px; border-radius: 4px;"
-        )
-        self._quiz_layout.addWidget(prompt)
-
-        self._q_group = QButtonGroup(self)
-        self._q_opts = []
-        for opt in q.get("options", []):
-            rb = QRadioButton(f"{opt['id']}. {opt['text']}")
-            rb.setStyleSheet(f"font-size: 15px; color: {Colors.CREAM}; padding: 6px;")
-            self._q_group.addButton(rb)
-            self._q_opts.append(rb)
-            self._quiz_layout.addWidget(rb)
-
-        self._quiz_layout.addStretch()
-
-        btn_row = QHBoxLayout()
-        confirm = McButton("确认")
-        confirm.clicked.connect(self._on_quiz_confirm)
-        btn_row.addStretch()
-        btn_row.addWidget(confirm)
-        self._quiz_layout.addLayout(btn_row)
-
-        self._q_feedback = QLabel()
-        self._q_feedback.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._q_feedback.setStyleSheet("font-size: 16px; font-weight: 900; padding: 8px;")
-        self._q_feedback.setVisible(False)
-        self._quiz_layout.addWidget(self._q_feedback)
-
-    def _on_quiz_confirm(self) -> None:
-        if self._q_group is None:
-            return
-        checked = self._q_group.checkedButton()
-        if checked is None:
-            return
-        lv = self._level or {}
-        qs = lv.get("questions", [])
-        q = qs[self._q_idx]
-        given = checked.text()[0]
-        correct = given == q["answer"]
-
-        if correct:
-            self._q_correct += 1
-            self._q_feedback.setText("✅ 正确！")
-            self._q_feedback.setStyleSheet(
-                f"font-size: 16px; font-weight: 900; padding: 8px; color: {Colors.GRASS_LIGHT};"
-            )
-        else:
-            self._q_feedback.setText(f"❌ 错误，正确答案是 {q['answer']}")
-            self._q_feedback.setStyleSheet(
-                f"font-size: 16px; font-weight: 900; padding: 8px; color: {Colors.HEART};"
-            )
-        self._q_feedback.setVisible(True)
-        for rb in self._q_opts:
-            rb.setEnabled(False)
-        self._q_group = None
-        self._q_idx += 1
-
-        if self._q_idx >= len(qs):
-            QTimer.singleShot(900, self._start_code)
-        else:
-            QTimer.singleShot(900, self._render_quiz_question)
 
     def _update_nav_btns(self) -> None:
         ids = self.loader.list_ids()
@@ -255,13 +169,9 @@ class ChallengePage(QWidget):
         if idx > 0:
             prev = self.loader.load_index()[idx - 1]
             self._prev_level_btn.setToolTip(f"上一关: {prev.get('title', ids[idx-1])}")
-        else:
-            self._prev_level_btn.setToolTip("")
         if idx >= 0 and idx < len(ids) - 1:
             nxt = self.loader.load_index()[idx + 1]
             self._next_level_btn.setToolTip(f"下一关: {nxt.get('title', ids[idx+1])}")
-        else:
-            self._next_level_btn.setToolTip("")
 
     def _prev_level(self) -> None:
         ids = self.loader.list_ids()
@@ -330,9 +240,14 @@ class ChallengePage(QWidget):
         self._next_level_btn.clicked.connect(self._next_level)
         self._title_lb = QLabel()
         self._title_lb.setStyleSheet(f"font-size: 24px; font-weight: 900; color: {Colors.CREAM}; padding: 4px 0;")
+
+        self._hearts = HealthBar(5)
+        self._hearts.setFixedSize(130, 30)
+
         top_bar.addWidget(self._prev_level_btn)
         top_bar.addWidget(self._title_lb)
         top_bar.addStretch()
+        top_bar.addWidget(self._hearts)
         top_bar.addWidget(self._next_level_btn)
 
         self._theory_lb = QLabel()
@@ -514,8 +429,16 @@ class ChallengePage(QWidget):
         for inp in self._inputs:
             inp.clear()
         self._result_lb.setVisible(False)
+        self._result_btns.setVisible(False)
+        self._step_btn.setVisible(True)
+        self._reset_btn.setVisible(True)
+        self._hint_btn.setVisible(True)
+        self.hearts = 5
+        self.streak = 0
+        self._hearts.set_hearts(5, 5)
         self._canvas.reset()
         self.engine.reset()
+        self._animator.reset()
         self._update_blanks_state()
         self._update_status()
 
@@ -524,6 +447,7 @@ class ChallengePage(QWidget):
         lines = code.split("\n")
         self.engine.reset()
         self._canvas.reset()
+        self._animator.reset()
         diffs = self.engine.execute(lines)
         for diff in diffs:
             if not diff.is_empty:
@@ -536,34 +460,49 @@ class ChallengePage(QWidget):
         self._hint_btn.setVisible(False)
         self._result_btns.setVisible(True)
 
-        ids = self.loader.list_ids()
-        idx = ids.index(self._level_id) if self._level_id in ids else -1
-        is_last = idx >= len(ids) - 1 or idx < 0
-        if ok and is_last:
-            self._next_btn.setText("🎉 全部通关!")
-            self._next_btn.clicked.disconnect()
-            self._next_btn.clicked.connect(lambda: None)
-        elif ok:
-            self._next_btn.setText("下一关 ▶")
-        else:
-            self._next_btn.setVisible(False)
-
         if ok:
-            self._result_lb.setText(f"✅ 通关！{lv.get('success_message', '')}")
+            self.streak += 1
+            self.audio.play_xp()
+            if self.streak >= 3:
+                self.audio.play_level_up()
+            ids = self.loader.list_ids()
+            idx = ids.index(self._level_id) if self._level_id in ids else -1
+            is_last = idx >= len(ids) - 1 or idx < 0
+            if is_last:
+                self._next_btn.setText("🎉 全部通关!")
+                self._next_btn.setEnabled(False)
+            else:
+                self._next_btn.setText("下一关 ▶")
+                self._next_btn.setEnabled(True)
+            self._result_lb.setText(f"✅ 通关！连击 x{self.streak}  {lv.get('success_message', '')}")
             self._result_lb.setStyleSheet(
                 f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
                 f"background: {Colors.GRASS}; color: white;"
             )
         else:
-            extra = lv.get("failure_guidance", "")
-            full = f"❌ {msg}"
-            if extra:
-                full += f"\n💡 {extra}"
-            self._result_lb.setText(full)
-            self._result_lb.setStyleSheet(
-                f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
-                f"background: {Colors.HEART}; color: white;"
-            )
+            self.hearts -= 1
+            self.streak = 0
+            self.audio.play_hurt()
+            self._hearts.set_hearts(self.hearts, 5)
+            if self.hearts <= 0:
+                self.audio.play_death()
+                self._result_lb.setText("💀 你被苦力怕炸飞了！所有生命耗尽。点 '重试' 再来一次。")
+                self._result_lb.setStyleSheet(
+                    f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
+                    f"background: {Colors.HEART_DARK}; color: white;"
+                )
+                self._next_btn.setVisible(False)
+            else:
+                extra = lv.get("failure_guidance", "")
+                full = f"❌ {msg}  ❤️ x{self.hearts}"
+                if extra:
+                    full += f"\n💡 {extra}"
+                self._result_lb.setText(full)
+                self._result_lb.setStyleSheet(
+                    f"font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px; "
+                    f"background: {Colors.HEART}; color: white;"
+                )
+                self._next_btn.setVisible(True if self._level else False)
         self._result_lb.setVisible(True)
 
     def _on_retry(self) -> None:
@@ -575,8 +514,12 @@ class ChallengePage(QWidget):
         self._current_blank = 0
         for inp in self._inputs:
             inp.clear()
+        self.hearts = 5
+        self.streak = 0
+        self._hearts.set_hearts(5, 5)
         self._canvas.reset()
         self.engine.reset()
+        self._animator.reset()
         self._update_blanks_state()
         self._update_status()
 

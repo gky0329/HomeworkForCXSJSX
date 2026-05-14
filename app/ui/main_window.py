@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         self.splash = SplashScreen()
         self.main_menu = MainMenuPage(audio)
         self.level_select = LevelSelectPage(loader)
-        self.challenge = ChallengePage(loader, engine)
+        self.challenge = ChallengePage(loader, engine, audio)
 
         for page in (self.splash, self.main_menu, self.level_select, self.challenge):
             self.stack.addWidget(page)
