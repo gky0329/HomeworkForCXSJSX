@@ -4,6 +4,8 @@
 >
 > **最后更新**：2026-05-13
 
+## MVP 额外完成（未在原计划中）
+
 ---
 
 ## Phase 0: 消除技术债（半天） ✅ 已完成
@@ -76,16 +78,16 @@ pytest tests/unit/ — 23/23 passed
 
 ---
 
-## Phase 2: 视觉魔法 — Sprint 2（2 天）
+## Phase 2: 视觉魔法 — Sprint 2 ✅ 已完成
 
 **原则**：只用 Mock 数据驱动画布，不连输入框。
 
-### Canvas 搭建 (`oop_canvas.py`)
-- 左侧 Class 区：绿色 `ClassItem` 卡片，显示类名 + 成员列表
+### Canvas 搭建 (`oop_canvas.py`) ✅
+- 左侧 Class 区：绿色 `ClassItem` 卡片，显示类名 + 成员列表（带 🔓/🔒 图标）
 - 右侧 Instance 区：蓝色 `InstanceItem` 卡片，显示对象名 + 成员值表格
-- 连线：从 Instance 到所属 Class 的虚线
+- 分区标签 + 分隔线
 
-### 动画 (`canvas_animator.py`)
+### 动画 (`canvas_animator.py`) ✅ 已实现，委派前端接入
 - 类定义：卡片 scale 0→1 飞入
 - 实例化：卡片从 Class 区飞出到 Instance 区
 - 成员赋值：值文本闪烁 2 次
@@ -104,37 +106,39 @@ canvas.apply(diff)
 
 ---
 
-## Phase 3: 组装闭环 — Sprint 3（2 天）
+## Phase 3: 组装闭环 — Sprint 3 ✅ 已完成
 
-### NavigationManager (`nav.py`)
-- 状态机替代 lambda 蛛网
-- 合法跳转表：Splash → Menu → LevelSelect → Challenge
+### ChallengePage (`challenge_page.py`) ✅
+- 统一三阶段流：NPC 对话（intro）→ 选择题（quiz）→ 填空代码（code）+ Canvas
+- 逐空填空：一次只激活一个 `QLineEdit`，输入后点「下一步」前进
+- 所有空白填满后按钮变为「⛏ 执行」，点击运行 Engine → Canvas 渲染 → Goal Checker 判定
+- QStackedWidget 管理三阶段切换，消除按钮重叠
 
-### ChallengePage (`challenge_page.py`)
-- 左：代码面板（填空式 QLineEdit + 只读行）
-- 右：OopCanvas
-- 底部：Step / Reset / Hint 按钮
-
-### 按钮流
-```
-用户填空 → 点击 Step → 拼接字符串 → StepExecutor 执行
-→ 产出 StateDiff → Canvas 播放动画 → Goal Checker 判断
-```
-
-### 输入防呆
+### 输入防呆 ✅
 - QLineEdit 绑定 `QRegularExpressionValidator`
 - 类名：`[A-Za-z_][A-Za-z0-9_]*`
 - 数值：`[0-9]+`
-- 关键：**禁止分号 `;` 和大括号 `{}`**，防止正则引擎崩溃
+- 访问控制：`public|private|protected`
 
-### 关卡 (`data/levels/oop_001.json`)
-- 第一关：定义 Player 类并实例化
-- 第二关：两个不同类的多实例
+### 多关卡导航 ✅
+- LevelSelectPage：从 `index.json` 读取关卡列表，显示标题+元信息，点击「进入」
+- ChallengePage 内 ◀ ▶ 快速切换相邻关卡
+- flow：主菜单 → ⛏ 关卡挑战 → 关卡选择 → 填空 → Canvas
 
-### 集成验收
+### 集成验收 ✅
 ```
-主菜单 → 选关 → 填空 → Step → 动画播放 → 通关
+主菜单 → ⛏ 关卡挑战 → 选关 → NPC 对话 → 选择题 → 填空 → Canvas → 通关
+单人游戏 → 创建世界 → 自动跳转关卡选择
 ```
+
+## MVP 额外完成（未在原计划中）
+
+- **CHECKER_REGISTRY 插件化** — 6 种 goal checker 注册表，加新判定不改老代码
+- **Engine 黑盒封装** — 统一 `execute()` 接口，内部可替换为正则/AST
+- **可扩展性优化.md** — 插件架构 + 贡献者指南 + 关卡格式规范
+- **关卡格式文档.md** — 独立贡献者手册，含 `_template.json`
+- **关卡设计准则.md v2.1** — 视觉锚点 + 语义化错误 + Canvas 空间管理
+- **单人流合并** — NPC 对话 → 选择题 → 填空 → Canvas 一条龙
 
 ---
 

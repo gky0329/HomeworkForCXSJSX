@@ -11,6 +11,42 @@
     {"npc": "iron_golem", "text": "不同的类可以同时存在，每个类都能创建多个实例。"}
   ],
 
+  "questions": [
+    {
+      "id": "q1", "type": "single_choice",
+      "prompt": "一个程序里可以定义几个不同的 class？",
+      "options": [
+        {"id": "A", "text": "只能 1 个"},
+        {"id": "B", "text": "可以有多个，用不同名字区分"},
+        {"id": "C", "text": "只能和文件数量相同"},
+        {"id": "D", "text": "不能超过 main 函数的行数"}
+      ],
+      "answer": "B"
+    },
+    {
+      "id": "q2", "type": "single_choice",
+      "prompt": "两个不同的类，它们的对象之间的成员值会互相影响吗？",
+      "options": [
+        {"id": "A", "text": "会，所有对象共享同一份成员值"},
+        {"id": "B", "text": "不会，每个实例拥有独立的成员值"},
+        {"id": "C", "text": "只有同名的成员会互相影响"},
+        {"id": "D", "text": "取决于当时的内存大小"}
+      ],
+      "answer": "B"
+    },
+    {
+      "id": "q3", "type": "single_choice",
+      "prompt": "Creeper c; IronGolem g; — 这两个变量分别是什么？",
+      "options": [
+        {"id": "A", "text": "两个同类型的变量"},
+        {"id": "B", "text": "两个类定义"},
+        {"id": "C", "text": "c 是 Creeper 类的实例，g 是 IronGolem 类的实例"},
+        {"id": "D", "text": "两个语法错误"}
+      ],
+      "answer": "C"
+    }
+  ],
+
   "theory": "C++ 中可以在同一个作用域里定义多个类，每个类都可以创建多个对象实例。不同的类通过类名区分，对象通过变量名区分。就像村里同时有村民和铁傀儡，每种都有各自的数量和属性。",
 
   "key_points": [
@@ -20,17 +56,17 @@
   ],
 
   "initial_code": [
-    "class Creeper {",
+    "____ Creeper {",
     "public:",
     "    int health;",
     "};",
-    "class IronGolem {",
+    "____ IronGolem {",
     "public:",
     "    int health;",
     "};",
     "Creeper c;",
     "IronGolem g;",
-    "c.health = 30;",
+    "c.health = ____;",
     "g.health = 50;"
   ],
 

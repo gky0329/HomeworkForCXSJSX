@@ -158,11 +158,14 @@ class ChallengePage(QWidget):
         self._phases.setCurrentWidget(self._code_w)
 
     def _clear_quiz_panel(self) -> None:
-        while self._quiz_layout.count():
-            item = self._quiz_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        old = self._quiz_w
+        self._quiz_w = QWidget()
+        self._quiz_layout = QVBoxLayout(self._quiz_w)
+        self._quiz_layout.setContentsMargins(30, 20, 30, 20)
+        self._quiz_layout.setSpacing(12)
+        self._phases.removeWidget(old)
+        self._phases.insertWidget(1, self._quiz_w)
+        self._phases.setCurrentWidget(self._quiz_w)
 
     def _render_quiz_question(self) -> None:
         self._clear_quiz_panel()
@@ -236,6 +239,7 @@ class ChallengePage(QWidget):
         self._q_feedback.setVisible(True)
         for rb in self._q_opts:
             rb.setEnabled(False)
+        self._q_group = None
         self._q_idx += 1
 
         if self._q_idx >= len(qs):
@@ -367,23 +371,36 @@ class ChallengePage(QWidget):
         self._result_lb.setStyleSheet("font-size: 15px; font-weight: 900; padding: 8px; border-radius: 4px;")
         self._result_lb.setVisible(False)
 
+        self._result_btns = QWidget()
+        self._result_btns.setVisible(False)
+        rb_layout = QHBoxLayout(self._result_btns)
+        rb_layout.setContentsMargins(0, 0, 0, 0)
+        rb_layout.setSpacing(8)
+        retry_btn = McButton("🔄 重试")
+        retry_btn.clicked.connect(self._on_retry)
+        self._next_btn = McButton("下一关 ▶")
+        self._next_btn.clicked.connect(self._to_next_level)
+        rb_layout.addStretch()
+        rb_layout.addWidget(retry_btn)
+        rb_layout.addWidget(self._next_btn)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         back = QPushButton("← 返回")
         back.setStyleSheet(_btn_c(Colors.STONE))
         back.clicked.connect(self.back_requested.emit)
-        hint_btn = QPushButton("? 提示")
-        hint_btn.setStyleSheet(_btn_c(Colors.OAK))
-        hint_btn.clicked.connect(self._show_next_hint)
+        self._hint_btn = QPushButton("? 提示")
+        self._hint_btn.setStyleSheet(_btn_c(Colors.OAK))
+        self._hint_btn.clicked.connect(self._show_next_hint)
         self._step_btn = McButton("▶ 下一步")
         self._step_btn.setEnabled(False)
         self._step_btn.clicked.connect(self._on_step)
-        reset_btn = McButton("↺ 重置")
-        reset_btn.clicked.connect(self._on_reset)
+        self._reset_btn = McButton("↺ 重置")
+        self._reset_btn.clicked.connect(self._on_reset)
         btn_row.addWidget(back)
-        btn_row.addWidget(hint_btn)
+        btn_row.addWidget(self._hint_btn)
         btn_row.addStretch()
-        btn_row.addWidget(reset_btn)
+        btn_row.addWidget(self._reset_btn)
         btn_row.addWidget(self._step_btn)
 
         layout.addLayout(top_bar)
@@ -393,6 +410,7 @@ class ChallengePage(QWidget):
         layout.addWidget(code_frame)
         layout.addWidget(self._status_lb)
         layout.addWidget(self._result_lb)
+        layout.addWidget(self._result_btns)
         layout.addStretch()
         layout.addLayout(btn_row)
         return panel
@@ -512,6 +530,24 @@ class ChallengePage(QWidget):
                 self._canvas.apply(diff)
         lv = self._level or {}
         ok, msg = self.loader.check_goal(lv, self.engine.last_model())
+
+        self._step_btn.setVisible(False)
+        self._reset_btn.setVisible(False)
+        self._hint_btn.setVisible(False)
+        self._result_btns.setVisible(True)
+
+        ids = self.loader.list_ids()
+        idx = ids.index(self._level_id) if self._level_id in ids else -1
+        is_last = idx >= len(ids) - 1 or idx < 0
+        if ok and is_last:
+            self._next_btn.setText("🎉 全部通关!")
+            self._next_btn.clicked.disconnect()
+            self._next_btn.clicked.connect(lambda: None)
+        elif ok:
+            self._next_btn.setText("下一关 ▶")
+        else:
+            self._next_btn.setVisible(False)
+
         if ok:
             self._result_lb.setText(f"✅ 通关！{lv.get('success_message', '')}")
             self._result_lb.setStyleSheet(
@@ -529,6 +565,26 @@ class ChallengePage(QWidget):
                 f"background: {Colors.HEART}; color: white;"
             )
         self._result_lb.setVisible(True)
+
+    def _on_retry(self) -> None:
+        self._result_lb.setVisible(False)
+        self._result_btns.setVisible(False)
+        self._step_btn.setVisible(True)
+        self._reset_btn.setVisible(True)
+        self._hint_btn.setVisible(True)
+        self._current_blank = 0
+        for inp in self._inputs:
+            inp.clear()
+        self._canvas.reset()
+        self.engine.reset()
+        self._update_blanks_state()
+        self._update_status()
+
+    def _to_next_level(self) -> None:
+        ids = self.loader.list_ids()
+        idx = ids.index(self._level_id) if self._level_id in ids else -1
+        if idx >= 0 and idx < len(ids) - 1:
+            self.load_level(ids[idx + 1])
 
     def _assemble_code(self) -> str:
         code = self._level.get("initial_code", []) if self._level else []
