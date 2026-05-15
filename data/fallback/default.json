@@ -1,0 +1,100 @@
+{
+  "steps": [
+    {
+      "line_number": 1,
+      "source_code": "int a = 42;",
+      "stack": [
+        {
+          "frame_name": "main",
+          "variables": [
+            {"name": "a", "type": "int", "value": "42", "address": "0xS001", "is_pointer": false}
+          ]
+        }
+      ],
+      "heap": [],
+      "edges": []
+    },
+    {
+      "line_number": 2,
+      "source_code": "int* p = new int(100);",
+      "stack": [
+        {
+          "frame_name": "main",
+          "variables": [
+            {"name": "a", "type": "int", "value": "42", "address": "0xS001", "is_pointer": false},
+            {"name": "p", "type": "int*", "value": "0xH001", "address": "0xS002", "is_pointer": true}
+          ]
+        }
+      ],
+      "heap": [
+        {"address": "0xH001", "type": "int", "value": "100", "is_freed": false}
+      ],
+      "edges": [
+        {"source_address": "0xS002", "target_address": "0xH001", "is_dangling": false}
+      ]
+    },
+    {
+      "line_number": 3,
+      "source_code": "int* q = &a;",
+      "stack": [
+        {
+          "frame_name": "main",
+          "variables": [
+            {"name": "a", "type": "int", "value": "42", "address": "0xS001", "is_pointer": false},
+            {"name": "p", "type": "int*", "value": "0xH001", "address": "0xS002", "is_pointer": true},
+            {"name": "q", "type": "int*", "value": "0xS001", "address": "0xS003", "is_pointer": true}
+          ]
+        }
+      ],
+      "heap": [
+        {"address": "0xH001", "type": "int", "value": "100", "is_freed": false}
+      ],
+      "edges": [
+        {"source_address": "0xS002", "target_address": "0xH001", "is_dangling": false},
+        {"source_address": "0xS003", "target_address": "0xS001", "is_dangling": false}
+      ]
+    },
+    {
+      "line_number": 4,
+      "source_code": "*p = 200;",
+      "stack": [
+        {
+          "frame_name": "main",
+          "variables": [
+            {"name": "a", "type": "int", "value": "42", "address": "0xS001", "is_pointer": false},
+            {"name": "p", "type": "int*", "value": "0xH001", "address": "0xS002", "is_pointer": true},
+            {"name": "q", "type": "int*", "value": "0xS001", "address": "0xS003", "is_pointer": true}
+          ]
+        }
+      ],
+      "heap": [
+        {"address": "0xH001", "type": "int", "value": "200", "is_freed": false}
+      ],
+      "edges": [
+        {"source_address": "0xS002", "target_address": "0xH001", "is_dangling": false},
+        {"source_address": "0xS003", "target_address": "0xS001", "is_dangling": false}
+      ]
+    },
+    {
+      "line_number": 5,
+      "source_code": "delete p;",
+      "stack": [
+        {
+          "frame_name": "main",
+          "variables": [
+            {"name": "a", "type": "int", "value": "42", "address": "0xS001", "is_pointer": false},
+            {"name": "p", "type": "int*", "value": "0xH001", "address": "0xS002", "is_pointer": true},
+            {"name": "q", "type": "int*", "value": "0xS001", "address": "0xS003", "is_pointer": true}
+          ]
+        }
+      ],
+      "heap": [
+        {"address": "0xH001", "type": "int", "value": "200", "is_freed": true}
+      ],
+      "edges": [
+        {"source_address": "0xS002", "target_address": "0xH001", "is_dangling": true},
+        {"source_address": "0xS003", "target_address": "0xS001", "is_dangling": false}
+      ]
+    }
+  ]
+}

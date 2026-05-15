@@ -1,0 +1,343 @@
+import json
+import asyncio
+import logging
+from pathlib import Path
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QPlainTextEdit, QFileDialog, QScrollArea, QFrame, QComboBox,
+    QSplitter,
+)
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QFont
+
+from app.services.file_service import (
+    extract_text, SUPPORTED_EXTENSIONS, file_type_label,
+)
+from app.services.ai_service import AIService
+from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
+from app.ui.theme.colors import (
+    CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, STACK_BORDER, HEAP_BORDER,
+)
+
+logger = logging.getLogger(__name__)
+
+FILE_FILTER = "All Supported Files (" + " ".join(
+    f"*{e}" for e in SUPPORTED_EXTENSIONS
+) + ");;PDF (*.pdf);;Word (*.docx *.doc);;C++ (*.cpp *.h);;" \
+    "Python (*.py);;Markdown (*.md);;Text (*.txt);;All Files (*)"
+
+PAGE_STYLE = f"""
+QFrame#resultCard {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    padding: 12px;
+    margin: 4px 0;
+}}
+QPushButton#visualizeBtn {{
+    background-color: {ACCENT};
+    color: #FFFFFF;
+    border: none;
+    border-radius: 3px;
+    padding: 3px 10px;
+    font-size: 11px;
+}}
+QLabel#conceptName {{
+    color: {STACK_BORDER};
+    font-size: 14px;
+    font-weight: bold;
+}}
+QLabel#quizQuestion {{
+    color: {HEAP_BORDER};
+    font-size: 13px;
+    font-weight: bold;
+}}
+"""
+
+
+class ProcessWorker(QThread):
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, file_text: str, config_path: Path | None = None):
+        super().__init__()
+        self._text = file_text
+        self._config_path = config_path
+
+    def run(self):
+        try:
+            service = AIService(self._config_path)
+            user_msg = PDF_USER_TEMPLATE.format(content=self._text[:15000])
+            raw = asyncio.run(service.chat_json(
+                system_prompt=PDF_SYSTEM_PROMPT,
+                user_message=user_msg,
+            ))
+            data = json.loads(raw)
+            self.finished.emit(data)
+        except Exception as e:
+            logger.exception("ProcessWorker failed")
+            self.error.emit(str(e))
+
+
+class FileImportPage(QWidget):
+    visualize_requested = Signal(str)
+
+    def __init__(self, config_path: Path | None = None, parent=None):
+        super().__init__(parent)
+        self._config_path = config_path
+        self._file_text = ""
+        self._worker: ProcessWorker | None = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        toolbar = QHBoxLayout()
+
+        type_label = QLabel("File type:")
+        type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        toolbar.addWidget(type_label)
+
+        self._type_combo = QComboBox()
+        self._type_combo.addItem("Auto-detect", "")
+        self._type_combo.addItem("C++ Source", ".cpp")
+        self._type_combo.addItem("C/C++ Header", ".h")
+        self._type_combo.addItem("Python", ".py")
+        self._type_combo.addItem("Markdown", ".md")
+        self._type_combo.addItem("Plain Text", ".txt")
+        self._type_combo.setStyleSheet(
+            f"QComboBox {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
+            f"border: 1px solid {BORDER}; border-radius: 4px; padding: 4px 8px; }}"
+        )
+        toolbar.addWidget(self._type_combo)
+
+        toolbar.addSpacing(8)
+
+        self._upload_btn = QPushButton("Upload File")
+        self._upload_btn.clicked.connect(self._on_upload)
+        toolbar.addWidget(self._upload_btn)
+
+        self._file_label = QLabel("No file selected")
+        self._file_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        toolbar.addWidget(self._file_label)
+
+        toolbar.addStretch()
+
+        self._process_btn = QPushButton("Extract Knowledge Points")
+        self._process_btn.setEnabled(False)
+        self._process_btn.clicked.connect(self._on_process)
+        toolbar.addWidget(self._process_btn)
+
+        layout.addLayout(toolbar)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        self._preview = QPlainTextEdit()
+        self._preview.setReadOnly(True)
+        self._preview.setPlaceholderText("File content appears here after upload...")
+        self._preview.setFont(QFont("JetBrains Mono", 11))
+        splitter.addWidget(self._preview)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(8, 0, 0, 0)
+
+        self._status = QLabel("Upload a file to begin")
+        self._status.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 4px;"
+        )
+        right_layout.addWidget(self._status)
+
+        self._result_scroll = QScrollArea()
+        self._result_scroll.setWidgetResizable(True)
+        self._result_scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: {CANVAS_BG}; }}"
+        )
+        self._result_container = QWidget()
+        self._result_layout = QVBoxLayout(self._result_container)
+        self._result_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._result_scroll.setWidget(self._result_container)
+        right_layout.addWidget(self._result_scroll)
+
+        splitter.addWidget(right)
+        splitter.setSizes([400, 500])
+
+        layout.addWidget(splitter)
+
+    def _on_upload(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select File", "", FILE_FILTER
+        )
+        if not path:
+            return
+
+        try:
+            file_path = Path(path)
+            ext = file_path.suffix.lower()
+            self._file_label.setText(
+                f"{file_path.name}  ({file_type_label(ext)})"
+            )
+            self._status.setText("Extracting text...")
+
+            self._file_text = extract_text(str(file_path))
+
+            preview = self._file_text[:20000]
+            if len(self._file_text) > 20000:
+                preview += (
+                    f"\n\n... ({len(self._file_text)} chars total, "
+                    "truncated for preview)"
+                )
+            self._preview.setPlainText(preview)
+            self._process_btn.setEnabled(True)
+            self._status.setText(
+                f"Loaded: {file_path.name} ({len(self._file_text)} chars). "
+                "Click 'Extract Knowledge Points' to process with AI."
+            )
+        except Exception as e:
+            self._status.setText(f"Error: {e}")
+            self._file_label.setText("Error loading file")
+
+    def _on_process(self):
+        if not self._file_text:
+            return
+
+        self._process_btn.setEnabled(False)
+        self._upload_btn.setEnabled(False)
+        self._clear_results()
+        self._status.setText("Processing with AI...")
+
+        self._worker = ProcessWorker(self._file_text, self._config_path)
+        self._worker.finished.connect(self._on_result)
+        self._worker.error.connect(self._on_error)
+        self._worker.start()
+
+    def _on_result(self, data: dict):
+        self._process_btn.setEnabled(True)
+        self._upload_btn.setEnabled(True)
+
+        kps = data.get("knowledge_points", [])
+        quizzes = data.get("quiz_questions", [])
+
+        self._status.setText(
+            f"Done: {len(kps)} knowledge points, {len(quizzes)} questions"
+        )
+
+        if kps:
+            section = QLabel(" Knowledge Points")
+            section.setStyleSheet(
+                f"color: {STACK_BORDER}; font-size: 15px; font-weight: bold; "
+                "padding: 8px 0 4px 0;"
+            )
+            self._result_layout.addWidget(section)
+
+            for kp in kps:
+                self._result_layout.addWidget(self._build_kp_card(kp))
+
+        if quizzes:
+            section = QLabel(" Quiz Questions")
+            section.setStyleSheet(
+                f"color: {HEAP_BORDER}; font-size: 15px; font-weight: bold; "
+                "padding: 12px 0 4px 0;"
+            )
+            self._result_layout.addWidget(section)
+
+            for i, q in enumerate(quizzes):
+                self._result_layout.addWidget(self._build_quiz_card(i + 1, q))
+
+        self._result_layout.addStretch()
+
+    def _build_kp_card(self, kp: dict) -> QFrame:
+        card = QFrame()
+        card.setObjectName("resultCard")
+        card.setStyleSheet(PAGE_STYLE)
+        layout = QVBoxLayout(card)
+        layout.setSpacing(6)
+
+        name = QLabel(kp.get("name", ""))
+        name.setObjectName("conceptName")
+        layout.addWidget(name)
+
+        expl = kp.get("explanation", "")
+        if expl:
+            label = QLabel(expl)
+            label.setWordWrap(True)
+            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
+            layout.addWidget(label)
+
+        code = kp.get("code_snippet", "")
+        if code:
+            code_frame = QFrame()
+            code_frame.setStyleSheet(
+                f"background-color: {CANVAS_BG}; border: 1px solid {BORDER}; "
+                "border-radius: 4px; padding: 6px; margin: 4px 0;"
+            )
+            cf_layout = QVBoxLayout(code_frame)
+            cf_layout.setContentsMargins(6, 4, 6, 4)
+
+            code_label = QLabel(code)
+            code_label.setFont(QFont("JetBrains Mono", 11))
+            code_label.setStyleSheet(
+                f"color: {TEXT_PRIMARY}; background: transparent; border: none;"
+            )
+            code_label.setWordWrap(True)
+            cf_layout.addWidget(code_label)
+
+            viz_btn = QPushButton("Visualize this code")
+            viz_btn.setObjectName("visualizeBtn")
+            viz_btn.clicked.connect(
+                lambda checked=None, c=code: self.visualize_requested.emit(c)
+            )
+            cf_layout.addWidget(viz_btn)
+
+            layout.addWidget(code_frame)
+
+        return card
+
+    def _build_quiz_card(self, num: int, q: dict) -> QFrame:
+        card = QFrame()
+        card.setObjectName("resultCard")
+        card.setStyleSheet(PAGE_STYLE)
+        layout = QVBoxLayout(card)
+        layout.setSpacing(4)
+
+        question = QLabel(f"Q{num}: {q.get('question', '')}")
+        question.setObjectName("quizQuestion")
+        question.setWordWrap(True)
+        layout.addWidget(question)
+
+        options = q.get("options", [])
+        answer = q.get("answer", -1)
+        labels = ["A", "B", "C", "D"]
+        for i, opt in enumerate(options):
+            prefix = " ✓ " if i == answer else "    "
+            opt_label = QLabel(f"{prefix}{labels[i]}) {opt}")
+            opt_label.setStyleSheet(
+                f"color: {'#4EC9B0' if i == answer else TEXT_SECONDARY}; "
+                "font-size: 12px; padding-left: 8px;"
+            )
+            layout.addWidget(opt_label)
+
+        explanation = q.get("explanation", "")
+        if explanation:
+            expl = QLabel(f"  {explanation}")
+            expl.setWordWrap(True)
+            expl.setStyleSheet(
+                f"color: {TEXT_SECONDARY}; font-size: 11px; padding-left: 12px;"
+            )
+            layout.addWidget(expl)
+
+        return card
+
+    def _on_error(self, msg: str):
+        self._process_btn.setEnabled(True)
+        self._upload_btn.setEnabled(True)
+        self._status.setText(f"Error: {msg}")
+
+    def _clear_results(self):
+        while self._result_layout.count():
+            item = self._result_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
