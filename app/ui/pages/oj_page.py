@@ -16,6 +16,7 @@ from app.core.state_diff import StateDiffEngine
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.services.ai_service import AIService
+from app.services import error_store
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -225,6 +226,12 @@ class OJPage(QWidget):
 
         trace: ExecutionTrace = data["trace"]
         analysis = data.get("analysis", {})
+
+        # Save knowledge points
+        for kp in analysis.get("knowledge_points", []):
+            error_store.add_knowledge_point(
+                kp.get("name", ""), "oj_analysis"
+            )
 
         self._trace = trace
         self._current_index = 0

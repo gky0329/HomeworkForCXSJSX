@@ -6,6 +6,7 @@ from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
+from app.services import error_store
 
 
 class Engine:
@@ -59,6 +60,8 @@ class Engine:
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
+        error_store.add_error("execution", "Code execution failed",
+                              "", error_msg, self._window.get_code())
         self._window.statusBar().showMessage(f"Error: {error_msg}")
 
     def _on_next(self):
