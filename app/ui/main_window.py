@@ -11,7 +11,6 @@ from PySide6.QtGui import (
 )
 
 from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY
-from app.ui.theme.styles import GLOBAL_STYLESHEET
 from app.ui.pages.file_import_page import FileImportPage
 from app.ui.pages.oj_page import OJPage
 from app.ui.pages.review_page import ReviewPage

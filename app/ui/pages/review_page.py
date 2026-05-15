@@ -1,15 +1,13 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QListWidget, QListWidgetItem, QMessageBox,
-    QSplitter,
+    QListWidget, QListWidgetItem, QSplitter, QFrame,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
 
 from app.services import error_store
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, HIGHLIGHT,
+    STACK_BORDER, HEAP_BORDER, EDGE_DANGLING, SUCCESS,
 )
 
 
@@ -112,13 +110,17 @@ class ReviewPage(QWidget):
             item = QListWidgetItem(text)
             if e.get("reviewed"):
                 item.setForeground(Qt.GlobalColor.gray)
+            item.setData(Qt.ItemDataRole.UserRole, e.get("id", ""))
             self._error_list.addItem(item)
 
     def _on_select(self, idx: int):
         if idx < 0 or idx >= len(self._errors):
             return
         e = self._errors[idx]
-        self._clear_detail()
+        while self._detail_layout.count():
+            item = self._detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         self._detail_layout.addWidget(
             _mlabel(f"Knowledge: {e.get('knowledge_point', '?')}", STACK_BORDER, 13, True)
         )
@@ -138,19 +140,17 @@ class ReviewPage(QWidget):
         self._delete_btn.setEnabled(True)
 
     def _on_review(self):
-        idx = self._error_list.currentRow()
-        if 0 <= idx < len(self._errors):
-            error_store.mark_reviewed(idx)
-            self._refresh()
+        item = self._error_list.currentItem()
+        if item:
+            eid = item.data(Qt.ItemDataRole.UserRole)
+            if eid:
+                error_store.mark_reviewed(eid)
+                self._refresh()
 
     def _on_delete(self):
-        idx = self._error_list.currentRow()
-        if 0 <= idx < len(self._errors):
-            error_store.delete_error(idx)
-            self._refresh()
-
-    def _clear_detail(self):
-        while self._detail_layout.count():
-            item = self._detail_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        item = self._error_list.currentItem()
+        if item:
+            eid = item.data(Qt.ItemDataRole.UserRole)
+            if eid:
+                error_store.delete_error(eid)
+                self._refresh()

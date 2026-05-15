@@ -1,21 +1,19 @@
 import math
 import random
-from typing import Any
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsView,
-    QGraphicsScene, QGraphicsEllipseItem, QGraphicsLineItem,
-    QGraphicsTextItem, QPushButton,
+    QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
+    QPushButton,
 )
-from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QFont, QColor, QPen, QBrush, QPainter, QLinearGradient,
 )
 
 from app.services import error_store
 from app.ui.theme.colors import (
-    CANVAS_BG, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
-    TEXT_PRIMARY, SURFACE, BORDER, ACCENT, HIGHLIGHT, SUCCESS,
+    CANVAS_BG, STACK_BORDER, TEXT_PRIMARY,
 )
 
 
@@ -46,7 +44,6 @@ class GraphPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nodes: list[GraphNode] = []
-        self._edges: list[QGraphicsLineItem] = []
         self._timer = QTimer()
         self._timer.timeout.connect(self._simulate)
         self._setup_ui()
@@ -98,11 +95,8 @@ class GraphPage(QWidget):
     def _refresh(self):
         self._timer.stop()
         for n in self._nodes:
-            self._scene.removeItem(n)
-        for e in self._edges:
-            self._scene.removeItem(e)
+            n.deleteLater()
         self._nodes.clear()
-        self._edges.clear()
 
         freq = error_store.get_error_frequency()
         kps = error_store.get_knowledge_points()

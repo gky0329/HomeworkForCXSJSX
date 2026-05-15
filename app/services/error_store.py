@@ -1,5 +1,6 @@
 import json
 import threading
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,7 +29,8 @@ def add_error(knowledge_point: str, question: str,
               user_answer: str, correct_answer: str, context: str = ""):
     with _lock:
         errors = _load(ERRORS_PATH)
-        errors.append({
+        entry = {
+            "id": uuid.uuid4().hex,
             "knowledge_point": knowledge_point,
             "question": question,
             "user_answer": user_answer,
@@ -37,8 +39,13 @@ def add_error(knowledge_point: str, question: str,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "reviewed": False,
             "review_count": 0,
-        })
+        }
+        errors.insert(0, entry)
         _save(ERRORS_PATH, errors)
+
+
+def add_execution_error(error_msg: str, code: str = ""):
+    add_error("execution", "Code execution failed", "", error_msg, code)
 
 
 def get_errors(reviewed: Optional[bool] = None) -> list:
@@ -57,21 +64,22 @@ def get_error_frequency() -> dict[str, int]:
     return freq
 
 
-def mark_reviewed(index: int):
+def mark_reviewed(error_id: str):
     with _lock:
         errors = _load(ERRORS_PATH)
-        if 0 <= index < len(errors):
-            errors[index]["reviewed"] = True
-            errors[index]["review_count"] = errors[index].get("review_count", 0) + 1
-            _save(ERRORS_PATH, errors)
+        for e in errors:
+            if e.get("id") == error_id:
+                e["reviewed"] = True
+                e["review_count"] = e.get("review_count", 0) + 1
+                _save(ERRORS_PATH, errors)
+                return
 
 
-def delete_error(index: int):
+def delete_error(error_id: str):
     with _lock:
         errors = _load(ERRORS_PATH)
-        if 0 <= index < len(errors):
-            errors.pop(index)
-            _save(ERRORS_PATH, errors)
+        errors[:] = [e for e in errors if e.get("id") != error_id]
+        _save(ERRORS_PATH, errors)
 
 
 def add_knowledge_point(name: str, source: str = ""):

@@ -60,8 +60,7 @@ class Engine:
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
-        error_store.add_error("execution", "Code execution failed",
-                              "", error_msg, self._window.get_code())
+        error_store.add_execution_error(error_msg, self._window.get_code())
         self._window.statusBar().showMessage(f"Error: {error_msg}")
 
     def _on_next(self):

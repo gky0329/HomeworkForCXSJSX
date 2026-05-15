@@ -305,8 +305,8 @@ class TrackerPanel(QWidget):
         return btn
 
     def _addr_name(self, address: str) -> str:
-        for addr, card in list(self._cards.items()):
-            child = card.findChild(QLabel)
-            if child and child.text():
-                return child.text()
+        if self._current_state:
+            var, _ = self._find_var(self._current_state, address)
+            if var:
+                return var.name
         return address

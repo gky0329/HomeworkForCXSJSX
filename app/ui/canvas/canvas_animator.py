@@ -1,3 +1,4 @@
+import time
 from PySide6.QtCore import QTimer, QPointF
 from PySide6.QtGui import QColor
 
@@ -16,15 +17,17 @@ class CanvasAnimator:
         self._pending = 0
         self._on_finished = None
         self._timers: list[QTimer] = []
+        self._generation = 0
 
     def stop_all(self):
+        self._generation += 1
         for timer in self._timers:
             try:
                 timer.stop()
-            except Exception:
-                pass
-            try:
-                timer.timeout.disconnect()
+                try:
+                    timer.timeout.disconnect()
+                except Exception:
+                    pass
             except Exception:
                 pass
         self._timers.clear()
@@ -47,7 +50,9 @@ class CanvasAnimator:
             self._on_finished = None
             cb()
 
-    def _check_done(self):
+    def _check_done(self, gen: int):
+        if gen != self._generation:
+            return
         self._pending -= 1
         if self._pending <= 0 and self._on_finished:
             cb = self._on_finished
@@ -110,9 +115,10 @@ class CanvasAnimator:
             item.setDefaultTextColor(QColor(HIGHLIGHT))
         else:
             progress = (t - 0.5) * 2
-            r = int(HIGHLIGHT.lstrip('#')[0:2], 16) * (1 - progress) + orig_color.red() * progress
-            g = int(HIGHLIGHT.lstrip('#')[2:4], 16) * (1 - progress) + orig_color.green() * progress
-            b = int(HIGHLIGHT.lstrip('#')[4:6], 16) * (1 - progress) + orig_color.blue() * progress
+            hex_hi = HIGHLIGHT.lstrip('#')
+            r = int(hex_hi[0:2], 16) * (1 - progress) + orig_color.red() * progress
+            g = int(hex_hi[2:4], 16) * (1 - progress) + orig_color.green() * progress
+            b = int(hex_hi[4:6], 16) * (1 - progress) + orig_color.blue() * progress
             item.setDefaultTextColor(QColor(int(r), int(g), int(b)))
 
     def _animate_modified_heap(self, diff: DiffResult):
@@ -170,27 +176,28 @@ class CanvasAnimator:
             item.setOpacity(1.0 - fade_t)
 
     def _tween(self, duration_ms: int, on_update, on_finish=None):
+        gen = self._generation
         start_time = [None]
         timer = QTimer()
         timer.setInterval(16)
         self._timers.append(timer)
 
         def tick():
+            if gen != self._generation:
+                timer.stop()
+                return
             if start_time[0] is None:
-                start_time[0] = __import__('time').time()
-            elapsed = (__import__('time').time() - start_time[0]) * 1000
+                start_time[0] = time.time()
+            elapsed = (time.time() - start_time[0]) * 1000
             t = elapsed / duration_ms
 
             if t >= 1.0:
                 on_update(1.0)
                 timer.stop()
-                try:
-                    self._timers.remove(timer)
-                except ValueError:
-                    pass
+                self._timers[:] = [t for t in self._timers if t is not timer]
                 if on_finish:
                     on_finish()
-                self._check_done()
+                self._check_done(gen)
             else:
                 on_update(t)
 
