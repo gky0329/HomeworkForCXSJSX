@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -110,15 +110,22 @@ class SettingsPage(QWidget):
         back_btn = McButton("← 返回")
         back_btn.clicked.connect(self.back_requested.emit)
         save_btn = McButton("保存")
-        save_btn.clicked.connect(self._emit_settings)
+        save_btn.clicked.connect(self._save_settings)
         btn_row.addWidget(back_btn)
         btn_row.addStretch()
         btn_row.addWidget(save_btn)
+
+        self._save_status = QLabel("")
+        self._save_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._save_status.setStyleSheet(
+            f"font-size: 14px; font-weight: 700; color: {Colors.GRASS_LIGHT};"
+        )
 
         layout.addWidget(title)
         layout.addWidget(tip)
         layout.addWidget(panel)
         layout.addStretch()
+        layout.addWidget(self._save_status)
         layout.addLayout(btn_row)
 
         self._sync_initial_state()
@@ -179,6 +186,11 @@ class SettingsPage(QWidget):
 
     def _on_key_changed(self, text: str) -> None:
         self._api_key = text.strip()
+
+    def _save_settings(self) -> None:
+        self._emit_settings()
+        self._save_status.setText("✓ API设置已保存！")
+        QTimer.singleShot(2000, lambda: self._save_status.setText(""))
 
     def _emit_settings(self) -> None:
         self._api_key = self._key_input.text().strip()

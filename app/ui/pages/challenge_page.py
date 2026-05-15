@@ -572,16 +572,44 @@ class ChallengePage(QWidget):
             self._hint_lb.setText("⚠ 请先在设置中填写 API Key")
             self._hint_lb.setVisible(True)
             return
-        initial_code = lv.get("initial_code", [])
-        question = "\n".join(str(line) for line in initial_code)
+
+        title = lv.get("title", "")
+        theory = lv.get("theory", "")
+        points = lv.get("key_points", [])
+        npc_lines = []
+        for d in lv.get("npc_dialogue", []):
+            npc_lines.append(f"[{d.get('npc','')}] {d.get('text','')}")
+        dialogue = "\n".join(npc_lines)
+        code = "\n".join(str(line) for line in lv.get("initial_code", []))
         answer = self._current_answer_text()
+        hints = lv.get("hints", [])
+
+        level_context = (
+            f"=== 当前关卡 ===\n"
+            f"标题：{title}\n\n"
+            f"故事背景（NPC对话）：\n{dialogue}\n\n"
+            f"知识点讲解：{theory}\n\n"
+            f"关键概念：{'、'.join(points)}\n\n"
+            f"需要填补空的代码（____是空白）：\n{code}\n\n"
+        )
+
         system_prompt = (
-            "请帮助学生学习C++程序设计，给他合适的提示和详细的讲解，但不要直接给出答案。"
-            "这是一道填空题，题目为{question}"
-        ).replace("{question}", question)
+            "你是小C，一位生活在Minecraft方块世界的年轻村民。你最近捡到了一块神奇的发着微光的"
+            "黑色方块，你给它取名为「家家」。家家让你对编程产生了浓厚的兴趣。"
+            "现在，你正在学习C++程序设计。你的好朋友——铁傀儡——会保护你，也会偶尔给你一些提示。"
+            "你说话的语气应该像一个好奇、友善的Minecraft村民："
+            "使用Minecraft里的比喻来解释C++概念（比如「类就像一张图纸，告诉我们方块该怎么摆放」），"
+            "保持简短、温暖、带点方块世界的幽默感。"
+            "你是来帮助别人的，不是来考试的——所以如果对方困惑，请像朋友一样鼓励他们。"
+            "不要直接给出答案，而是要像铁傀儡教你那样，给提示、打比方、一步步引导。"
+            "当学生问问题时，你应该先理解他们在哪个关卡、遇到了什么困难，"
+            "然后根据关卡知识点给出有针对性的讲解。"
+        )
         user_prompt = (
-            "我当前在题目中填的空为{answer}（每空之间用@分割），我的困惑为{problem}"
-        ).replace("{answer}", answer)
+            f"{level_context}"
+            f"我当前填的空为（每空之间用@分割）：{answer}\n"
+            f"我的困惑为{{problem}}"
+        )
         payload = AiHelpPayload(
             api_url=self.settings.api_url,
             api_key=self.settings.api_key,

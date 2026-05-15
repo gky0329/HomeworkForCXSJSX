@@ -35,6 +35,7 @@ class AiHelpPayload:
 
 class AiHelpWorker(QObject):
     chunk_received = Signal(str)
+    connected = Signal()
     finished = Signal()
     failed = Signal(str)
 
@@ -67,6 +68,7 @@ class AiHelpWorker(QObject):
                 if status != 200:
                     self._emit_error(response.read().decode("utf-8", errors="ignore"))
                     return
+                first_segment = True
                 for raw in response:
                     line = raw.strip()
                     if not line.startswith(b"data:"):
@@ -81,6 +83,9 @@ class AiHelpWorker(QObject):
                     delta = message.get("choices", [{}])[0].get("delta", {})
                     content = delta.get("content")
                     if content:
+                        if first_segment:
+                            first_segment = False
+                            self.connected.emit()
                         self.chunk_received.emit(content)
         except urllib.error.HTTPError as exc:
             status = exc.code
@@ -174,7 +179,7 @@ class AiHelpDialog(QDialog):
         if not problem:
             self._status.setText("请输入你的困惑")
             return
-        self._status.setText("请稍后...")
+        self._status.setText("正在发送请求...")
         self._send_btn.setEnabled(False)
         payload = AiHelpPayload(
             api_url=self._payload.api_url,
@@ -186,11 +191,15 @@ class AiHelpDialog(QDialog):
         )
         self._start_worker(payload)
 
+    def _on_connected(self) -> None:
+        self._status.setText("✓ 小C收到你的问题了！他正在思考...")
+
     def _start_worker(self, payload: AiHelpPayload) -> None:
         self._thread = QThread()
         self._worker = AiHelpWorker(payload, self._logger)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
+        self._worker.connected.connect(self._on_connected)
         self._worker.chunk_received.connect(self._append_text)
         self._worker.failed.connect(self._handle_error)
         self._worker.finished.connect(self._handle_done)
