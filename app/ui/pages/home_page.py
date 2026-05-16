@@ -1,9 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QPushButton, QScrollArea,
+    QPushButton,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 
 from app.services import error_store
 from app.ui.theme.colors import (
@@ -21,11 +20,11 @@ CARD_BG = (
     f"border-radius: 10px; }}"
     f"QFrame:hover {{ border-color: {STACK_BORDER}; }}"
 )
-ACTION_BTN = (
-    f"QPushButton {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
-    f"border: 1px solid {BORDER}; border-radius: 10px; padding: 16px 20px; "
-    f"font-size: 14px; text-align: left; }}"
-    f"QPushButton:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
+LINK_BTN = (
+    f"QPushButton {{ background-color: {SURFACE}; color: {ACCENT}; "
+    f"border: 1px solid {BORDER}; border-radius: 10px; "
+    f"padding: 14px 24px; font-size: 15px; font-weight: bold; text-align: left; }}"
+    f"QPushButton:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; color: {STACK_BORDER}; }}"
 )
 
 TAB_NAMES = {
@@ -42,6 +41,7 @@ class HomePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._stat_labels: dict[str, QLabel] = {}
         self._setup_ui()
 
     def _setup_ui(self):
@@ -62,13 +62,16 @@ class HomePage(QWidget):
         actions = QHBoxLayout()
         actions.setSpacing(12)
 
-        code_btn = self._action_card("Code Editor", "Write & visualize C++ code\nline by line", STACK_BORDER, "Code Editor")
-        ojl_btn = self._action_card("OJ Analysis", "Paste OJ problems &\nget AI explanations", HEAP_BORDER, "OJ Analysis")
-        file_btn = self._action_card("File Import", "Upload PDF / Word / C++\nextract knowledge + quiz", ACCENT, "File Import")
+        for label, tab in [("Code Editor", "Code Editor"),
+                           ("OJ Analysis", "OJ Analysis"),
+                           ("File Import", "File Import")]:
+            btn = QPushButton(label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(LINK_BTN)
+            idx = TAB_NAMES.get(tab, 0)
+            btn.clicked.connect(lambda checked=None, i=idx: self.tab_switch_requested.emit(i))
+            actions.addWidget(btn)
 
-        actions.addWidget(code_btn)
-        actions.addWidget(ojl_btn)
-        actions.addWidget(file_btn)
         main.addLayout(actions)
 
         main.addSpacing(8)
@@ -76,13 +79,13 @@ class HomePage(QWidget):
         stats_row = QHBoxLayout()
         stats_row.setSpacing(12)
 
-        self._error_stat = self._stat_card("0", "Pending Review")
-        self._kp_stat = self._stat_card("0", "Knowledge Points")
-        self._activity_stat = self._stat_card("0", "Recent Activities")
+        self._error_card = self._stat_card("0", "Pending Review", "Review")
+        self._kp_card = self._stat_card("0", "Knowledge Points", "Knowledge Graph")
+        self._act_card = self._stat_card("0", "Recent Activities", None)
 
-        stats_row.addWidget(self._error_stat)
-        stats_row.addWidget(self._kp_stat)
-        stats_row.addWidget(self._activity_stat)
+        stats_row.addWidget(self._error_card)
+        stats_row.addWidget(self._kp_card)
+        stats_row.addWidget(self._act_card)
         main.addLayout(stats_row)
 
         main.addSpacing(4)
@@ -98,33 +101,19 @@ class HomePage(QWidget):
 
         main.addStretch()
 
-    def _action_card(self, title: str, desc: str, color: str, tab_name: str) -> QFrame:
+    def _stat_card(self, num: str, label: str, tab_name: str | None) -> QFrame:
         card = QFrame()
         card.setStyleSheet(CARD_BG)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(4)
 
-        t = QLabel(title)
-        t.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: bold;")
-        layout.addWidget(t)
+        if tab_name:
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            idx = TAB_NAMES.get(tab_name, 0)
 
-        d = QLabel(desc)
-        d.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px;")
-        layout.addWidget(d)
+            def on_click(event, i=idx):
+                self.tab_switch_requested.emit(i)
 
-        card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.mousePressEvent = on_click
 
-        def on_click(event, tn=tab_name):
-            idx = TAB_NAMES.get(tn, 0)
-            self.tab_switch_requested.emit(idx)
-
-        card.mousePressEvent = on_click
-        return card
-
-    def _stat_card(self, num: str, label: str) -> QFrame:
-        card = QFrame()
-        card.setStyleSheet(CARD_BG)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(2)
@@ -140,23 +129,19 @@ class HomePage(QWidget):
         l.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(l)
 
+        self._stat_labels[label] = n
         return card
 
     def refresh(self):
         stats = error_store.get_all_stats()
         activities = error_store.get_recent_activity()
 
-        stat_num = self._error_stat.findChild(QLabel)
-        if stat_num:
-            stat_num.setText(str(stats["unreviewed"]))
-
-        kp_labels = self._kp_stat.findChildren(QLabel)
-        if len(kp_labels) > 0:
-            kp_labels[0].setText(str(stats["knowledge_points"]))
-
-        act_labels = self._activity_stat.findChildren(QLabel)
-        if len(act_labels) > 0:
-            act_labels[0].setText(str(len(activities)))
+        if "Pending Review" in self._stat_labels:
+            self._stat_labels["Pending Review"].setText(str(stats["unreviewed"]))
+        if "Knowledge Points" in self._stat_labels:
+            self._stat_labels["Knowledge Points"].setText(str(stats["knowledge_points"]))
+        if "Recent Activities" in self._stat_labels:
+            self._stat_labels["Recent Activities"].setText(str(len(activities)))
 
         while self._activity_list.count():
             item = self._activity_list.takeAt(0)
