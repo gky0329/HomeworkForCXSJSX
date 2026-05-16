@@ -2,13 +2,13 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QPushButton,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QColor
 
 from app.core.memory_model import MemoryState, Variable
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING,
+    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, HIGHLIGHT,
 )
 
 
@@ -55,6 +55,7 @@ class TrackerPanel(QWidget):
         super().__init__(parent)
         self._tracked_addresses: set[str] = set()
         self._cards: dict[str, QFrame] = {}
+        self._prev_values: dict[str, str] = {}
         self._current_state: MemoryState | None = None
         self._chip_buttons: dict[str, QPushButton] = {}
         self._setup_ui()
@@ -194,28 +195,43 @@ class TrackerPanel(QWidget):
 
     def _on_clear_all(self):
         self._tracked_addresses.clear()
+        self._card_labels.clear()
+        self._prev_values.clear()
         if self._current_state:
             self._rebuild_chips(self._current_state)
         self._refresh_cards()
 
     def _refresh_cards(self):
-        for addr, card in list(self._cards.items()):
-            self._cards_layout.removeWidget(card)
-            card.deleteLater()
-        self._cards.clear()
+        current = set(self._tracked_addresses)
 
-        if not self._tracked_addresses or self._current_state is None:
+        for addr in list(self._cards):
+            if addr not in current:
+                card = self._cards.pop(addr)
+                self._prev_values.pop(addr, None)
+                self._cards_layout.removeWidget(card)
+                card.deleteLater()
+
+        if self._current_state is None:
             self._clear_all_btn.setVisible(False)
             return
 
-        self._clear_all_btn.setVisible(True)
+        for addr in current:
+            var, frame_name = self._find_var(self._current_state, addr)
+            old_val = self._prev_values.get(addr)
+            new_val = var.value if var else None
 
-        for address in self._tracked_addresses:
-            var, frame_name = self._find_var(self._current_state, address)
-            card = self._build_card(var, frame_name, address)
-            idx = self._cards_layout.count() - 1
-            self._cards_layout.insertWidget(max(0, idx), card)
-            self._cards[address] = card
+            if addr in self._cards:
+                self._update_card(addr, var, frame_name, old_val, new_val)
+            else:
+                card = self._build_card(var, frame_name, addr)
+                idx = self._cards_layout.count()
+                self._cards_layout.insertWidget(max(0, idx - 1), card)
+                self._cards[addr] = card
+
+            if var:
+                self._prev_values[addr] = new_val
+
+        self._clear_all_btn.setVisible(bool(self._tracked_addresses))
 
     def _find_var(self, state: MemoryState, address: str):
         for frame in state.stack:
@@ -257,12 +273,58 @@ class TrackerPanel(QWidget):
         il.setFont(QFont("JetBrains Mono", 10))
         il.setStyleSheet(f"color: {TEXT_PRIMARY};")
         vbox.addWidget(il)
+        il.setObjectName("value_label")
 
         sl = QLabel(f"scope: {frame_name}  [{var.address}]")
         sl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
         vbox.addWidget(sl)
 
         return card
+
+    def _update_card(self, addr: str, var, frame_name: str,
+                     old_val: str | None, new_val: str | None):
+        card = self._cards.get(addr)
+        if card is None:
+            return
+
+        if var is None:
+            card.setStyleSheet(CARD_DESTROYED)
+            value_label = card.findChild(QLabel, "value_label")
+            if value_label:
+                value_label.setText("out of scope")
+                value_label.setStyleSheet(
+                    f"color: {EDGE_DANGLING}; font-size: 10px;"
+                )
+            return
+
+        card.setStyleSheet(CARD_STYLE)
+        value_label = card.findChild(QLabel, "value_label")
+        if value_label is None:
+            return
+
+        changed = old_val is not None and new_val is not None and old_val != new_val
+        if changed:
+            value_label.setText(f"{var.type}  =  {old_val} → {new_val}")
+            value_label.setStyleSheet(
+                f"color: {HIGHLIGHT}; font-weight: bold;"
+            )
+            card.setStyleSheet(
+                f"QFrame {{ background-color: #2A2A10; "
+                f"border: 2px solid {HIGHLIGHT}; border-radius: 8px; }}"
+            )
+
+            def restore(addr=addr, lbl=value_label, card=card):
+                if addr in self._current_state:
+                    v, _ = self._find_var(self._current_state, addr)
+                    if v:
+                        lbl.setText(f"{v.type}  =  {v.value}")
+                lbl.setStyleSheet(f"color: {TEXT_PRIMARY};")
+                card.setStyleSheet(CARD_STYLE)
+
+            QTimer.singleShot(1200, restore)
+        else:
+            value_label.setText(f"{var.type}  =  {new_val or ''}")
+            value_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
 
     def _addr_name(self, address: str) -> str:
         if self._current_state:
