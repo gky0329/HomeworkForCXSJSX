@@ -328,6 +328,25 @@ class OJPage(QWidget):
             cl.addWidget(c)
             vbox.addWidget(cf)
 
+        review_btn = QPushButton("Add to Review")
+        review_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
+            f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
+            f"margin-top: 4px; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+        )
+        kp_name = kp.get("name", "")
+        kp_expl = kp.get("explanation", "")
+        review_btn.clicked.connect(
+            lambda checked=None, n=kp_name, e=kp_expl:
+            error_store.add_error(
+                knowledge_point=n, question="Manual review",
+                user_answer="Needs practice", correct_answer=e,
+            )
+        )
+        vbox.addWidget(review_btn)
+
         self._analysis_layout.addWidget(card)
 
     def _add_ref_card(self, ref: dict):

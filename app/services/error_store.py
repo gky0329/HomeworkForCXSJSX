@@ -44,10 +44,6 @@ def add_error(knowledge_point: str, question: str,
         _save(ERRORS_PATH, errors)
 
 
-def add_execution_error(error_msg: str, code: str = ""):
-    add_error("execution", "Code execution failed", "", error_msg, code)
-
-
 def get_errors(reviewed: Optional[bool] = None) -> list:
     errors = _load(ERRORS_PATH)
     if reviewed is not None:

@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QSplitter, QFrame,
+    QDialog, QLineEdit, QTextEdit, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt
 
@@ -36,6 +37,10 @@ class ReviewPage(QWidget):
 
         header = QHBoxLayout()
         header.addWidget(_mlabel("Error Review", STACK_BORDER, 16, True))
+        header.addSpacing(12)
+        add_btn = QPushButton("+ Add Error")
+        add_btn.clicked.connect(self._on_add_error)
+        header.addWidget(add_btn)
         header.addStretch()
         self._stats_label = _mlabel("", TEXT_SECONDARY, 12)
         header.addWidget(self._stats_label)
@@ -94,6 +99,33 @@ class ReviewPage(QWidget):
         bottom.addStretch()
         bottom.addWidget(refresh_btn)
         layout.addLayout(bottom)
+
+    def _on_add_error(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Error")
+        dialog.setMinimumWidth(400)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Knowledge Point:"))
+        kp_edit = QLineEdit()
+        kp_edit.setPlaceholderText("e.g. Pointers, STL...")
+        layout.addWidget(kp_edit)
+        layout.addWidget(QLabel("Question / Description:"))
+        q_edit = QTextEdit()
+        q_edit.setPlaceholderText("What did you get wrong?")
+        q_edit.setMaximumHeight(100)
+        layout.addWidget(q_edit)
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            kp = kp_edit.text().strip() or "manual"
+            q = q_edit.toPlainText().strip() or "Manual entry"
+            error_store.add_error(kp, q, "", "", "")
+            self._refresh()
 
     def _refresh(self):
         self._errors = error_store.get_errors()

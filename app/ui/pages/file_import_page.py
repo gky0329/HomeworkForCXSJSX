@@ -15,10 +15,11 @@ from app.services.file_service import (
     extract_text, SUPPORTED_EXTENSIONS, file_type_label,
 )
 from app.services.ai_service import AIService
+from app.services import error_store
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    ACCENT, STACK_BORDER, HEAP_BORDER,
+    ACCENT, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
 )
 
 logger = logging.getLogger(__name__)
@@ -328,6 +329,27 @@ class FileImportPage(QWidget):
                 f"color: {TEXT_SECONDARY}; font-size: 11px; padding-left: 12px;"
             )
             layout.addWidget(expl)
+
+        wrong_btn = QPushButton("I got this wrong")
+        wrong_btn.setObjectName("visualizeBtn")
+        wrong_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+            f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
+            f"margin-top: 4px; }}"
+            f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+        )
+        q_text = q.get('question', '')
+        wrong_btn.clicked.connect(
+            lambda checked=None, q=q_text, a_idx=answer, opts=options:
+            error_store.add_error(
+                knowledge_point="quiz",
+                question=q,
+                user_answer="?",
+                correct_answer=opts[answer] if 0 <= answer < len(opts) else "?",
+            )
+        )
+        layout.addWidget(wrong_btn)
 
         return card
 
