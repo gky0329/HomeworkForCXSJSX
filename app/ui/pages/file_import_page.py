@@ -57,6 +57,14 @@ QLabel#quizQuestion {{
 }}
 """
 
+BTN_OPT = (
+    f"QPushButton {{ background-color: {CANVAS_BG}; "
+    f"color: {TEXT_PRIMARY}; border: 1px solid {BORDER}; "
+    f"border-radius: 6px; padding: 6px 14px; "
+    f"font-size: 12px; text-align: left; }}"
+    f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
+)
+
 
 class ProcessWorker(QThread):
     finished = Signal(object)
@@ -302,7 +310,7 @@ class FileImportPage(QWidget):
         card.setObjectName("resultCard")
         card.setStyleSheet(PAGE_STYLE)
         layout = QVBoxLayout(card)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
 
         question = QLabel(f"Q{num}: {q.get('question', '')}")
         question.setObjectName("quizQuestion")
@@ -310,46 +318,106 @@ class FileImportPage(QWidget):
         layout.addWidget(question)
 
         options = q.get("options", [])
-        answer = q.get("answer", -1)
+        answer_idx = q.get("answer", -1)
         labels = ["A", "B", "C", "D"]
-        for i, opt in enumerate(options):
-            prefix = " ✓ " if i == answer else "    "
-            opt_label = QLabel(f"{prefix}{labels[i]}) {opt}")
-            opt_label.setStyleSheet(
-                f"color: {'#4EC9B0' if i == answer else TEXT_SECONDARY}; "
-                "font-size: 12px; padding-left: 8px;"
-            )
-            layout.addWidget(opt_label)
+
+        result_label = QLabel("")
+        result_label.setVisible(False)
+        layout.addWidget(result_label)
 
         explanation = q.get("explanation", "")
-        if explanation:
-            expl = QLabel(f"  {explanation}")
-            expl.setWordWrap(True)
-            expl.setStyleSheet(
-                f"color: {TEXT_SECONDARY}; font-size: 11px; padding-left: 12px;"
-            )
-            layout.addWidget(expl)
+        expl_label = QLabel(f"  {explanation}" if explanation else "")
+        expl_label.setWordWrap(True)
+        expl_label.setVisible(False)
+        expl_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 11px; padding-left: 12px;"
+        )
+        layout.addWidget(expl_label)
 
-        wrong_btn = QPushButton("I got this wrong")
-        wrong_btn.setObjectName("visualizeBtn")
-        wrong_btn.setStyleSheet(
-            f"QPushButton {{ background-color: transparent; "
-            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-            f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
-            f"margin-top: 4px; }}"
-            f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
-        )
-        q_text = q.get('question', '')
-        wrong_btn.clicked.connect(
-            lambda checked=None, q=q_text, a_idx=answer, opts=options:
-            error_store.add_error(
-                knowledge_point="quiz",
-                question=q,
-                user_answer="?",
-                correct_answer=opts[answer] if 0 <= answer < len(opts) else "?",
+        answered = [False]
+
+        def on_choice(choice_idx: int, btn_widgets: list[QPushButton]):
+            if answered[0]:
+                return
+            answered[0] = True
+
+            correct = (choice_idx == answer_idx)
+
+            for i, btn in enumerate(btn_widgets):
+                if i == choice_idx:
+                    if correct:
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: #1A3A2A; "
+                            f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                            f"border-radius: 6px; padding: 6px 14px; "
+                            f"font-size: 12px; text-align: left; font-weight: bold; }}"
+                        )
+                    else:
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: #3A1A1A; "
+                            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+                            f"border-radius: 6px; padding: 6px 14px; "
+                            f"font-size: 12px; text-align: left; font-weight: bold; }}"
+                        )
+                elif i == answer_idx:
+                    btn.setStyleSheet(
+                        f"QPushButton {{ background-color: #1A3A2A; "
+                        f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                        f"border-radius: 6px; padding: 6px 14px; "
+                        f"font-size: 12px; text-align: left; }}"
+                    )
+                else:
+                    btn.setStyleSheet(
+                        BTN_OPT
+                    )
+                btn.setEnabled(False)
+
+            if correct:
+                result_label.setText("✓ Correct!")
+                result_label.setStyleSheet(
+                    f"color: #4EC9B0; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                )
+            else:
+                result_label.setText(
+                    f"✗ Wrong — correct answer: {labels[answer_idx]}) {options[answer_idx]}"
+                )
+                result_label.setStyleSheet(
+                    f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                )
+
+                wrong_btn = QPushButton("Add to My Errors")
+                wrong_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: transparent; "
+                    f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+                    f"border-radius: 3px; padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
+                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+                )
+                q_text = q.get("question", "")
+                wrong_btn.clicked.connect(
+                    lambda checked=None, q_text=q_text, a_idx=answer_idx, opts=options:
+                    error_store.add_error(
+                        knowledge_point="quiz",
+                        question=q_text,
+                        user_answer=labels[choice_idx] if choice_idx < len(labels) else "?",
+                        correct_answer=opts[answer_idx] if 0 <= answer_idx < len(opts) else "?",
+                    )
+                )
+                layout.addWidget(wrong_btn)
+
+            result_label.setVisible(True)
+            if explanation:
+                expl_label.setVisible(True)
+
+        btns = []
+        for i, opt in enumerate(options):
+            btn = QPushButton(f"{labels[i]}) {opt}")
+            btn.setStyleSheet(BTN_OPT)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(
+                lambda checked=None, idx=i, bw=btns: on_choice(idx, bw)
             )
-        )
-        layout.addWidget(wrong_btn)
+            layout.addWidget(btn)
+            btns.append(btn)
 
         return card
 
