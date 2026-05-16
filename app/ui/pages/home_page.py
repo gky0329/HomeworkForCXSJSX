@@ -29,11 +29,11 @@ ACTION_BTN = (
 )
 
 TAB_NAMES = {
-    "Code Editor": 0,
-    "OJ Analysis": 1,
-    "File Import": 2,
-    "Review": 3,
-    "Knowledge Graph": 4,
+    "Code Editor": 1,
+    "OJ Analysis": 2,
+    "File Import": 3,
+    "Review": 4,
+    "Knowledge Graph": 5,
 }
 
 
