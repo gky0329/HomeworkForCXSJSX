@@ -1,6 +1,7 @@
 import json
 import threading
 import uuid
+import math
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -10,6 +11,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 ERRORS_PATH = DATA_DIR / "errors.json"
 KNOWLEDGE_PATH = DATA_DIR / "knowledge.json"
 ACTIVITY_PATH = DATA_DIR / "activity.json"
+SCORES_PATH = DATA_DIR / "scores.json"
 
 _lock = threading.Lock()
 
@@ -128,3 +130,57 @@ def log_activity(action: str, detail: str = ""):
 def get_recent_activity(limit: int = 8) -> list:
     items = _load(ACTIVITY_PATH)
     return items[:limit]
+
+
+def record_review_result(kp_name: str, correct: bool):
+    with _lock:
+        scores = _load(SCORES_PATH)
+        for s in scores:
+            if s["name"] == kp_name:
+                s["reviews"] = s.get("reviews", 0) + 1
+                if correct:
+                    s["correct"] = s.get("correct", 0) + 1
+                else:
+                    s["wrong"] = s.get("wrong", 0) + 1
+                s["last_reviewed"] = datetime.now(timezone.utc).isoformat()
+                _save(SCORES_PATH, scores)
+                return
+        scores.append({
+            "name": kp_name,
+            "reviews": 1,
+            "correct": 1 if correct else 0,
+            "wrong": 0 if correct else 1,
+            "last_reviewed": datetime.now(timezone.utc).isoformat(),
+        })
+        _save(SCORES_PATH, scores)
+
+
+def get_ucb_queue(c: float = 1.0) -> list[dict]:
+    scores = _load(SCORES_PATH)
+    if not scores:
+        return []
+
+    total_reviews = sum(s.get("reviews", 0) for s in scores)
+
+    result = []
+    for s in scores:
+        correct = s.get("correct", 0)
+        wrong = s.get("wrong", 0)
+        reviews = s.get("reviews", 0)
+        win_rate = (correct + 0.5) / (correct + wrong + 1.0)
+        exploration = c * math.sqrt(
+            math.log(total_reviews + 1) / max(reviews, 1)
+        )
+        ucb = win_rate + exploration
+        result.append({
+            "name": s["name"],
+            "correct": correct,
+            "wrong": wrong,
+            "reviews": reviews,
+            "win_rate": round(win_rate, 2),
+            "ucb": round(ucb, 4),
+            "last_reviewed": s.get("last_reviewed", ""),
+        })
+
+    result.sort(key=lambda x: -x["ucb"])
+    return result

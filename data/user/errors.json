@@ -73,8 +73,8 @@
     "correct_answer": "引用必须初始化",
     "context": "",
     "timestamp": "2026-05-16T02:45:43.126885+00:00",
-    "reviewed": false,
-    "review_count": 0
+    "reviewed": true,
+    "review_count": 1
   },
   {
     "id": "0ba613ff85214ab48d55b54481f16147",

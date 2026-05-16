@@ -344,6 +344,9 @@ class FileImportPage(QWidget):
 
             correct = (choice_idx == answer_idx)
 
+            kp_name = q.get("knowledge_point", "quiz")
+            error_store.record_review_result(kp_name, correct)
+
             for i, btn in enumerate(btn_widgets):
                 if i == choice_idx:
                     if correct:

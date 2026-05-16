@@ -46,6 +46,9 @@ class ReviewPage(QWidget):
         header.addWidget(self._stats_label)
         layout.addLayout(header)
 
+        self._queue_section = QVBoxLayout()
+        layout.addLayout(self._queue_section)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         left = QWidget()
@@ -138,7 +141,66 @@ class ReviewPage(QWidget):
         self._add_btn.setText("+ Add Error")
         self._add_btn.setStyleSheet("")
 
+    def _rebuild_queue(self):
+        while self._queue_section.count():
+            item = self._queue_section.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        queue = error_store.get_ucb_queue()
+        if not queue:
+            return
+
+        title = _mlabel(" Smart Review Queue", STACK_BORDER, 14, True)
+        self._queue_section.addWidget(title)
+
+        for i, item in enumerate(queue[:5]):
+            name = item["name"]
+            win = item["win_rate"]
+            ucb = item["ucb"]
+            correct = item["correct"]
+            wrong = item["wrong"]
+
+            bar_w = max(1, int(ucb * 120))
+
+            row = QFrame()
+            row.setStyleSheet(
+                f"QFrame {{ background-color: {CANVAS_BG}; "
+                f"border: 1px solid {BORDER}; border-radius: 6px; "
+                f"margin: 2px 0; padding: 6px 10px; }}"
+            )
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(8)
+
+            rank = QLabel(f"  #{i + 1}")
+            rank.setStyleSheet(f"color: {SUCCESS}; font-size: 12px; font-weight: bold;")
+            rl.addWidget(rank)
+
+            lbl = QLabel(f"{name}")
+            lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
+            rl.addWidget(lbl)
+
+            bar = QFrame()
+            bar.setFixedSize(bar_w, 8)
+            bar.setStyleSheet(
+                f"QFrame {{ background-color: {STACK_BORDER}; "
+                f"border-radius: 4px; border: none; }}"
+            )
+            rl.addWidget(bar)
+
+            rl.addStretch()
+
+            detail = QLabel(f" ✓{correct} ✗{wrong}  {int(ucb * 100)}%")
+            detail.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
+            rl.addWidget(detail)
+
+            self._queue_section.addWidget(row)
+
+        self._queue_section.addSpacing(8)
+
     def _refresh(self):
+        self._rebuild_queue()
         self._errors = error_store.get_errors()
         stats = error_store.get_all_stats()
         self._stats_label.setText(
