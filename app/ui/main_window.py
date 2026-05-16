@@ -15,6 +15,7 @@ from app.ui.pages.file_import_page import FileImportPage
 from app.ui.pages.oj_page import OJPage
 from app.ui.pages.review_page import ReviewPage
 from app.ui.pages.graph_page import GraphPage
+from app.ui.pages.home_page import HomePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 
 
@@ -103,18 +104,21 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(TAB_STYLE)
 
+        self._home_tab = self._build_home_tab()
         self._code_tab = self._build_code_tab()
         self._file_tab = self._build_file_tab()
         self._oj_tab = self._build_oj_tab()
         self._review_tab = self._build_review_tab()
         self._graph_tab = self._build_graph_tab()
 
+        self._tabs.addTab(self._home_tab, "Home")
         self._tabs.addTab(self._code_tab, "Code Editor")
         self._tabs.addTab(self._oj_tab, "OJ Analysis")
         self._tabs.addTab(self._file_tab, "File Import")
         self._tabs.addTab(self._review_tab, "Review")
         self._tabs.addTab(self._graph_tab, "Knowledge Graph")
         self._review_tab_index = self._tabs.indexOf(self._review_tab)
+        self._home_tab_index = self._tabs.indexOf(self._home_tab)
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         central = QWidget()
@@ -122,6 +126,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tabs)
         self.setCentralWidget(central)
+
+    def _build_home_tab(self) -> QWidget:
+        self.home_page = HomePage()
+        self.home_page.tab_switch_requested.connect(self._tabs.setCurrentIndex)
+        return self.home_page
 
     def _build_code_tab(self) -> QWidget:
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -179,7 +188,9 @@ class MainWindow(QMainWindow):
         return self.graph_page
 
     def _on_tab_changed(self, index: int):
-        if index == self._review_tab_index:
+        if index == self._home_tab_index:
+            self.home_page.refresh()
+        elif index == self._review_tab_index:
             self.review_page._refresh()
 
     def _on_visualize_from_file(self, code: str):

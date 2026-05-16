@@ -9,6 +9,7 @@ DATA_DIR = Path(__file__).parent.parent.parent / "data" / "user"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ERRORS_PATH = DATA_DIR / "errors.json"
 KNOWLEDGE_PATH = DATA_DIR / "knowledge.json"
+ACTIVITY_PATH = DATA_DIR / "activity.json"
 
 _lock = threading.Lock()
 
@@ -109,3 +110,21 @@ def get_all_stats() -> dict:
         "error_frequency": freq,
         "knowledge_points": len(kps),
     }
+
+
+def log_activity(action: str, detail: str = ""):
+    with _lock:
+        items = _load(ACTIVITY_PATH)
+        items.insert(0, {
+            "action": action,
+            "detail": detail,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        if len(items) > 50:
+            items = items[:50]
+        _save(ACTIVITY_PATH, items)
+
+
+def get_recent_activity(limit: int = 8) -> list:
+    items = _load(ACTIVITY_PATH)
+    return items[:limit]

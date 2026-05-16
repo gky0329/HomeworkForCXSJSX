@@ -183,7 +183,6 @@ class TrackerPanel(QWidget):
 
     def _on_clear_all(self):
         self._tracked_addresses.clear()
-        self._card_labels.clear()
         self._prev_values.clear()
         if self._current_state:
             self._rebuild_chips(self._current_state)

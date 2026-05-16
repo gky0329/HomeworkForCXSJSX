@@ -6,6 +6,7 @@ from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
+from app.services import error_store
 
 
 class Engine:
@@ -49,6 +50,7 @@ class Engine:
         if trace.steps:
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
+            error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
                 f"Ready — {len(trace.steps)} steps loaded"
             )

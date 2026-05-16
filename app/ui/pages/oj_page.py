@@ -236,6 +236,7 @@ class OJPage(QWidget):
         self._trace = trace
         self._current_index = 0
 
+        error_store.log_activity("OJ Analysis", f"Analyzed {len(trace.steps)} steps")
         self._build_analysis(analysis)
 
         if trace.steps:

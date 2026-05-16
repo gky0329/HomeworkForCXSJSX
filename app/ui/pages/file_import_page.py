@@ -233,6 +233,7 @@ class FileImportPage(QWidget):
         self._status.setText(
             f"Done: {len(kps)} knowledge points, {len(quizzes)} questions"
         )
+        error_store.log_activity("File Import", f"Extracted {len(kps)} KPs, {len(quizzes)} quizzes")
 
         if kps:
             section = QLabel(" Knowledge Points")
