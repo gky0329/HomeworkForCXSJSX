@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame, QLineEdit, QSplitter,
     QListWidget, QListWidgetItem,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QMargins
 
 from app.services import error_store
 from app.ui.theme.colors import (
@@ -81,6 +81,24 @@ class KnowledgePage(QWidget):
         )
         self._concept_list.currentRowChanged.connect(self._on_select)
         splitter.addWidget(self._concept_list)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(12, 0, 0, 0)
+
+        self._detail_label = _mlabel("Select a concept", TEXT_SECONDARY, 13)
+        right_layout.addWidget(self._detail_label)
+
+        self._detail = QFrame()
+        self._detail.setStyleSheet(
+            f"QFrame {{ background-color: {SURFACE}; "
+            f"border: 1px solid {BORDER}; border-radius: 10px; padding: 16px; }}"
+        )
+        self._detail_layout = QVBoxLayout(self._detail)
+        self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right_layout.addWidget(self._detail)
+
+        splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 5)
         layout.addWidget(splitter)
@@ -126,12 +144,29 @@ class KnowledgePage(QWidget):
 
             count = kp.get("count", 1)
             errs = kp.get("_errors", 0)
+            source = kp.get("source", "")
 
-            label = f"{name}"
+            score = kp.get("_score", {})
+            correct = score.get("correct", 0)
+            wrong = score.get("wrong", 0)
+            ucb = score.get("ucb", 0)
+
+            line1 = name
+            parts = []
+            if count:
+                parts.append(f"seen {count}×")
+            if correct or wrong:
+                parts.append(f"quiz ✓{correct} ✗{wrong}")
             if errs:
-                label += f"    [✗{errs}]"
+                parts.append(f"errors {errs}")
+            if source:
+                parts.append(f"from {source}")
+
+            label = f"{line1}\n  {' · '.join(parts) if parts else ''}"
 
             item = QListWidgetItem(label)
+            item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 4, 0, 4)))
+
             if errs > 0:
                 item.setForeground(Qt.GlobalColor.red)
             elif count > 0:
@@ -198,6 +233,10 @@ class KnowledgePage(QWidget):
                 self._detail_layout.addWidget(
                     _mlabel(f"  → {dep}", TEXT_PRIMARY, 12)
                 )
+        else:
+            self._detail_layout.addWidget(
+                _mlabel("No dependencies recorded", TEXT_SECONDARY, 11)
+            )
 
         related_errors = error_store.get_errors()
         related = [
