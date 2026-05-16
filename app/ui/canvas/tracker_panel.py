@@ -41,7 +41,7 @@ TRACK_ALL_BTN = (
     f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
 )
 CARD_STYLE = (
-    f"QFrame {{ background-color: {CANVAS_BG}; border: 1px solid {BORDER}; "
+    f"QFrame {{ background-color: #1E2A38; border: 2px solid {STACK_BORDER}; "
     f"border-radius: 8px; }}"
 )
 CARD_DESTROYED = (
@@ -62,7 +62,7 @@ class TrackerPanel(QWidget):
 
     def _setup_ui(self):
         self.setStyleSheet(PANEL_BG)
-        self.setMinimumHeight(170)
+        self.setMinimumHeight(220)
         self.setSizePolicy(
             self.sizePolicy().horizontalPolicy(),
             self.sizePolicy().verticalPolicy(),
@@ -110,24 +110,12 @@ class TrackerPanel(QWidget):
         self._chips_layout.setSpacing(8)
         layout.addWidget(self._chips_widget, 0)
 
-        self._cards_scroll = QScrollArea()
-        self._cards_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._cards_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._cards_scroll.setFixedHeight(92)
-        self._cards_scroll.setStyleSheet(
-            f"QScrollArea {{ border: none; background: transparent; }}"
-        )
         self._cards_widget = QWidget()
         self._cards_layout = QHBoxLayout(self._cards_widget)
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(10)
         self._cards_layout.addStretch()
-        self._cards_scroll.setWidget(self._cards_widget)
-        layout.addWidget(self._cards_scroll, 1)
+        layout.addWidget(self._cards_widget, 1)
 
     def set_state(self, state: MemoryState):
         self._current_state = state

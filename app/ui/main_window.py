@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(splitter, 1)
-        layout.addWidget(self.tracker_panel)
+        layout.addWidget(self.tracker_panel, 0)
         return tab
 
     def _build_file_tab(self) -> QWidget:
