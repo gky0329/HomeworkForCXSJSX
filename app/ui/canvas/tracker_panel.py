@@ -13,25 +13,25 @@ from app.ui.theme.colors import (
 
 
 PANEL_BG = (
-    f"background-color: {SURFACE}; border-top: 2px solid {BORDER};"
+    f"background-color: {SURFACE}; border-top: 2px solid {STACK_BORDER};"
 )
 
 CHIP = (
     f"QPushButton {{ background-color: {CANVAS_BG}; color: {TEXT_PRIMARY}; "
     f"border: 1px solid {BORDER}; border-radius: 8px; "
-    f"padding: 4px 12px; font-size: 12px; }}"
+    f"padding: 6px 14px; font-size: 13px; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
 )
 CHIP_TRACKED = (
     f"QPushButton {{ background-color: #1A3A5C; color: {STACK_BORDER}; "
-    f"border: 1px solid {STACK_BORDER}; border-radius: 8px; "
-    f"padding: 4px 12px; font-size: 12px; font-weight: bold; }}"
+    f"border: 2px solid {STACK_BORDER}; border-radius: 8px; "
+    f"padding: 6px 14px; font-size: 13px; font-weight: bold; }}"
     f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}"
 )
 CHIP_PTR = (
     f"QPushButton {{ background-color: #3D2916; color: {HEAP_BORDER}; "
     f"border: 1px solid {HEAP_BORDER}; border-radius: 8px; "
-    f"padding: 4px 12px; font-size: 12px; }}"
+    f"padding: 6px 14px; font-size: 13px; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; }}"
 )
 TRACK_ALL_BTN = (
@@ -50,9 +50,6 @@ CARD_DESTROYED = (
     f"border: 1px dashed {EDGE_DANGLING}; border-radius: 8px; }}"
 )
 
-HINT_COLOR = TEXT_SECONDARY
-TITLE_COLOR = STACK_BORDER
-
 
 class TrackerPanel(QWidget):
     def __init__(self, parent=None):
@@ -65,24 +62,23 @@ class TrackerPanel(QWidget):
 
     def _setup_ui(self):
         self.setStyleSheet(PANEL_BG)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(170)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(10, 8, 10, 6)
         layout.setSpacing(6)
 
         header = QHBoxLayout()
-        title = QLabel("Tracker")
+        title = QLabel(" Tracker ")
         title.setStyleSheet(
-            f"color: {TITLE_COLOR}; font-size: 12px; font-weight: bold; "
+            f"color: {STACK_BORDER}; font-size: 12px; font-weight: bold; "
             f"background: transparent; border: none;"
         )
         header.addWidget(title)
-        header.addSpacing(12)
 
-        self._hint = QLabel("")
+        self._hint = QLabel("Run code to see variables")
         self._hint.setStyleSheet(
-            f"color: {HINT_COLOR}; font-size: 11px; "
+            f"color: {TEXT_SECONDARY}; font-size: 11px; "
             f"background: transparent; border: none;"
         )
         header.addWidget(self._hint)
@@ -107,41 +103,41 @@ class TrackerPanel(QWidget):
 
         self._chips_area = QScrollArea()
         self._chips_area.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self._chips_area.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self._chips_area.setFixedHeight(38)
+        self._chips_area.setFixedHeight(40)
         self._chips_area.setStyleSheet(
             f"QScrollArea {{ border: none; background: transparent; }}"
         )
         self._chips_widget = QWidget()
         self._chips_layout = QHBoxLayout(self._chips_widget)
         self._chips_layout.setContentsMargins(0, 0, 0, 0)
-        self._chips_layout.setSpacing(6)
+        self._chips_layout.setSpacing(8)
         self._chips_layout.addStretch()
         self._chips_area.setWidget(self._chips_widget)
-        layout.addWidget(self._chips_area)
+        layout.addWidget(self._chips_area, 0)
 
         self._cards_scroll = QScrollArea()
         self._cards_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self._cards_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self._cards_scroll.setFixedHeight(96)
+        self._cards_scroll.setFixedHeight(90)
         self._cards_scroll.setStyleSheet(
             f"QScrollArea {{ border: none; background: transparent; }}"
         )
         self._cards_widget = QWidget()
         self._cards_layout = QHBoxLayout(self._cards_widget)
-        self._cards_layout.setContentsMargins(0, 4, 0, 4)
-        self._cards_layout.setSpacing(8)
+        self._cards_layout.setContentsMargins(2, 0, 2, 0)
+        self._cards_layout.setSpacing(10)
         self._cards_layout.addStretch()
         self._cards_scroll.setWidget(self._cards_widget)
-        layout.addWidget(self._cards_scroll)
+        layout.addWidget(self._cards_scroll, 1)
 
     def set_state(self, state: MemoryState):
         self._current_state = state
@@ -162,8 +158,7 @@ class TrackerPanel(QWidget):
             for var in frame.variables:
                 all_addrs.append(var.address)
                 tracked = var.address in self._tracked_addresses
-                prefix = "✓ " if tracked else "+ "
-                text = f"{prefix}{var.name} : {var.value}"
+                text = f"+ {var.name} = {var.value}" if not tracked else f"✓ {var.name} = {var.value}"
                 btn = QPushButton(text)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -184,7 +179,7 @@ class TrackerPanel(QWidget):
 
         n = len(all_addrs)
         self._hint.setText(
-            f"{n} variable(s) above — click + to pin"
+            f"  |  {n} variable(s) — click a chip to pin it"
             if n else "Run code to see variables"
         )
         self._track_all_btn.setVisible(n > 0)
@@ -195,7 +190,6 @@ class TrackerPanel(QWidget):
             self._tracked_addresses.discard(address)
         else:
             self._tracked_addresses.add(address)
-        # Rebuild chips to update prefix
         if self._current_state:
             self._rebuild_chips(self._current_state)
             self._refresh_cards()
@@ -245,9 +239,10 @@ class TrackerPanel(QWidget):
         self, var: Variable | None, frame_name: str, address: str
     ) -> QFrame:
         card = QFrame()
-        card.setFixedSize(175, 88)
+        card.setFixedSize(180, 82)
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
         vbox = QVBoxLayout(card)
-        vbox.setContentsMargins(10, 6, 10, 6)
+        vbox.setContentsMargins(10, 8, 10, 6)
         vbox.setSpacing(2)
 
         if var is None:
@@ -263,9 +258,6 @@ class TrackerPanel(QWidget):
             dl = QLabel("out of scope")
             dl.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 10px;")
             vbox.addWidget(dl)
-
-            close = self._make_close_btn(address, card)
-            close.move(card.width() - 22, 4)
             return card
 
         card.setStyleSheet(CARD_STYLE)
@@ -285,28 +277,11 @@ class TrackerPanel(QWidget):
         sl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
         vbox.addWidget(sl)
 
-        close = self._make_close_btn(address, card)
-        close.move(card.width() - 22, 4)
-
         return card
-
-    def _make_close_btn(self, address: str, parent: QFrame) -> QPushButton:
-        btn = QPushButton("✕", parent)
-        btn.setFixedSize(18, 18)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {TEXT_SECONDARY}; "
-            f"border: none; font-size: 10px; }}"
-            f"QPushButton:hover {{ color: {EDGE_DANGLING}; }}"
-        )
-        btn.clicked.connect(
-            lambda checked=None, a=address: self._toggle_track(a)
-        )
-        return btn
 
     def _addr_name(self, address: str) -> str:
         if self._current_state:
-            var, _ = self._find_var(self._current_state, address)
-            if var:
-                return var.name
+            v, _ = self._find_var(self._current_state, address)
+            if v:
+                return v.name
         return address

@@ -114,6 +114,8 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._file_tab, "File Import")
         self._tabs.addTab(self._review_tab, "Review")
         self._tabs.addTab(self._graph_tab, "Knowledge Graph")
+        self._review_tab_index = self._tabs.indexOf(self._review_tab)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -175,6 +177,10 @@ class MainWindow(QMainWindow):
     def _build_graph_tab(self) -> QWidget:
         self.graph_page = GraphPage()
         return self.graph_page
+
+    def _on_tab_changed(self, index: int):
+        if index == self._review_tab_index:
+            self.review_page._refresh()
 
     def _on_visualize_from_file(self, code: str):
         self.code_editor.setPlainText(code)

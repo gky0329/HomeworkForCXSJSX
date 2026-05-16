@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QSplitter, QFrame,
     QDialog, QLineEdit, QTextEdit, QDialogButtonBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
 from app.ui.theme.colors import (
@@ -38,9 +38,9 @@ class ReviewPage(QWidget):
         header = QHBoxLayout()
         header.addWidget(_mlabel("Error Review", STACK_BORDER, 16, True))
         header.addSpacing(12)
-        add_btn = QPushButton("+ Add Error")
-        add_btn.clicked.connect(self._on_add_error)
-        header.addWidget(add_btn)
+        self._add_btn = QPushButton("+ Add Error")
+        self._add_btn.clicked.connect(self._on_add_error)
+        header.addWidget(self._add_btn)
         header.addStretch()
         self._stats_label = _mlabel("", TEXT_SECONDARY, 12)
         header.addWidget(self._stats_label)
@@ -126,6 +126,17 @@ class ReviewPage(QWidget):
             q = q_edit.toPlainText().strip() or "Manual entry"
             error_store.add_error(kp, q, "", "", "")
             self._refresh()
+            self._add_btn.setText("✓ Added")
+            self._add_btn.setStyleSheet(
+                f"QPushButton {{ background-color: #1A3A2A; "
+                f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                f"border-radius: 3px; padding: 4px 12px; font-size: 12px; }}"
+            )
+            QTimer.singleShot(2000, self._reset_add_btn)
+
+    def _reset_add_btn(self):
+        self._add_btn.setText("+ Add Error")
+        self._add_btn.setStyleSheet("")
 
     def _refresh(self):
         self._errors = error_store.get_errors()

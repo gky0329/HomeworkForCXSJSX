@@ -1,14 +1,25 @@
 [
   {
-    "id": "40b5302427b44fa191f148774e6c6aa5",
+    "id": "25d11443310040f9bdbff52279514ce0",
     "knowledge_point": "quiz",
-    "question": "以下关于内联函数的说法，错误的是？",
-    "user_answer": "?",
-    "correct_answer": "内联函数可以递归",
+    "question": "关于友元，下列说法正确的是？",
+    "user_answer": "D",
+    "correct_answer": "友元函数可以访问类的私有成员",
     "context": "",
-    "timestamp": "2026-05-16T02:45:56.320692+00:00",
-    "reviewed": true,
-    "review_count": 1
+    "timestamp": "2026-05-16T02:52:58.048138+00:00",
+    "reviewed": false,
+    "review_count": 0
+  },
+  {
+    "id": "7fe3bc14c4624c30ab5355bdc3e0ad40",
+    "knowledge_point": "quiz",
+    "question": "关于this指针，下列说法正确的是？",
+    "user_answer": "?",
+    "correct_answer": "this指针是一个常量指针",
+    "context": "",
+    "timestamp": "2026-05-16T02:52:03.497647+00:00",
+    "reviewed": false,
+    "review_count": 0
   },
   {
     "id": "71b48e2d56ce45d0a0132ce8d8a318dc",

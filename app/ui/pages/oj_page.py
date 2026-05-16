@@ -338,13 +338,20 @@ class OJPage(QWidget):
         )
         kp_name = kp.get("name", "")
         kp_expl = kp.get("explanation", "")
-        review_btn.clicked.connect(
-            lambda checked=None, n=kp_name, e=kp_expl:
+        def save_and_feedback(btn=review_btn, n=kp_name, e=kp_expl):
             error_store.add_error(
                 knowledge_point=n, question="Manual review",
                 user_answer="Needs practice", correct_answer=e,
             )
-        )
+            btn.setText("✓ Added")
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: #1A3A2A; "
+                f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
+                f"margin-top: 4px; }}"
+            )
+            btn.setEnabled(False)
+        review_btn.clicked.connect(save_and_feedback)
         vbox.addWidget(review_btn)
 
         self._analysis_layout.addWidget(card)

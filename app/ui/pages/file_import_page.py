@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFileDialog, QScrollArea, QFrame, QComboBox,
     QSplitter,
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont
 
 from app.services.file_service import (
@@ -393,15 +393,21 @@ class FileImportPage(QWidget):
                     f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
                 )
                 q_text = q.get("question", "")
-                wrong_btn.clicked.connect(
-                    lambda checked=None, q_text=q_text, a_idx=answer_idx, opts=options:
+                def save_and_feedback(btn=wrong_btn, q_text=q_text, a_idx=answer_idx, opts=options, lbl=labels, ci=choice_idx):
                     error_store.add_error(
                         knowledge_point="quiz",
                         question=q_text,
-                        user_answer=labels[choice_idx] if choice_idx < len(labels) else "?",
-                        correct_answer=opts[answer_idx] if 0 <= answer_idx < len(opts) else "?",
+                        user_answer=lbl[ci] if ci < len(lbl) else "?",
+                        correct_answer=opts[a_idx] if 0 <= a_idx < len(opts) else "?",
                     )
-                )
+                    btn.setText("✓ Added")
+                    btn.setStyleSheet(
+                        f"QPushButton {{ background-color: #1A3A2A; "
+                        f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                        f"border-radius: 3px; padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
+                    )
+                    btn.setEnabled(False)
+                wrong_btn.clicked.connect(save_and_feedback)
                 layout.addWidget(wrong_btn)
 
             result_label.setVisible(True)
