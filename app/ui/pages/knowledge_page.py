@@ -67,35 +67,22 @@ class KnowledgePage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._concept_list = QListWidget()
+        self._concept_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._concept_list.setWordWrap(True)
         self._concept_list.setStyleSheet(
             f"QListWidget {{ background-color: {CANVAS_BG}; "
             f"border: 1px solid {BORDER}; border-radius: 8px; "
             f"color: {TEXT_PRIMARY}; font-size: 13px; }}"
-            f"QListWidget::item {{ padding: 10px 14px; "
+            f"QListWidget::item {{ padding: 10px 14px; min-height: 32px; "
             f"border-bottom: 1px solid {BORDER}; }}"
             f"QListWidget::item:selected {{ background-color: #1A3A5C; }}"
         )
         self._concept_list.currentRowChanged.connect(self._on_select)
         splitter.addWidget(self._concept_list)
-
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(12, 0, 0, 0)
-
-        self._detail_label = _mlabel("Select a concept", TEXT_SECONDARY, 13)
-        right_layout.addWidget(self._detail_label)
-
-        self._detail = QFrame()
-        self._detail.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE}; "
-            f"border: 1px solid {BORDER}; border-radius: 10px; padding: 16px; }}"
-        )
-        self._detail_layout = QVBoxLayout(self._detail)
-        self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        right_layout.addWidget(self._detail)
-
-        splitter.addWidget(right)
-        splitter.setSizes([300, 500])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 5)
         layout.addWidget(splitter)
 
         refresh_btn = QPushButton("Refresh")
