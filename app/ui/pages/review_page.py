@@ -1,14 +1,15 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QSplitter, QFrame,
-    QDialog, QLineEdit, QTextEdit, QDialogButtonBox,
+    QSplitter, QFrame, QTextEdit, QDialog, QLineEdit,
+    QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, EDGE_DANGLING, SUCCESS,
+    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS,
+    HIGHLIGHT,
 )
 
 
@@ -24,89 +25,234 @@ def _mlabel(text: str, color: str = TEXT_PRIMARY, size: int = 12,
     return label
 
 
+RATE_GOOD = (
+    f"QPushButton {{ background-color: #1A3A2A; color: {SUCCESS}; "
+    f"border: 1px solid {SUCCESS}; border-radius: 8px; "
+    f"padding: 10px 28px; font-size: 14px; font-weight: bold; }}"
+    f"QPushButton:hover {{ background-color: #2A4A3A; }}"
+)
+RATE_AGAIN = (
+    f"QPushButton {{ background-color: #3A1A1A; color: {EDGE_DANGLING}; "
+    f"border: 1px solid {EDGE_DANGLING}; border-radius: 8px; "
+    f"padding: 10px 28px; font-size: 14px; font-weight: bold; }}"
+    f"QPushButton:hover {{ background-color: #4A2A2A; }}"
+)
+CARD = (
+    f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"border-radius: 12px; }}"
+)
+REVEAL_BTN = (
+    f"QPushButton {{ background-color: {CANVAS_BG}; color: {ACCENT}; "
+    f"border: 1px solid {ACCENT}; border-radius: 8px; padding: 8px 24px; "
+    f"font-size: 13px; }}"
+    f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+)
+NOTES_STYLE = (
+    f"QTextEdit {{ background-color: {CANVAS_BG}; color: {TEXT_PRIMARY}; "
+    f"border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; "
+    f"font-size: 12px; }}"
+)
+
+
 class ReviewPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._errors: list = []
+        self._cards: list[dict] = []
+        self._current_idx = 0
+        self._answer_revealed = False
         self._setup_ui()
-        self._refresh()
+        self._load_cards()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(_mlabel("Error Review", STACK_BORDER, 16, True))
+        header.addWidget(_mlabel("Review", STACK_BORDER, 16, True))
         header.addSpacing(12)
         self._add_btn = QPushButton("+ Add Error")
         self._add_btn.clicked.connect(self._on_add_error)
         header.addWidget(self._add_btn)
+
+        self._queue_btn = QPushButton("Smart Queue")
+        self._queue_btn.clicked.connect(self._on_show_queue)
+        header.addWidget(self._queue_btn)
+
         header.addStretch()
-        self._stats_label = _mlabel("", TEXT_SECONDARY, 12)
-        header.addWidget(self._stats_label)
+        self._progress = _mlabel("", TEXT_SECONDARY, 12)
+        header.addWidget(self._progress)
         layout.addLayout(header)
 
-        self._queue_section = QVBoxLayout()
-        layout.addLayout(self._queue_section)
+        self._card_area = QVBoxLayout()
+        layout.addLayout(self._card_area, 1)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._empty_state = QVBoxLayout()
+        layout.addLayout(self._empty_state)
 
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(_mlabel("Errors", HEAP_BORDER, 13, True))
-        self._error_list = QListWidget()
-        self._error_list.setStyleSheet(
-            f"QListWidget {{ background-color: {CANVAS_BG}; "
-            f"border: 1px solid {BORDER}; border-radius: 6px; "
-            f"color: {TEXT_PRIMARY}; font-size: 12px; }}"
-            f"QListWidget::item {{ padding: 8px; border-bottom: 1px solid {BORDER}; }}"
-            f"QListWidget::item:selected {{ background-color: {SURFACE}; }}"
+        self._render_empty_or_card()
+
+    def _load_cards(self):
+        self._cards = error_store.get_due_cards()
+        self._current_idx = 0
+        self._answer_revealed = False
+        self._render_empty_or_card()
+
+    def _render_empty_or_card(self):
+        while self._card_area.count():
+            item = self._card_area.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        while self._empty_state.count():
+            item = self._empty_state.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not self._cards:
+            self._progress.setText("")
+            done = _mlabel("No cards due — great job!", SUCCESS, 14, True)
+            done.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._empty_state.addStretch()
+            self._empty_state.addWidget(done)
+            self._empty_state.addWidget(_mlabel(
+                "Come back later or add errors via OJ / File Import",
+                TEXT_SECONDARY, 12
+            ))
+            self._empty_state.addStretch()
+            return
+
+        self._render_card(self._cards[self._current_idx])
+
+    def _render_card(self, card: dict):
+        self._progress.setText(
+            f"Card {self._current_idx + 1} of {len(self._cards)}"
         )
-        self._error_list.currentRowChanged.connect(self._on_select)
-        left_layout.addWidget(self._error_list)
-        splitter.addWidget(left)
+        self._answer_revealed = False
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(8, 0, 0, 0)
-        right_layout.addWidget(_mlabel("Details", HEAP_BORDER, 13, True))
+        c = QFrame()
+        c.setStyleSheet(CARD)
+        v = QVBoxLayout(c)
+        v.setContentsMargins(20, 16, 20, 16)
+        v.setSpacing(12)
 
-        self._detail = QFrame()
-        self._detail.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE}; "
-            f"border: 1px solid {BORDER}; border-radius: 8px; padding: 12px; }}"
+        kp = card.get("knowledge_point", "")
+        if kp:
+            kpl = QLabel(kp)
+            kpl.setStyleSheet(
+                f"color: {HEAP_BORDER}; font-size: 13px; font-weight: bold; "
+                f"background-color: #3D2916; border-radius: 6px; "
+                f"padding: 4px 12px;"
+            )
+            kpl.setWordWrap(True)
+            v.addWidget(kpl)
+
+        qtext = card.get("question", "")
+        ql = QLabel(qtext)
+        ql.setWordWrap(True)
+        ql.setStyleSheet(
+            f"color: {TEXT_PRIMARY}; font-size: 16px; "
+            f"padding: 8px 0;"
         )
-        self._detail_layout = QVBoxLayout(self._detail)
-        right_layout.addWidget(self._detail)
+        v.addWidget(ql)
+
+        user_ans = card.get("user_answer", "")
+        if user_ans:
+            ul = QLabel(f"Your answer: {user_ans}")
+            ul.setStyleSheet(
+                f"color: {EDGE_DANGLING}; font-size: 12px; font-style: italic;"
+            )
+            v.addWidget(ul)
+
+        v.addStretch()
+
+        reveal_widget = QWidget()
+        reveal_widget.setObjectName("reveal_area")
+        reveal_layout = QVBoxLayout(reveal_widget)
+        reveal_layout.setContentsMargins(0, 0, 0, 0)
+        reveal_layout.setSpacing(8)
+
+        reveal_btn = QPushButton("Show Answer")
+        reveal_btn.setStyleSheet(REVEAL_BTN)
+        reveal_layout.addWidget(reveal_btn)
+
+        self._reveal_stack = QVBoxLayout()
+        reveal_layout.addLayout(self._reveal_stack)
+
+        reveal_btn.clicked.connect(
+            lambda: self._reveal_answer(card)
+        )
+
+        v.addWidget(reveal_widget)
+        self._card_area.addWidget(c)
+
+    def _reveal_answer(self, card: dict):
+        if self._answer_revealed:
+            return
+        self._answer_revealed = True
+
+        while self._reveal_stack.count():
+            item = self._reveal_stack.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        correct = card.get("correct_answer", "")
+        al = QLabel(f"Correct: {correct}")
+        al.setWordWrap(True)
+        al.setStyleSheet(
+            f"color: {SUCCESS}; font-size: 15px; font-weight: bold; "
+            f"background-color: #1A2A22; border-radius: 6px; "
+            f"padding: 12px;"
+        )
+        self._reveal_stack.addWidget(al)
+
+        notes = card.get("notes", "")
+        nl = QLabel("Notes (edit below):")
+        nl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; padding-top: 8px;")
+        self._reveal_stack.addWidget(nl)
+
+        notes_edit = QTextEdit()
+        notes_edit.setStyleSheet(NOTES_STYLE)
+        notes_edit.setPlainText(notes)
+        notes_edit.setMaximumHeight(80)
+        notes_edit.setObjectName("notes_edit")
+        notes_edit.textChanged.connect(
+            lambda: error_store.update_notes(
+                card["id"],
+                notes_edit.toPlainText(),
+            )
+        )
+        self._reveal_stack.addWidget(notes_edit)
 
         btn_row = QHBoxLayout()
-        self._review_btn = QPushButton("Mark Reviewed")
-        self._review_btn.setEnabled(False)
-        self._review_btn.clicked.connect(self._on_review)
-        btn_row.addWidget(self._review_btn)
-        self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setEnabled(False)
-        self._delete_btn.clicked.connect(self._on_delete)
-        btn_row.addWidget(self._delete_btn)
-        btn_row.addStretch()
-        right_layout.addLayout(btn_row)
+        btn_row.setSpacing(12)
 
-        splitter.addWidget(right)
-        splitter.setSizes([350, 500])
-        layout.addWidget(splitter)
+        again_btn = QPushButton("Needs Review")
+        again_btn.setStyleSheet(RATE_AGAIN)
+        again_btn.clicked.connect(
+            lambda: self._rate_and_next(card["id"], 0)
+        )
+        btn_row.addWidget(again_btn)
 
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh)
-        bottom = QHBoxLayout()
-        bottom.addStretch()
-        bottom.addWidget(refresh_btn)
-        layout.addLayout(bottom)
+        good_btn = QPushButton("Got It")
+        good_btn.setStyleSheet(RATE_GOOD)
+        good_btn.clicked.connect(
+            lambda: self._rate_and_next(card["id"], 3)
+        )
+        btn_row.addWidget(good_btn)
+
+        self._reveal_stack.addLayout(btn_row)
+
+    def _rate_and_next(self, eid: str, quality: int):
+        error_store.schedule_review(eid, quality)
+        self._cards.pop(self._current_idx)
+        if self._current_idx >= len(self._cards):
+            self._current_idx = 0
+        self._render_empty_or_card()
 
     def _on_add_error(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Error")
-        dialog.setMinimumWidth(400)
+        dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel("Knowledge Point:"))
         kp_edit = QLineEdit()
@@ -115,8 +261,12 @@ class ReviewPage(QWidget):
         layout.addWidget(QLabel("Question / Description:"))
         q_edit = QTextEdit()
         q_edit.setPlaceholderText("What did you get wrong?")
-        q_edit.setMaximumHeight(100)
+        q_edit.setMaximumHeight(80)
         layout.addWidget(q_edit)
+        layout.addWidget(QLabel("Correct Answer:"))
+        a_edit = QLineEdit()
+        a_edit.setPlaceholderText("The right answer")
+        layout.addWidget(a_edit)
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -127,8 +277,9 @@ class ReviewPage(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             kp = kp_edit.text().strip() or "manual"
             q = q_edit.toPlainText().strip() or "Manual entry"
-            error_store.add_error(kp, q, "", "", "")
-            self._refresh()
+            a = a_edit.text().strip() or ""
+            error_store.add_error(kp, q, "", a, "")
+            self._load_cards()
             self._add_btn.setText("✓ Added")
             self._add_btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; "
@@ -141,121 +292,25 @@ class ReviewPage(QWidget):
         self._add_btn.setText("+ Add Error")
         self._add_btn.setStyleSheet("")
 
-    def _rebuild_queue(self):
-        while self._queue_section.count():
-            item = self._queue_section.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
+    def _on_show_queue(self):
         queue = error_store.get_ucb_queue()
-        if not queue:
-            return
-
-        title = _mlabel(" Smart Review Queue", STACK_BORDER, 14, True)
-        self._queue_section.addWidget(title)
-
-        for i, item in enumerate(queue[:5]):
-            name = item["name"]
-            win = item["win_rate"]
-            ucb = item["ucb"]
-            correct = item["correct"]
-            wrong = item["wrong"]
-
-            bar_w = max(1, int(ucb * 120))
-
-            row = QFrame()
-            row.setStyleSheet(
-                f"QFrame {{ background-color: {CANVAS_BG}; "
-                f"border: 1px solid {BORDER}; border-radius: 6px; "
-                f"margin: 2px 0; padding: 6px 10px; }}"
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Smart Queue (UCB)")
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(_mlabel("Review Priority (UCB)", STACK_BORDER, 14, True))
+        for i, item in enumerate(queue[:8]):
+            row = QLabel(
+                f"  #{i + 1}  {item['name']}  "
+                f"[✓{item['correct']} ✗{item['wrong']}]  "
+                f"{int(item['ucb'] * 100)}%"
             )
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(8)
-
-            rank = QLabel(f"  #{i + 1}")
-            rank.setStyleSheet(f"color: {SUCCESS}; font-size: 12px; font-weight: bold;")
-            rl.addWidget(rank)
-
-            lbl = QLabel(f"{name}")
-            lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
-            rl.addWidget(lbl)
-
-            bar = QFrame()
-            bar.setFixedSize(bar_w, 8)
-            bar.setStyleSheet(
-                f"QFrame {{ background-color: {STACK_BORDER}; "
-                f"border-radius: 4px; border: none; }}"
-            )
-            rl.addWidget(bar)
-
-            rl.addStretch()
-
-            detail = QLabel(f" ✓{correct} ✗{wrong}  {int(ucb * 100)}%")
-            detail.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
-            rl.addWidget(detail)
-
-            self._queue_section.addWidget(row)
-
-        self._queue_section.addSpacing(8)
+            row.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; padding: 4px 0;")
+            layout.addWidget(row)
+        ok = QPushButton("OK")
+        ok.clicked.connect(dialog.accept)
+        layout.addWidget(ok)
+        dialog.exec()
 
     def _refresh(self):
-        self._rebuild_queue()
-        self._errors = error_store.get_errors()
-        stats = error_store.get_all_stats()
-        self._stats_label.setText(
-            f"{stats['total_errors']} total / {stats['unreviewed']} unreviewed"
-        )
-        self._error_list.clear()
-        for e in self._errors:
-            kp = e.get("knowledge_point", "?")
-            ts = e.get("timestamp", "")[:10]
-            rv = "" if e.get("reviewed") else "  [NEW]"
-            text = f"[{kp}] {e.get('question', '')[:50]}... ({ts}){rv}"
-            item = QListWidgetItem(text)
-            if e.get("reviewed"):
-                item.setForeground(Qt.GlobalColor.gray)
-            item.setData(Qt.ItemDataRole.UserRole, e.get("id", ""))
-            self._error_list.addItem(item)
-
-    def _on_select(self, idx: int):
-        if idx < 0 or idx >= len(self._errors):
-            return
-        e = self._errors[idx]
-        while self._detail_layout.count():
-            item = self._detail_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._detail_layout.addWidget(
-            _mlabel(f"Knowledge: {e.get('knowledge_point', '?')}", STACK_BORDER, 13, True)
-        )
-        self._detail_layout.addWidget(
-            _mlabel(f"Q: {e.get('question', '')}", TEXT_PRIMARY, 12)
-        )
-        self._detail_layout.addWidget(
-            _mlabel(f"Your answer: {e.get('user_answer', '')}", EDGE_DANGLING, 12)
-        )
-        self._detail_layout.addWidget(
-            _mlabel(f"Correct: {e.get('correct_answer', '')}", SUCCESS, 12)
-        )
-        self._detail_layout.addWidget(
-            _mlabel(f"Time: {e.get('timestamp', '')}", TEXT_SECONDARY, 10)
-        )
-        self._review_btn.setEnabled(not e.get("reviewed", False))
-        self._delete_btn.setEnabled(True)
-
-    def _on_review(self):
-        item = self._error_list.currentItem()
-        if item:
-            eid = item.data(Qt.ItemDataRole.UserRole)
-            if eid:
-                error_store.mark_reviewed(eid)
-                self._refresh()
-
-    def _on_delete(self):
-        item = self._error_list.currentItem()
-        if item:
-            eid = item.data(Qt.ItemDataRole.UserRole)
-            if eid:
-                error_store.delete_error(eid)
-                self._refresh()
+        self._load_cards()

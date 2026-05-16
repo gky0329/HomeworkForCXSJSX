@@ -3,7 +3,7 @@ import threading
 import uuid
 import math
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data" / "user"
@@ -32,6 +32,7 @@ def add_error(knowledge_point: str, question: str,
               user_answer: str, correct_answer: str, context: str = ""):
     with _lock:
         errors = _load(ERRORS_PATH)
+        now = datetime.now(timezone.utc)
         entry = {
             "id": uuid.uuid4().hex,
             "knowledge_point": knowledge_point,
@@ -39,9 +40,14 @@ def add_error(knowledge_point: str, question: str,
             "user_answer": user_answer,
             "correct_answer": correct_answer,
             "context": context,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
             "reviewed": False,
             "review_count": 0,
+            "n": 0,
+            "ef": 2.5,
+            "interval": 1,
+            "next_review": now.isoformat(),
+            "notes": "",
         }
         errors.insert(0, entry)
         _save(ERRORS_PATH, errors)
@@ -63,13 +69,62 @@ def get_error_frequency() -> dict[str, int]:
     return freq
 
 
-def mark_reviewed(error_id: str):
+def get_due_cards() -> list:
+    now = datetime.now(timezone.utc).isoformat()
+    errors = _load(ERRORS_PATH)
+    return [e for e in errors
+            if e.get("next_review", "") <= now]
+
+
+def schedule_review(error_id: str, quality: int):
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        for e in errors:
+            if e.get("id") != error_id:
+                continue
+            n = e.get("n", 0)
+            ef = e.get("ef", 2.5)
+            interval = e.get("interval", 1)
+
+            if quality >= 3:
+                if n == 0:
+                    interval = 1
+                elif n == 1:
+                    interval = 6
+                else:
+                    interval = round(interval * ef)
+                n += 1
+            else:
+                if n == 0:
+                    interval = 0
+                else:
+                    n = 0
+                    interval = 1
+
+            ef = ef + (0.1 - (3 - quality) * (0.08 + (3 - quality) * 0.02))
+            ef = max(1.3, ef)
+
+            if interval == 0:
+                days = datetime.now(timezone.utc)
+            else:
+                days = datetime.now(timezone.utc) + timedelta(days=max(1, interval))
+
+            e["n"] = n
+            e["ef"] = ef
+            e["interval"] = interval
+            e["next_review"] = days.isoformat()
+            e["reviewed"] = True
+            e["review_count"] = e.get("review_count", 0) + 1
+            _save(ERRORS_PATH, errors)
+            return
+
+
+def update_notes(error_id: str, notes: str):
     with _lock:
         errors = _load(ERRORS_PATH)
         for e in errors:
             if e.get("id") == error_id:
-                e["reviewed"] = True
-                e["review_count"] = e.get("review_count", 0) + 1
+                e["notes"] = notes
                 _save(ERRORS_PATH, errors)
                 return
 
