@@ -12,6 +12,7 @@ ERRORS_PATH = DATA_DIR / "errors.json"
 KNOWLEDGE_PATH = DATA_DIR / "knowledge.json"
 ACTIVITY_PATH = DATA_DIR / "activity.json"
 SCORES_PATH = DATA_DIR / "scores.json"
+DEPS_PATH = DATA_DIR / "dependencies.json"
 
 _lock = threading.Lock()
 
@@ -239,3 +240,20 @@ def get_ucb_queue(c: float = 1.0) -> list[dict]:
 
     result.sort(key=lambda x: -x["ucb"])
     return result
+
+
+def set_dependency(parent: str, child: str):
+    with _lock:
+        deps = _load(DEPS_PATH)
+        for d in deps:
+            if d["parent"] == parent and d["child"] == child:
+                return
+        deps.append({"parent": parent, "child": child})
+        _save(DEPS_PATH, deps)
+
+
+def get_dependencies(name: str) -> list[str]:
+    deps = _load(DEPS_PATH)
+    return sorted(set(
+        d["child"] for d in deps if d["parent"] == name
+    ))

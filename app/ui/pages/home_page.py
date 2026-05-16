@@ -32,7 +32,7 @@ TAB_NAMES = {
     "OJ Analysis": 2,
     "File Import": 3,
     "Review": 4,
-    "Knowledge Graph": 5,
+    "Knowledge Base": 5,
 }
 
 
@@ -80,7 +80,7 @@ class HomePage(QWidget):
         stats_row.setSpacing(12)
 
         self._error_card = self._stat_card("0", "Pending Review", "Review")
-        self._kp_card = self._stat_card("0", "Knowledge Points", "Knowledge Graph")
+        self._kp_card = self._stat_card("0", "Knowledge Points", "Knowledge Base")
         self._act_card = self._stat_card("0", "Recent Activities", None)
 
         stats_row.addWidget(self._error_card)

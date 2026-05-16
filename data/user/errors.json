@@ -8,11 +8,11 @@
     "context": "",
     "timestamp": "2026-05-16T08:30:03.498388+00:00",
     "reviewed": true,
-    "review_count": 1,
-    "n": 0,
-    "ef": 2.1799999999999997,
-    "interval": 0,
-    "next_review": "2026-05-16T08:30:03.498604+00:00",
+    "review_count": 2,
+    "n": 1,
+    "ef": 2.28,
+    "interval": 1,
+    "next_review": "2026-05-17T08:35:22.811780+00:00",
     "notes": ""
   },
   {
@@ -39,12 +39,12 @@
     "correct_answer": "address",
     "context": "",
     "timestamp": "2026-05-16T08:30:03.497623+00:00",
-    "reviewed": false,
-    "review_count": 0,
-    "n": 0,
-    "ef": 2.5,
+    "reviewed": true,
+    "review_count": 1,
+    "n": 1,
+    "ef": 2.6,
     "interval": 1,
-    "next_review": "2026-05-16T08:30:03.497623+00:00",
+    "next_review": "2026-05-17T08:35:25.882563+00:00",
     "notes": ""
   }
 ]
