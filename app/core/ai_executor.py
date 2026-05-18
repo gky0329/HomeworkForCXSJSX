@@ -31,15 +31,20 @@ class AIExecutor:
             return await self.run_code(code)
         except Exception as e:
             logger.warning(f"LLM execution failed: {e}")
-            fallback = self._load_fallback(code)
+            fallback = self._load_fallback()
             if fallback:
                 return fallback
             raise
 
-    def _load_fallback(self, code: str) -> ExecutionTrace | None:
+    def _load_fallback(self) -> ExecutionTrace | None:
         fallback_path = FALLBACK_DIR / "default.json"
         if not fallback_path.exists():
+            logger.debug("No fallback trace available")
             return None
-        with open(fallback_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return ExecutionTrace.model_validate(data)
+        try:
+            with open(fallback_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ExecutionTrace.model_validate(data)
+        except Exception as e:
+            logger.warning(f"Fallback load failed: {e}")
+            return None
