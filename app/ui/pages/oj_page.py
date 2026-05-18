@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QSplitter, QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QColor, QPainter
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent
 
 from app.core.memory_model import ExecutionTrace
 from app.core.state_diff import StateDiffEngine
@@ -161,7 +161,7 @@ class OJPage(QWidget):
         canvas_layout = QVBoxLayout(canvas_widget)
         canvas_layout.setContentsMargins(0, 0, 0, 0)
 
-        self._canvas_view = QGraphicsView()
+        self._canvas_view = self._create_canvas_view()
         self._canvas_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._canvas_view.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
@@ -440,3 +440,10 @@ class OJPage(QWidget):
             self._trace is not None and self._current_index + 1 < total
         )
         self._step_info.setText(f"Step {current}/{total}")
+
+    @staticmethod
+    def _create_canvas_view() -> QGraphicsView:
+        class _OJCanvasView(QGraphicsView):
+            def wheelEvent(self, event: QWheelEvent):
+                event.accept()
+        return _OJCanvasView()

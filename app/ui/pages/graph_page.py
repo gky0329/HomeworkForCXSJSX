@@ -71,7 +71,10 @@ class GraphPage(QWidget):
         header.addWidget(self._stats_label)
         layout.addLayout(header)
 
-        self._view = QGraphicsView()
+        cls = type("_GraphCanvas", (QGraphicsView,), {
+            "wheelEvent": lambda self, e: e.accept(),
+        })
+        self._view = cls()
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._view.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
