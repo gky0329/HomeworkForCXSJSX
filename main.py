@@ -37,9 +37,6 @@ def main():
     if not has_api_key(config):
         show_api_key_dialog()
 
-    if os.environ.get("QT_SCALE_FACTOR"):
-        os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-
     config_path = Path(__file__).parent / "config.yaml"
 
     window = MainWindow(config_path)
