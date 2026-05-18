@@ -315,7 +315,9 @@ class TrackerPanel(QWidget):
             )
 
             def restore(addr=addr, lbl=value_label, card=card):
-                if addr in self._current_state:
+                if self._cards.get(addr) is not card:
+                    return
+                if self._current_state is not None:
                     v, _ = self._find_var(self._current_state, addr)
                     if v:
                         lbl.setText(f"{v.type}  =  {v.value}")
