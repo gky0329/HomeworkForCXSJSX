@@ -24,6 +24,8 @@
 - 用户输入测试输入 → 编译运行 → 对比预期输出
 - 错误 diff 展示
 - 性能分析（时间/内存）
+- **AI 自动生成 Reference Code**：用户仅粘贴 Problem Description 时，AI 生成参考答案代码并自动填入右侧 Reference Code 编辑器
+- **多模型路由**：不同任务选用不同模型（代码执行 Trace 用 DeepSeek-Flash 性价比高，OJ 解答/代码生成用 DeepSeek-V4-Pro 保证质量）
 
 ### 1.5 可视化更多 C++ 概念
 | 概念 | 可视化方式 |

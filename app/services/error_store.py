@@ -14,7 +14,7 @@ ACTIVITY_PATH = DATA_DIR / "activity.json"
 SCORES_PATH = DATA_DIR / "scores.json"
 DEPS_PATH = DATA_DIR / "dependencies.json"
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 
 def _load(path: Path) -> list:
@@ -55,26 +55,29 @@ def add_error(knowledge_point: str, question: str,
 
 
 def get_errors(reviewed: Optional[bool] = None) -> list:
-    errors = _load(ERRORS_PATH)
-    if reviewed is not None:
-        errors = [e for e in errors if e.get("reviewed", False) == reviewed]
-    return sorted(errors, key=lambda e: e.get("timestamp", ""), reverse=True)
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        if reviewed is not None:
+            errors = [e for e in errors if e.get("reviewed", False) == reviewed]
+        return sorted(errors, key=lambda e: e.get("timestamp", ""), reverse=True)
 
 
 def get_error_frequency() -> dict[str, int]:
-    errors = get_errors()
-    freq: dict[str, int] = {}
-    for e in errors:
-        kp = e.get("knowledge_point", "unknown")
-        freq[kp] = freq.get(kp, 0) + 1
-    return freq
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        freq: dict[str, int] = {}
+        for e in errors:
+            kp = e.get("knowledge_point", "unknown")
+            freq[kp] = freq.get(kp, 0) + 1
+        return freq
 
 
 def get_due_cards() -> list:
     now = datetime.now(timezone.utc).isoformat()
-    errors = _load(ERRORS_PATH)
-    return [e for e in errors
-            if e.get("next_review", "") <= now]
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        return [e for e in errors
+                if e.get("next_review", "") <= now]
 
 
 def schedule_review(error_id: str, quality: int):
@@ -155,19 +158,25 @@ def add_knowledge_point(name: str, source: str = ""):
 
 
 def get_knowledge_points() -> list:
-    return _load(KNOWLEDGE_PATH)
+    with _lock:
+        return _load(KNOWLEDGE_PATH)
 
 
 def get_all_stats() -> dict:
-    errors = get_errors()
-    freq = get_error_frequency()
-    kps = get_knowledge_points()
-    return {
-        "total_errors": len(errors),
-        "unreviewed": len([e for e in errors if not e.get("reviewed", False)]),
-        "error_frequency": freq,
-        "knowledge_points": len(kps),
-    }
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        unreviewed = len([e for e in errors if not e.get("reviewed", False)])
+        freq: dict[str, int] = {}
+        for e in errors:
+            kp = e.get("knowledge_point", "unknown")
+            freq[kp] = freq.get(kp, 0) + 1
+        kps = _load(KNOWLEDGE_PATH)
+        return {
+            "total_errors": len(errors),
+            "unreviewed": unreviewed,
+            "error_frequency": freq,
+            "knowledge_points": len(kps),
+        }
 
 
 def log_activity(action: str, detail: str = ""):
@@ -184,8 +193,9 @@ def log_activity(action: str, detail: str = ""):
 
 
 def get_recent_activity(limit: int = 8) -> list:
-    items = _load(ACTIVITY_PATH)
-    return items[:limit]
+    with _lock:
+        items = _load(ACTIVITY_PATH)
+        return items[:limit]
 
 
 def record_review_result(kp_name: str, correct: bool):
@@ -212,34 +222,35 @@ def record_review_result(kp_name: str, correct: bool):
 
 
 def get_ucb_queue(c: float = 1.0) -> list[dict]:
-    scores = _load(SCORES_PATH)
-    if not scores:
-        return []
+    with _lock:
+        scores = _load(SCORES_PATH)
+        if not scores:
+            return []
 
-    total_reviews = sum(s.get("reviews", 0) for s in scores)
+        total_reviews = sum(s.get("reviews", 0) for s in scores)
 
-    result = []
-    for s in scores:
-        correct = s.get("correct", 0)
-        wrong = s.get("wrong", 0)
-        reviews = s.get("reviews", 0)
-        win_rate = (correct + 0.5) / (correct + wrong + 1.0)
-        exploration = c * math.sqrt(
-            math.log(total_reviews + 1) / max(reviews, 1)
-        )
-        ucb = win_rate + exploration
-        result.append({
-            "name": s["name"],
-            "correct": correct,
-            "wrong": wrong,
-            "reviews": reviews,
-            "win_rate": round(win_rate, 2),
-            "ucb": round(ucb, 4),
-            "last_reviewed": s.get("last_reviewed", ""),
-        })
+        result = []
+        for s in scores:
+            correct = s.get("correct", 0)
+            wrong = s.get("wrong", 0)
+            reviews = s.get("reviews", 0)
+            win_rate = (correct + 0.5) / (correct + wrong + 1.0)
+            exploration = c * math.sqrt(
+                math.log(total_reviews + 1) / max(reviews, 1)
+            )
+            ucb = win_rate + exploration
+            result.append({
+                "name": s["name"],
+                "correct": correct,
+                "wrong": wrong,
+                "reviews": reviews,
+                "win_rate": round(win_rate, 2),
+                "ucb": round(ucb, 4),
+                "last_reviewed": s.get("last_reviewed", ""),
+            })
 
-    result.sort(key=lambda x: -x["ucb"])
-    return result
+        result.sort(key=lambda x: -x["ucb"])
+        return result
 
 
 def set_dependency(parent: str, child: str):
@@ -253,7 +264,8 @@ def set_dependency(parent: str, child: str):
 
 
 def get_dependencies(name: str) -> list[str]:
-    deps = _load(DEPS_PATH)
-    return sorted(set(
-        d["child"] for d in deps if d["parent"] == name
-    ))
+    with _lock:
+        deps = _load(DEPS_PATH)
+        return sorted(set(
+            d["child"] for d in deps if d["parent"] == name
+        ))

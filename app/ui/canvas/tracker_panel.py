@@ -122,12 +122,26 @@ class TrackerPanel(QWidget):
         self._rebuild_chips(state)
         self._refresh_cards()
 
-    def _rebuild_chips(self, state: MemoryState):
+    def clear(self):
+        self._current_state = None
+        self._tracked_addresses.clear()
+        self._prev_values.clear()
+        self._rebuild_chips(None)
+        self._refresh_cards()
+
+    def _rebuild_chips(self, state: MemoryState | None):
         while self._chips_layout.count():
             item = self._chips_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._chip_buttons.clear()
+
+        if state is None:
+            self._hint.setText("Run code to see variables")
+            self._track_all_btn.setVisible(False)
+            self._clear_all_btn.setVisible(False)
+            self._chips_layout.addStretch()
+            return
 
         all_addrs = []
         for frame in state.stack:

@@ -402,14 +402,11 @@ class OJPage(QWidget):
     def _on_prev(self):
         if self._trace is None or self._current_index <= 0:
             return
-        prev_state = self._trace.steps[self._current_index]
         self._current_index -= 1
         curr_state = self._trace.steps[self._current_index]
-        diff = self._diff_engine.diff(prev_state, curr_state)
         self._animator.stop_all()
         self._memory_canvas.clear()
         self._memory_canvas.render_state(curr_state)
-        self._animator.animate_diff(diff)
         self._update_controls()
 
     def _on_next(self):

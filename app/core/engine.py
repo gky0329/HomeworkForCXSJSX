@@ -45,9 +45,9 @@ class Engine:
     def _on_trace_ready(self, trace: ExecutionTrace):
         self._window.show_loading(False)
         self._trace = trace
-        self._current_index = 0
 
         if trace.steps:
+            self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
@@ -55,6 +55,7 @@ class Engine:
                 f"Ready — {len(trace.steps)} steps loaded"
             )
         else:
+            self._current_index = -1
             self._window.statusBar().showMessage("AI returned empty trace")
 
         self._update_controls()
@@ -96,6 +97,7 @@ class Engine:
         self._current_index = -1
         self._animator.stop_all()
         self._canvas.clear()
+        self._window.tracker_panel.clear()
         self._window.step_label.setText("Ready")
         self._update_controls()
 

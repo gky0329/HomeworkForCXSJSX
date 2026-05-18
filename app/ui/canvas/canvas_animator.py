@@ -53,8 +53,8 @@ class CanvasAnimator:
     def _check_done(self, gen: int):
         if gen != self._generation:
             return
-        self._pending -= 1
-        if self._pending <= 0 and self._on_finished:
+        self._pending = max(0, self._pending - 1)
+        if self._pending == 0 and self._on_finished:
             cb = self._on_finished
             self._on_finished = None
             cb()

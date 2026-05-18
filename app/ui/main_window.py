@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
 
     def _on_visualize_from_file(self, code: str):
         self.code_editor.setPlainText(code)
-        self._tabs.setCurrentIndex(0)
+        self._tabs.setCurrentWidget(self._code_tab)
         self.statusBar().showMessage("Code loaded from PDF — click Run to visualize")
 
     def _setup_overlay(self):

@@ -49,6 +49,15 @@ class GraphPage(QWidget):
         self._setup_ui()
         self._refresh()
 
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        if self._nodes:
+            self._timer.start(30)
+        super().showEvent(event)
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
