@@ -1,5 +1,6 @@
 import json
 import os
+import asyncio
 import httpx
 import yaml
 from pathlib import Path
@@ -63,13 +64,20 @@ class AIService:
                     parsed = json.loads(content)
                     return json.dumps(parsed, ensure_ascii=False)
 
+            except httpx.TimeoutException as e:
+                last_error = RuntimeError(f"Request timed out: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if attempt < max_retries:
+                    await asyncio.sleep(1)
                     continue
             except (json.JSONDecodeError, KeyError) as e:
                 last_error = e
                 if attempt < max_retries:
+                    await asyncio.sleep(1)
                     continue
 
         raise RuntimeError(
