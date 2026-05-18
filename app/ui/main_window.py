@@ -192,6 +192,8 @@ class MainWindow(QMainWindow):
             self.home_page.refresh()
         elif index == self._review_tab_index:
             self.review_page._refresh()
+        if self._overlay.isVisible():
+            self._overlay.setGeometry(self.centralWidget().rect())
 
     def _on_visualize_from_file(self, code: str):
         self.code_editor.setPlainText(code)
