@@ -147,7 +147,7 @@ class FileImportPage(QWidget):
         self._preview = QPlainTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setPlaceholderText("File content appears here after upload...")
-        self._preview.setFont(QFont("JetBrains Mono", 11))
+        self._preview.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         splitter.addWidget(self._preview)
 
         right = QWidget()
@@ -288,7 +288,7 @@ class FileImportPage(QWidget):
             cf_layout.setContentsMargins(6, 4, 6, 4)
 
             code_label = QLabel(code)
-            code_label.setFont(QFont("JetBrains Mono", 11))
+            code_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
             code_label.setStyleSheet(
                 f"color: {TEXT_PRIMARY}; background: transparent; border: none;"
             )

@@ -26,15 +26,15 @@ class HeapItem(QGraphicsRectItem):
 
         self._addr_label = QGraphicsTextItem(self)
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
-        self._addr_label.setFont(QFont("JetBrains Mono", 9, QFont.Weight.Bold))
+        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
 
         self._type_label = QGraphicsTextItem(self)
         self._type_label.setDefaultTextColor(QColor(HEAP_TEXT))
-        self._type_label.setFont(QFont("JetBrains Mono", 10))
+        self._type_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
 
         self._value_label = QGraphicsTextItem(self)
         self._value_label.setDefaultTextColor(QColor(HEAP_TEXT))
-        self._value_label.setFont(QFont("JetBrains Mono", 11, QFont.Weight.Bold))
+        self._value_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11, QFont.Weight.Bold))
 
         self._rebuild_labels()
 

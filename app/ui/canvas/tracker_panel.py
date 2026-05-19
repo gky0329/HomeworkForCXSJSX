@@ -271,7 +271,7 @@ class TrackerPanel(QWidget):
         vbox.addWidget(nl)
 
         il = QLabel(f"{var.type}  =  {var.value}")
-        il.setFont(QFont("JetBrains Mono", 10))
+        il.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
         il.setStyleSheet(f"color: {TEXT_PRIMARY};")
         vbox.addWidget(il)
         il.setObjectName("value_label")

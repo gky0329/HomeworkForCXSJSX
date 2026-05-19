@@ -14,7 +14,7 @@ class VarItem(QGraphicsTextItem):
         self.variable = variable
         self.address = variable.address
         self.setDefaultTextColor(QColor(STACK_VAR_TEXT))
-        self.setFont(QFont("JetBrains Mono", 11))
+        self.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         self._update_text()
 
     def _update_text(self):
@@ -47,7 +47,7 @@ class StackItem(QGraphicsRectItem):
 
         self._title_item = QGraphicsTextItem(self)
         self._title_item.setDefaultTextColor(QColor(STACK_TITLE))
-        self._title_item.setFont(QFont("JetBrains Mono", 11, QFont.Weight.Bold))
+        self._title_item.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11, QFont.Weight.Bold))
 
         self._build(frame)
 

@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
             "*p = 200;\n"
             "delete p;\n"
         )
-        self.code_editor.setFont(QFont("JetBrains Mono", 14))
+        self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 14))
         self.code_editor.setPlaceholderText("// Enter C++ code here...")
 
         self.canvas_view = CanvasView()

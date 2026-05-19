@@ -35,7 +35,7 @@ class GraphNode(QGraphicsEllipseItem):
 
         self._text = QGraphicsTextItem(label, self)
         self._text.setDefaultTextColor(QColor("#FFFFFF"))
-        self._text.setFont(QFont("JetBrains Mono", 10))
+        self._text.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
         trect = self._text.boundingRect()
         self._text.setPos(-trect.width() / 2, -trect.height() / 2)
 
@@ -132,7 +132,7 @@ class GraphPage(QWidget):
                 "No data yet — use OJ Analysis or File Import to build knowledge"
             )
             placeholder.setDefaultTextColor(QColor(TEXT_PRIMARY))
-            placeholder.setFont(QFont("JetBrains Mono", 14))
+            placeholder.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 14))
             placeholder.setPos(-250, -20)
             self._scene.addItem(placeholder)
             return

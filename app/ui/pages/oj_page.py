@@ -112,7 +112,7 @@ class OJPage(QWidget):
         self._problem_edit.setPlaceholderText(
             "Paste OJ problem description here..."
         )
-        self._problem_edit.setFont(QFont("JetBrains Mono", 12))
+        self._problem_edit.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 12))
         problem_layout.addWidget(self._problem_edit)
         input_splitter.addWidget(problem_widget)
 
@@ -124,7 +124,7 @@ class OJPage(QWidget):
         self._code_edit.setPlaceholderText(
             "// Enter C++ solution code\n"
         )
-        self._code_edit.setFont(QFont("JetBrains Mono", 12))
+        self._code_edit.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 12))
         code_layout.addWidget(self._code_edit)
         input_splitter.addWidget(code_widget)
 
@@ -324,7 +324,7 @@ class OJPage(QWidget):
             cl = QVBoxLayout(cf)
             cl.setContentsMargins(6, 4, 6, 4)
             c = QLabel(code)
-            c.setFont(QFont("JetBrains Mono", 11))
+            c.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
             c.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
             cl.addWidget(c)
             vbox.addWidget(cf)
@@ -385,7 +385,7 @@ class OJPage(QWidget):
             cl = QVBoxLayout(cf)
             cl.setContentsMargins(6, 4, 6, 4)
             c = QLabel(code)
-            c.setFont(QFont("JetBrains Mono", 11))
+            c.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
             c.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
             c.setWordWrap(True)
             cl.addWidget(c)
