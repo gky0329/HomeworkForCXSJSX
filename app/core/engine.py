@@ -34,6 +34,13 @@ class Engine:
             self._window.statusBar().showMessage("No code to run")
             return
 
+        if self._worker is not None and self._worker.isRunning():
+            try:
+                self._worker.finished.disconnect(self._on_trace_ready)
+                self._worker.error.disconnect(self._on_trace_error)
+            except Exception:
+                pass
+
         self._window.show_loading(True)
         self._window.statusBar().showMessage("Sending code to AI...")
 
