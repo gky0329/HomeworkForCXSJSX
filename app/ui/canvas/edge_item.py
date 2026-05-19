@@ -15,6 +15,7 @@ class EdgeItem(QGraphicsPathItem):
         self.target_addr = target_addr
         self._is_dangling = is_dangling
         self._address_map = address_map
+        self._arrow_polygon = QPolygonF()
         self.recalc()
 
     def recalc(self):
