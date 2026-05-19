@@ -215,12 +215,13 @@ class ReviewPage(QWidget):
         notes_edit.setPlainText(notes)
         notes_edit.setMaximumHeight(80)
         notes_edit.setObjectName("notes_edit")
-        notes_edit.textChanged.connect(
-            lambda: error_store.update_notes(
-                card["id"],
-                notes_edit.toPlainText(),
-            )
-        )
+        save_timer = QTimer()
+        save_timer.setSingleShot(True)
+        save_timer.setInterval(600)
+        def debounced_save():
+            error_store.update_notes(card["id"], notes_edit.toPlainText())
+        save_timer.timeout.connect(debounced_save)
+        notes_edit.textChanged.connect(save_timer.start)
         self._reveal_stack.addWidget(notes_edit)
 
         btn_row = QHBoxLayout()
