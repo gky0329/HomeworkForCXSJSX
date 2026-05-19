@@ -44,6 +44,7 @@ class CanvasAnimator:
         self._animate_modified_vars(diff)
         self._animate_modified_heap(diff)
         self._animate_freed_heap(diff)
+        self._animate_removed_edges(diff)
 
         if self._pending == 0 and self._on_finished:
             cb = self._on_finished
@@ -142,6 +143,28 @@ class CanvasAnimator:
             item.setOpacity(0.4)
         else:
             item.setOpacity(0.4 + (t - 0.5) * 2 * 0.6)
+
+    def _animate_removed_edges(self, diff: DiffResult):
+        for edge in diff.removed_edges:
+            items = [
+                e for e in self._canvas.get_edge_items()
+                if e.source_addr == edge.source_address
+                and e.target_addr == edge.target_address
+            ]
+            for item in items:
+                item.setOpacity(1.0)
+                self._pending += 1
+                self._tween(
+                    duration_ms=400,
+                    on_update=lambda t, it=item: (
+                        None if not self._alive(it) else it.setOpacity(1.0 - t)
+                    ),
+                    on_finish=lambda it=item: self._safe_remove_edge(it),
+                )
+
+    def _safe_remove_edge(self, item):
+        if self._alive(item) and item.scene() is not None:
+            item.scene().removeItem(item)
 
     def _animate_freed_heap(self, diff: DiffResult):
         for block in diff.freed_heap:
