@@ -63,7 +63,7 @@ def _extract_markdown(path: Path) -> str:
 def _extract_code(path: Path) -> str:
     raw = path.read_text(encoding="utf-8", errors="replace")
     lines = [l.rstrip() for l in raw.splitlines()
-             if not l.strip().startswith("//") and not l.strip().startswith("#")]
+             if not l.strip().startswith("//")]
     return "\n".join(lines)
 
 
