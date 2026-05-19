@@ -64,6 +64,11 @@ class AIService:
                     parsed = json.loads(content)
                     return json.dumps(parsed, ensure_ascii=False)
 
+            except httpx.ConnectError as e:
+                last_error = RuntimeError(f"Cannot reach API — check network: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
             except httpx.TimeoutException as e:
                 last_error = RuntimeError(f"Request timed out: {e}")
                 if attempt < max_retries:

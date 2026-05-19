@@ -63,6 +63,8 @@ class Engine:
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
         self._window.statusBar().showMessage(f"Error: {error_msg}")
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(self._window, "Execution Error", error_msg)
 
     def _on_next(self):
         if self._trace is None or self._current_index + 1 >= len(self._trace.steps):
