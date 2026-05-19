@@ -4,7 +4,6 @@ import uuid
 import math
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data" / "user"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,7 +53,7 @@ def add_error(knowledge_point: str, question: str,
         _save(ERRORS_PATH, errors)
 
 
-def get_errors(reviewed: Optional[bool] = None) -> list:
+def get_errors(reviewed: bool | None = None) -> list:
     with _lock:
         errors = _load(ERRORS_PATH)
         if reviewed is not None:

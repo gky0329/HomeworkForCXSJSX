@@ -4,11 +4,10 @@ import asyncio
 import httpx
 import yaml
 from pathlib import Path
-from typing import Optional
 
 
 class AIService:
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         if config_path is None:
             config_path = Path(__file__).parent.parent.parent / "config.yaml"
 

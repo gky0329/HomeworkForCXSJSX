@@ -144,3 +144,13 @@ OJ_USER_TEMPLATE = """请分析以下 OJ 题目：
 ```cpp
 {code}
 ```"""
+
+OJ_AUTOGEN_TEMPLATE = """请为以下 OJ 题目生成 C++ 解答代码，并执行分析：
+
+【题目描述】
+{problem}
+
+要求：
+1. 首先生成一段完整的 C++ 解答代码
+2. 对该代码逐行分析内存变化，输出 ExecutionTrace
+3. 在 reference_answers 中放入你生成的代码"""

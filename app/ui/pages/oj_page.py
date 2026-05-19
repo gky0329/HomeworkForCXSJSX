@@ -17,7 +17,7 @@ from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.services.ai_service import AIService
 from app.services import error_store
-from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE
+from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ_AUTOGEN_TEMPLATE
 from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -58,10 +58,17 @@ class OJWorker(QThread):
     def run(self):
         try:
             service = AIService(self._config_path)
-            user_msg = OJ_USER_TEMPLATE.format(
-                problem=self._problem[:3000],
-                code=self._code[:5000],
-            )
+            if self._code.strip():
+                template = OJ_USER_TEMPLATE
+                user_msg = template.format(
+                    problem=self._problem[:3000],
+                    code=self._code[:5000],
+                )
+            else:
+                template = OJ_AUTOGEN_TEMPLATE
+                user_msg = template.format(
+                    problem=self._problem[:3000],
+                )
             raw = asyncio.run(service.chat_json(
                 system_prompt=OJ_SYSTEM_PROMPT,
                 user_message=user_msg,
@@ -91,6 +98,7 @@ class OJPage(QWidget):
         self._worker: OJWorker | None = None
         self._trace: ExecutionTrace | None = None
         self._current_index = -1
+        self._autogen = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -215,6 +223,7 @@ class OJPage(QWidget):
 
         self._run_btn.setEnabled(False)
         self._run_btn.setText("Analyzing...")
+        self._autogen = not code
 
         self._worker = OJWorker(problem, code, self._config_path)
         self._worker.finished.connect(self._on_result)
@@ -236,6 +245,14 @@ class OJPage(QWidget):
 
         self._trace = trace
         self._current_index = 0
+
+        if self._autogen:
+            refs = analysis.get("reference_answers", [])
+            if refs:
+                gen_code = refs[0].get("code", "") or refs[0].get("explanation", "")
+                if gen_code:
+                    self._code_edit.setPlainText(gen_code)
+                    self._autogen = False
 
         error_store.log_activity("OJ Analysis", f"Analyzed {len(trace.steps)} steps")
         self._build_analysis(analysis)

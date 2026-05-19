@@ -1,4 +1,3 @@
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.core.memory_model import (
@@ -64,7 +63,7 @@ class StateDiffEngine:
     def _build_edge_map(state: MemoryState) -> dict[tuple[str, str], PointerEdge]:
         return {(e.source_address, e.target_address): e for e in state.edges}
 
-    def diff(self, prev: Optional[MemoryState], curr: MemoryState) -> DiffResult:
+    def diff(self, prev: MemoryState | None, curr: MemoryState) -> DiffResult:
         if prev is None:
             return DiffResult(
                 added_vars=self._all_vars(curr),
