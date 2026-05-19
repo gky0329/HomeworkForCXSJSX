@@ -1,6 +1,6 @@
 import subprocess
+import sys
 import tempfile
-import os
 from pathlib import Path
 
 
@@ -32,17 +32,21 @@ def _find_compiler() -> str | None:
 def compile_and_run(code: str, test_cases: list[dict]) -> dict:
     compiler = _find_compiler()
     if compiler is None:
-        return {
-            "compile": CompileResult(
-                False, "",
-                "No C++ compiler found. Install g++ or clang++."
-            ),
-            "tests": [],
-        }
+        if sys.platform == "win32":
+            msg = (
+                "No C++ compiler found.\n\n"
+                "On Windows, install MinGW-w64:\n"
+                "  https://winlibs.com\n"
+                "Or enable WSL and run the app there."
+            )
+        else:
+            msg = "No C++ compiler found. Install g++ or clang++."
+        return {"compile": CompileResult(False, "", msg), "tests": []}
 
     with tempfile.TemporaryDirectory() as tmpdir:
         src = Path(tmpdir) / "solution.cpp"
-        binary = Path(tmpdir) / "a.out"
+        ext = ".exe" if sys.platform == "win32" else ""
+        binary = Path(tmpdir) / f"a{ext}"
         src.write_text(code, encoding="utf-8")
 
         compile_proc = subprocess.run(
