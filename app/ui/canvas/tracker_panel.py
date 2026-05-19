@@ -245,7 +245,8 @@ class TrackerPanel(QWidget):
         self, var: Variable | None, frame_name: str, address: str
     ) -> QFrame:
         card = QFrame()
-        card.setFixedSize(180, 82)
+        card.setFixedWidth(220)
+        card.setMinimumHeight(82)
         vbox = QVBoxLayout(card)
         vbox.setContentsMargins(10, 8, 10, 6)
         vbox.setSpacing(2)
@@ -272,6 +273,7 @@ class TrackerPanel(QWidget):
 
         il = QLabel(f"{var.type}  =  {var.value}")
         il.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+        il.setWordWrap(True)
         il.setStyleSheet(f"color: {TEXT_PRIMARY};")
         vbox.addWidget(il)
         il.setObjectName("value_label")
