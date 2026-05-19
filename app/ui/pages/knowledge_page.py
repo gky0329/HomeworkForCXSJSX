@@ -84,7 +84,13 @@ class KnowledgePage(QWidget):
         )
         self._detail_layout = QVBoxLayout(self._detail)
         self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        right_layout.addWidget(self._detail)
+        detail_scroll = QScrollArea()
+        detail_scroll.setWidgetResizable(True)
+        detail_scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: transparent; }}"
+        )
+        detail_scroll.setWidget(self._detail)
+        right_layout.addWidget(detail_scroll)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 3)
@@ -153,7 +159,7 @@ class KnowledgePage(QWidget):
             label = f"{line1}\n  {' · '.join(parts) if parts else ''}"
 
             item = QListWidgetItem(label)
-            item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 4, 0, 4)))
+            item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 6, 0, 6)))
 
             if errs > 0:
                 item.setForeground(Qt.GlobalColor.red)
