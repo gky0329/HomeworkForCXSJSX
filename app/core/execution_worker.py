@@ -22,7 +22,7 @@ class ExecutionWorker(QThread):
     def run(self):
         try:
             executor = AIExecutor(self._config_path)
-            trace = asyncio.run(executor.run_code_with_fallback(self._code))
+            trace = asyncio.run(executor.run_code(self._code))
             self.finished.emit(trace)
         except Exception as e:
             logger.exception("ExecutionWorker failed")
