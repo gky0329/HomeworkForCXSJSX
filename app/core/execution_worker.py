@@ -25,5 +25,5 @@ class ExecutionWorker(QThread):
             trace = asyncio.run(executor.run_code(self._code))
             self.finished.emit(trace)
         except Exception as e:
-            logger.exception("ExecutionWorker failed")
+            logger.error("Execution failed: %s", e)
             self.error.emit(str(e))

@@ -79,7 +79,7 @@ class OJWorker(QThread):
                 },
             })
         except Exception as e:
-            logger.exception("OJWorker failed")
+            logger.error("OJWorker failed: %s", e)
             self.error.emit(str(e))
 
 

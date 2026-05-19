@@ -86,7 +86,7 @@ class ProcessWorker(QThread):
             data = json.loads(raw)
             self.finished.emit(data)
         except Exception as e:
-            logger.exception("ProcessWorker failed")
+            logger.error("ProcessWorker failed: %s", e)
             self.error.emit(str(e))
 
 
