@@ -4,7 +4,7 @@ import random
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsView,
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
-    QPushButton,
+    QGraphicsLineItem, QPushButton,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
@@ -44,6 +44,7 @@ class GraphPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nodes: list[GraphNode] = []
+        self._edges: list[tuple[QGraphicsLineItem, GraphNode, GraphNode]] = []
         self._timer = QTimer()
         self._timer.timeout.connect(self._simulate)
         self._setup_ui()
@@ -106,6 +107,9 @@ class GraphPage(QWidget):
 
     def _refresh(self):
         self._timer.stop()
+        for e, _, _ in self._edges:
+            e.deleteLater()
+        self._edges.clear()
         for n in self._nodes:
             n.deleteLater()
         self._nodes.clear()
@@ -156,6 +160,26 @@ class GraphPage(QWidget):
             self._scene.addItem(node)
             self._nodes.append(node)
 
+        name_to_node = {n.label: n for n in self._nodes}
+        seen = set()
+        for parent_name, parent_node in name_to_node.items():
+            for child_name in error_store.get_dependencies(parent_name):
+                child_node = name_to_node.get(child_name)
+                if child_node is None:
+                    continue
+                key = tuple(sorted((parent_name, child_name)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                edge = QGraphicsLineItem(
+                    parent_node.pos().x(), parent_node.pos().y(),
+                    child_node.pos().x(), child_node.pos().y(),
+                )
+                edge.setPen(QPen(QColor("#444444"), 1))
+                edge.setZValue(-1)
+                self._scene.addItem(edge)
+                self._edges.append((edge, parent_node, child_node))
+
         self._timer.start(30)
 
     def _simulate(self):
@@ -187,12 +211,30 @@ class GraphPage(QWidget):
                 b.vx -= fx
                 b.vy -= fy
 
+        for _, parent, child in self._edges:
+            dx = child.pos().x() - parent.pos().x()
+            dy = child.pos().y() - parent.pos().y()
+            dist = math.hypot(dx, dy) or 1
+            spring_force = 0.003 * dist
+            fx = spring_force * dx / dist
+            fy = spring_force * dy / dist
+            parent.vx += fx
+            parent.vy += fy
+            child.vx -= fx
+            child.vy -= fy
+
         for n in self._nodes:
             n.vx *= 0.85
             n.vy *= 0.85
             n.setPos(
                 n.pos().x() + n.vx,
                 n.pos().y() + n.vy,
+            )
+
+        for edge, parent_node, child_node in self._edges:
+            edge.setLine(
+                parent_node.pos().x(), parent_node.pos().y(),
+                child_node.pos().x(), child_node.pos().y(),
             )
 
         total_v = sum(abs(n.vx) + abs(n.vy) for n in self._nodes)
