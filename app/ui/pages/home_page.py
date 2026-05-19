@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 
 from app.services import error_store
+from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, HIGHLIGHT, SUCCESS,
@@ -143,10 +144,7 @@ class HomePage(QWidget):
         if "Recent Activities" in self._stat_labels:
             self._stat_labels["Recent Activities"].setText(str(len(activities)))
 
-        while self._activity_list.count():
-            item = self._activity_list.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._activity_list)
 
         if not activities:
             placeholder = QLabel("No activity yet — start by running some code or importing a file")

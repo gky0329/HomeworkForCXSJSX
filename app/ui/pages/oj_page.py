@@ -18,6 +18,7 @@ from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE
+from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT,
@@ -394,10 +395,7 @@ class OJPage(QWidget):
         self._analysis_layout.addWidget(card)
 
     def _clear_analysis(self):
-        while self._analysis_layout.count():
-            item = self._analysis_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._analysis_layout)
 
     def _on_prev(self):
         if self._trace is None or self._current_index <= 0:

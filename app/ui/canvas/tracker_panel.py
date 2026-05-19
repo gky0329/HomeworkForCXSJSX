@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
 
 from app.core.memory_model import MemoryState, Variable
+from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, HIGHLIGHT,
@@ -130,10 +131,7 @@ class TrackerPanel(QWidget):
         self._refresh_cards()
 
     def _rebuild_chips(self, state: MemoryState | None):
-        while self._chips_layout.count():
-            item = self._chips_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._chips_layout)
         self._chip_buttons.clear()
 
         if state is None:

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QMargins
 
 from app.services import error_store
-from app.ui.widgets.helpers import mlabel
+from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT,
@@ -176,10 +176,7 @@ class KnowledgePage(QWidget):
         if idx < 0:
             return
 
-        while self._detail_layout.count():
-            item = self._detail_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._detail_layout)
 
         item = self._concept_list.item(idx)
         kp = item.data(Qt.ItemDataRole.UserRole)

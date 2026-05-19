@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
-from app.ui.widgets.helpers import mlabel
+from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS,
@@ -87,14 +87,8 @@ class ReviewPage(QWidget):
         self._render_empty_or_card()
 
     def _render_empty_or_card(self):
-        while self._card_area.count():
-            item = self._card_area.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        while self._empty_state.count():
-            item = self._empty_state.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._card_area)
+        clear_layout(self._empty_state)
 
         if not self._cards:
             self._progress.setText("")
@@ -178,10 +172,7 @@ class ReviewPage(QWidget):
             return
         self._answer_revealed = True
 
-        while self._reveal_stack.count():
-            item = self._reveal_stack.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._reveal_stack)
 
         correct = card.get("correct_answer", "")
         al = QLabel(f"Correct: {correct}")

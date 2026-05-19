@@ -17,6 +17,7 @@ from app.services.file_service import (
 from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
+from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
@@ -437,7 +438,4 @@ class FileImportPage(QWidget):
         self._status.setText(f"Error: {msg}")
 
     def _clear_results(self):
-        while self._result_layout.count():
-            item = self._result_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._result_layout)
