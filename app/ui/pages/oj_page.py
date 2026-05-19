@@ -18,10 +18,11 @@ from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ_AUTOGEN_TEMPLATE
+from app.services.compile_runner import compile_and_run
 from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT,
+    ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT, EDGE_DANGLING,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,8 @@ class OJPage(QWidget):
         toolbar.addWidget(self._step_info)
         toolbar.addStretch()
         top_layout.addLayout(toolbar)
+
+        self._build_test_panel(top_layout)
 
         top_splitter.addWidget(top_area)
 
@@ -456,6 +459,98 @@ class OJPage(QWidget):
             self._trace is not None and self._current_index + 1 < total
         )
         self._step_info.setText(f"Step {current}/{total}")
+
+    def _build_test_panel(self, parent_layout):
+        test_header = QHBoxLayout()
+        test_header.addWidget(QLabel("Test Cases:"))
+        self._test_input = QPlainTextEdit()
+        self._test_input.setPlaceholderText("Input")
+        self._test_input.setMaximumHeight(50)
+        self._test_input.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
+        self._test_expected = QPlainTextEdit()
+        self._test_expected.setPlaceholderText("Expected output")
+        self._test_expected.setMaximumHeight(50)
+        self._test_expected.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
+        add_btn = QPushButton("Add Case")
+        add_btn.clicked.connect(self._on_add_test_case)
+        test_header.addWidget(self._test_input)
+        test_header.addWidget(self._test_expected)
+        test_header.addWidget(add_btn)
+        parent_layout.addLayout(test_header)
+
+        self._test_cases: list[dict] = []
+        self._test_list = QVBoxLayout()
+        parent_layout.addLayout(self._test_list)
+
+        run_row = QHBoxLayout()
+        self._run_tests_btn = QPushButton("Compile & Run Tests")
+        self._run_tests_btn.clicked.connect(self._on_compile_run)
+        self._run_tests_btn.setVisible(False)
+        run_row.addWidget(self._run_tests_btn)
+        run_row.addStretch()
+        parent_layout.addLayout(run_row)
+
+        self._test_results = QVBoxLayout()
+        parent_layout.addLayout(self._test_results)
+
+    def _on_add_test_case(self):
+        inp = self._test_input.toPlainText()
+        exp = self._test_expected.toPlainText()
+        if not inp and not exp:
+            return
+        self._test_cases.append({"input": inp, "expected": exp})
+        self._test_input.clear()
+        self._test_expected.clear()
+        self._run_tests_btn.setVisible(True)
+        self._refresh_test_list()
+
+    def _refresh_test_list(self):
+        clear_layout(self._test_list)
+        for i, tc in enumerate(self._test_cases):
+            row = QHBoxLayout()
+            label = QLabel(f"#{i + 1}  in: {tc['input'][:30]}  |  out: {tc['expected'][:30]}")
+            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
+            row.addWidget(label)
+            del_btn = QPushButton("×")
+            del_btn.setFixedSize(24, 24)
+            del_btn.clicked.connect(lambda checked=None, idx=i: self._remove_test_case(idx))
+            row.addWidget(del_btn)
+            row.addStretch()
+            self._test_list.addLayout(row)
+
+    def _remove_test_case(self, idx: int):
+        if 0 <= idx < len(self._test_cases):
+            self._test_cases.pop(idx)
+        if not self._test_cases:
+            self._run_tests_btn.setVisible(False)
+        self._refresh_test_list()
+
+    def _on_compile_run(self):
+        code = self._code_edit.toPlainText().strip()
+        if not code or not self._test_cases:
+            return
+        clear_layout(self._test_results)
+        result = compile_and_run(code, self._test_cases)
+        compile_ok = result["compile"]
+        if not compile_ok.success:
+            err = QLabel(f"Compile error:\n{compile_ok.error}")
+            err.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
+            err.setWordWrap(True)
+            self._test_results.addWidget(err)
+            return
+        for t in result["tests"]:
+            if t.passed:
+                r = QLabel(f"  ✓ Case #{t.case_index} passed")
+                r.setStyleSheet(f"color: #4EC9B0; font-size: 13px; font-weight: bold;")
+            else:
+                r = QLabel(
+                    f"  ✗ Case #{t.case_index} FAILED\n"
+                    f"    Expected: {t.expected}\n"
+                    f"    Got:      {t.actual}"
+                )
+                r.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
+                r.setWordWrap(True)
+            self._test_results.addWidget(r)
 
     @staticmethod
     def _create_canvas_view() -> QGraphicsView:

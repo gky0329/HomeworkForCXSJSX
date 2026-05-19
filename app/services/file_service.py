@@ -34,6 +34,23 @@ def _extract_docx(path: Path) -> str:
     return "\n\n".join(paras)
 
 
+def _extract_pptx(path: Path) -> str:
+    from pptx import Presentation
+    prs = Presentation(str(path))
+    slides_out: list[str] = []
+    for i, slide in enumerate(prs.slides, 1):
+        lines = [f"Slide {i}"]
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    text = para.text.strip()
+                    if text:
+                        lines.append(text)
+        if len(lines) > 1:
+            slides_out.append("\n".join(lines))
+    return "\n\n---\n\n".join(slides_out)
+
+
 def _extract_markdown(path: Path) -> str:
     raw = path.read_text(encoding="utf-8", errors="replace")
     lines = []
@@ -74,6 +91,7 @@ def _extract_text(path: Path) -> str:
 HANDLERS: dict[str, list[str]] = {
     "pdf":  [".pdf"],
     "docx": [".docx", ".doc"],
+    "pptx": [".pptx", ".ppt"],
     "markdown": [".md", ".mdx"],
     "code":  [".cpp", ".cxx", ".cc", ".c", ".h", ".hpp", ".py", ".java", ".js", ".ts"],
     "text":  [".txt"],
@@ -90,6 +108,7 @@ def _handler_for(ext: str) -> str | None:
 _EXTRACTORS = {
     "pdf":      _extract_pdf,
     "docx":     _extract_docx,
+    "pptx":     _extract_pptx,
     "markdown": _extract_markdown,
     "code":     _extract_code,
     "text":     _extract_text,
@@ -131,5 +150,7 @@ def file_type_label(ext: str) -> str:
         ".js": "JavaScript",
         ".ts": "TypeScript",
         ".txt": "Plain Text",
+        ".pptx": "PowerPoint",
+        ".ppt": "PowerPoint",
     }
     return labels.get(ext, f"{ext} File")
