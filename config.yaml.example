@@ -1,17 +1,15 @@
 app:
-  name: "C++ Memory Visualizer"
-  version: "0.1.0"
-
+  name: C++ Memory Visualizer
+  version: 0.1.0
 llm:
-  provider: deepseek
-  api_key: "sk-your-deepseek-api-key-here"
-  api_base: "https://api.deepseek.com"
-  model: deepseek-chat
-  temperature: 0.0
+  api_base: https://api.deepseek.com
+  api_key: your-api-key-here  # or set DEEPSEEK_API_KEY env var
   max_tokens: 4096
-
+  model: deepseek-chat
+  provider: deepseek
+  temperature: 0.0
 ui:
-  theme: dark
-  font_family: "JetBrains Mono, Consolas, monospace"
-  font_size: 13
   code_font_size: 14
+  font_family: JetBrains Mono, Menlo, SF Mono, Courier New, monospace
+  font_size: 13
+  theme: dark
