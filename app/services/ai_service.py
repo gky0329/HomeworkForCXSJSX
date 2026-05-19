@@ -28,6 +28,7 @@ class AIService:
         system_prompt: str,
         user_message: str,
         max_retries: int = 2,
+        model: str | None = None,
     ) -> str:
         if not self.api_key:
             raise RuntimeError(
@@ -42,7 +43,7 @@ class AIService:
             "Content-Type": "application/json",
         }
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},

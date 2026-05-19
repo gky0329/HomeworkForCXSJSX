@@ -83,6 +83,7 @@ class ProcessWorker(QThread):
             raw = asyncio.run(service.chat_json(
                 system_prompt=PDF_SYSTEM_PROMPT,
                 user_message=user_msg,
+                model="deepseek-reasoner",
             ))
             data = json.loads(raw)
             self.finished.emit(data)

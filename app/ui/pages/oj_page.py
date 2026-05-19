@@ -72,6 +72,7 @@ class OJWorker(QThread):
             raw = asyncio.run(service.chat_json(
                 system_prompt=OJ_SYSTEM_PROMPT,
                 user_message=user_msg,
+                model="deepseek-reasoner",
             ))
             data = json.loads(raw)
             trace = ExecutionTrace.model_validate(data)
