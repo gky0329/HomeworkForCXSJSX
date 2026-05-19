@@ -6,23 +6,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
+from app.ui.widgets.helpers import mlabel
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS,
-    HIGHLIGHT,
 )
-
-
-def _mlabel(text: str, color: str = TEXT_PRIMARY, size: int = 12,
-            bold: bool = False) -> QLabel:
-    w = "bold" if bold else "normal"
-    label = QLabel(text)
-    label.setWordWrap(True)
-    label.setStyleSheet(
-        f"color: {color}; font-size: {size}px; font-weight: {w};"
-        f"background: transparent; border: none;"
-    )
-    return label
 
 
 RATE_GOOD = (
@@ -69,7 +57,7 @@ class ReviewPage(QWidget):
         layout.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(_mlabel("Review", STACK_BORDER, 16, True))
+        header.addWidget(mlabel("Review", STACK_BORDER, 16, True))
         header.addSpacing(12)
         self._add_btn = QPushButton("+ Add Error")
         self._add_btn.clicked.connect(self._on_add_error)
@@ -80,7 +68,7 @@ class ReviewPage(QWidget):
         header.addWidget(self._queue_btn)
 
         header.addStretch()
-        self._progress = _mlabel("", TEXT_SECONDARY, 12)
+        self._progress = mlabel("", TEXT_SECONDARY, 12)
         header.addWidget(self._progress)
         layout.addLayout(header)
 
@@ -110,11 +98,11 @@ class ReviewPage(QWidget):
 
         if not self._cards:
             self._progress.setText("")
-            done = _mlabel("No cards due — great job!", SUCCESS, 14, True)
+            done = mlabel("No cards due — great job!", SUCCESS, 14, True)
             done.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._empty_state.addStretch()
             self._empty_state.addWidget(done)
-            self._empty_state.addWidget(_mlabel(
+            self._empty_state.addWidget(mlabel(
                 "Come back later or add errors via OJ / File Import",
                 TEXT_SECONDARY, 12
             ))
@@ -299,7 +287,7 @@ class ReviewPage(QWidget):
         dialog.setWindowTitle("Smart Queue (UCB)")
         dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(_mlabel("Review Priority (UCB)", STACK_BORDER, 14, True))
+        layout.addWidget(mlabel("Review Priority (UCB)", STACK_BORDER, 14, True))
         for i, item in enumerate(queue[:8]):
             row = QLabel(
                 f"  #{i + 1}  {item['name']}  "

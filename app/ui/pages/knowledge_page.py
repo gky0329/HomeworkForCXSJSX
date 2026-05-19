@@ -1,15 +1,15 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QScrollArea, QFrame, QLineEdit, QSplitter,
     QListWidget, QListWidgetItem,
 )
 from PySide6.QtCore import Qt, QMargins
 
 from app.services import error_store
+from app.ui.widgets.helpers import mlabel
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS,
-    HIGHLIGHT,
+    STACK_BORDER, HEAP_BORDER, ACCENT,
 )
 
 
@@ -18,18 +18,6 @@ CARD_BG = (
     f"border-radius: 10px; }}"
     f"QFrame:hover {{ border-color: {STACK_BORDER}; }}"
 )
-
-
-def _mlabel(text: str, color: str = TEXT_PRIMARY, size: int = 12,
-            bold: bool = False) -> QLabel:
-    w = "bold" if bold else "normal"
-    lbl = QLabel(text)
-    lbl.setWordWrap(True)
-    lbl.setStyleSheet(
-        f"color: {color}; font-size: {size}px; font-weight: {w}; "
-        f"background: transparent; border: none;"
-    )
-    return lbl
 
 
 class KnowledgePage(QWidget):
@@ -45,7 +33,7 @@ class KnowledgePage(QWidget):
         layout.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(_mlabel("Knowledge Base", STACK_BORDER, 16, True))
+        header.addWidget(mlabel("Knowledge Base", STACK_BORDER, 16, True))
         header.addStretch()
 
         self._search = QLineEdit()
@@ -59,7 +47,7 @@ class KnowledgePage(QWidget):
         self._search.textChanged.connect(self._on_search)
         header.addWidget(self._search)
 
-        self._stats_label = _mlabel("", TEXT_SECONDARY, 12)
+        self._stats_label = mlabel("", TEXT_SECONDARY, 12)
         header.addWidget(self._stats_label)
 
         layout.addLayout(header)
@@ -86,7 +74,7 @@ class KnowledgePage(QWidget):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(12, 0, 0, 0)
 
-        self._detail_label = _mlabel("Select a concept", TEXT_SECONDARY, 13)
+        self._detail_label = mlabel("Select a concept", TEXT_SECONDARY, 13)
         right_layout.addWidget(self._detail_label)
 
         self._detail = QFrame()
@@ -199,7 +187,7 @@ class KnowledgePage(QWidget):
         self._detail_label.setText(name)
 
         self._detail_layout.addWidget(
-            _mlabel(name, STACK_BORDER, 18, True)
+            mlabel(name, STACK_BORDER, 18, True)
         )
 
         stats = [
@@ -219,7 +207,7 @@ class KnowledgePage(QWidget):
 
         for s in stats:
             self._detail_layout.addWidget(
-                _mlabel(s, TEXT_SECONDARY, 12)
+                mlabel(s, TEXT_SECONDARY, 12)
             )
 
         self._detail_layout.addSpacing(8)
@@ -227,15 +215,15 @@ class KnowledgePage(QWidget):
         deps = error_store.get_dependencies(name)
         if deps:
             self._detail_layout.addWidget(
-                _mlabel("Dependencies", HEAP_BORDER, 13, True)
+                mlabel("Dependencies", HEAP_BORDER, 13, True)
             )
             for dep in deps:
                 self._detail_layout.addWidget(
-                    _mlabel(f"  → {dep}", TEXT_PRIMARY, 12)
+                    mlabel(f"  → {dep}", TEXT_PRIMARY, 12)
                 )
         else:
             self._detail_layout.addWidget(
-                _mlabel("No dependencies recorded", TEXT_SECONDARY, 11)
+                mlabel("No dependencies recorded", TEXT_SECONDARY, 11)
             )
 
         related_errors = error_store.get_errors()
@@ -247,13 +235,13 @@ class KnowledgePage(QWidget):
         if related:
             self._detail_layout.addSpacing(4)
             self._detail_layout.addWidget(
-                _mlabel(f"Recent Cards ({len(related)})", ACCENT, 12, True)
+                mlabel(f"Recent Cards ({len(related)})", ACCENT, 12, True)
             )
             for e in related:
                 q = e.get("question", "")[:80]
                 reviewed = "✓" if e.get("reviewed") else " "
                 self._detail_layout.addWidget(
-                    _mlabel(f"  [{reviewed}] {q}", TEXT_SECONDARY, 11)
+                    mlabel(f"  [{reviewed}] {q}", TEXT_SECONDARY, 11)
                 )
 
         self._detail_layout.addStretch()
