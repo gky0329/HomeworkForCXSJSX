@@ -26,13 +26,13 @@
   {
     "name": "标准输入输出流",
     "source": "oj_analysis",
-    "count": 2,
+    "count": 4,
     "timestamp": "2026-05-18T15:40:57.815722+00:00"
   },
   {
     "name": "变量声明与初始化",
     "source": "oj_analysis",
-    "count": 1,
+    "count": 2,
     "timestamp": "2026-05-18T15:40:57.818187+00:00"
   },
   {
@@ -40,5 +40,29 @@
     "source": "oj_analysis",
     "count": 1,
     "timestamp": "2026-05-18T15:41:22.273997+00:00"
+  },
+  {
+    "name": "基本输入输出",
+    "source": "oj_analysis",
+    "count": 1,
+    "timestamp": "2026-05-20T03:13:43.322632+00:00"
+  },
+  {
+    "name": "变量声明",
+    "source": "oj_analysis",
+    "count": 1,
+    "timestamp": "2026-05-20T03:13:43.323667+00:00"
+  },
+  {
+    "name": "整数类型int",
+    "source": "oj_analysis",
+    "count": 1,
+    "timestamp": "2026-05-20T03:16:39.172628+00:00"
+  },
+  {
+    "name": "算术运算符",
+    "source": "oj_analysis",
+    "count": 1,
+    "timestamp": "2026-05-20T03:18:21.181193+00:00"
   }
 ]

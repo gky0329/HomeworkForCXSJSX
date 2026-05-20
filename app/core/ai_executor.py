@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 
+from pydantic import ValidationError
 from app.core.memory_model import ExecutionTrace
 from app.services.ai_service import AIService
 from app.services.prompt_templates import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
@@ -21,8 +22,13 @@ class AIExecutor:
             system_prompt=SYSTEM_PROMPT,
             user_message=user_msg,
         )
-        data = json.loads(raw_json)
-        trace = ExecutionTrace.model_validate(data)
+        try:
+            data = json.loads(raw_json)
+            trace = ExecutionTrace.model_validate(data)
+        except (json.JSONDecodeError, ValidationError) as e:
+            raise RuntimeError(
+                f"LLM returned invalid response: {e}\n\n---RAW RESPONSE---\n{raw_json[:2000]}"
+            ) from e
         logger.info(f"ExecutionTrace validated: {len(trace.steps)} steps")
         return trace
 

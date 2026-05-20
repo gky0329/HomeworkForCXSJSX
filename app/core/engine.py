@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtWidgets import QMessageBox
+from app.ui.widgets.error_dialog import show_error_dialog
 from app.core.memory_model import ExecutionTrace, MemoryState
 from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
@@ -20,6 +20,7 @@ class Engine:
         self._trace: ExecutionTrace | None = None
         self._current_index: int = -1
         self._worker: ExecutionWorker | None = None
+        self._last_code: str = ""
 
         self._connect_signals()
 
@@ -34,6 +35,7 @@ class Engine:
         if not code:
             self._window.statusBar().showMessage("No code to run")
             return
+        self._last_code = code
 
         if self._worker is not None and self._worker.isRunning():
             try:
@@ -70,8 +72,23 @@ class Engine:
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
-        self._window.statusBar().showMessage(f"Error: {error_msg}")
-        QMessageBox.warning(self._window, "Execution Error", error_msg)
+        self._window.statusBar().showMessage(f"Error: {error_msg.split(chr(10))[0]}")
+
+        raw = ""
+        display_msg = error_msg
+        if "---RAW RESPONSE---" in error_msg:
+            parts = error_msg.split("---RAW RESPONSE---", 1)
+            display_msg = parts[0].strip()
+            raw = parts[1].strip()
+
+        show_error_dialog(
+            self._window,
+            "Execution Error",
+            display_msg,
+            code=self._last_code,
+            raw_response=raw,
+            on_retry=lambda: self._on_run(),
+        )
 
     def _on_next(self):
         if self._trace is None or self._current_index + 1 >= len(self._trace.steps):

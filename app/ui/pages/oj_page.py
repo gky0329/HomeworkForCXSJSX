@@ -20,6 +20,7 @@ from app.services import error_store
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ_AUTOGEN_TEMPLATE
 from app.services.compile_runner import compile_and_run
 from app.ui.widgets.helpers import clear_layout
+from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT, EDGE_DANGLING,
@@ -447,7 +448,23 @@ class OJPage(QWidget):
     def _on_error(self, msg: str):
         self._run_btn.setEnabled(True)
         self._run_btn.setText("Run Analysis")
-        self._step_info.setText(f"Error: {msg}")
+        self._step_info.setText(f"Error: {msg[:60]}")
+
+        raw = ""
+        display_msg = msg
+        if "---RAW RESPONSE---" in msg:
+            parts = msg.split("---RAW RESPONSE---", 1)
+            display_msg = parts[0].strip()
+            raw = parts[1].strip()
+
+        show_error_dialog(
+            self,
+            "OJ Analysis Error",
+            display_msg,
+            code=self._code_edit.toPlainText().strip(),
+            raw_response=raw,
+            on_retry=lambda: self._on_run(),
+        )
 
     def _update_controls(self):
         total = len(self._trace.steps) if self._trace else 0

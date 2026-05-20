@@ -18,6 +18,7 @@ from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
 from app.ui.widgets.helpers import clear_layout
+from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
@@ -85,7 +86,12 @@ class ProcessWorker(QThread):
                 user_message=user_msg,
                 model="deepseek-reasoner",
             ))
-            data = json.loads(raw)
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"LLM returned invalid JSON: {e}\n\n---RAW RESPONSE---\n{raw[:2000]}"
+                ) from e
             self.finished.emit(data)
         except Exception as e:
             logger.error("ProcessWorker failed: %s", e)
@@ -436,7 +442,22 @@ class FileImportPage(QWidget):
     def _on_error(self, msg: str):
         self._process_btn.setEnabled(True)
         self._upload_btn.setEnabled(True)
-        self._status.setText(f"Error: {msg}")
+        self._status.setText(f"Error: {msg[:60]}")
+
+        raw = ""
+        display_msg = msg
+        if "---RAW RESPONSE---" in msg:
+            parts = msg.split("---RAW RESPONSE---", 1)
+            display_msg = parts[0].strip()
+            raw = parts[1].strip()
+
+        show_error_dialog(
+            self,
+            "File Import Error",
+            display_msg,
+            raw_response=raw,
+            on_retry=lambda: self._on_process(),
+        )
 
     def _clear_results(self):
         clear_layout(self._result_layout)
