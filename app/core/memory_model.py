@@ -1,5 +1,16 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
+
+
+class ArrayElement(BaseModel):
+    index: int = 0
+    value: str = ""
+
+
+class StructMember(BaseModel):
+    name: str = ""
+    type: str = ""
+    value: str = ""
 
 
 class Variable(BaseModel):
@@ -8,6 +19,10 @@ class Variable(BaseModel):
     value: str
     address: str
     is_pointer: bool
+    is_array: bool = False
+    element_count: Optional[int] = None
+    elements: List[ArrayElement] = Field(default_factory=list)
+    members: List[StructMember] = Field(default_factory=list)
 
 
 class StackFrame(BaseModel):
@@ -20,6 +35,10 @@ class HeapBlock(BaseModel):
     type: str
     value: str
     is_freed: bool = False
+    is_array: bool = False
+    element_count: Optional[int] = None
+    elements: List[ArrayElement] = Field(default_factory=list)
+    members: List[StructMember] = Field(default_factory=list)
 
 
 class PointerEdge(BaseModel):
