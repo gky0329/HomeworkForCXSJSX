@@ -1,8 +1,6 @@
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtGui import QShortcut, QKeySequence
-from PySide6.QtCore import Qt
 from app.core.memory_model import ExecutionTrace, MemoryState
 from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
@@ -30,11 +28,6 @@ class Engine:
         self._window.btn_next.clicked.connect(self._on_next)
         self._window.btn_prev.clicked.connect(self._on_prev)
         self._window.btn_reset.clicked.connect(self._on_reset)
-
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self._window, self._on_next)
-        QShortcut(QKeySequence(Qt.Key.Key_B), self._window, self._on_prev)
-        QShortcut(QKeySequence("Ctrl+Return"), self._window, self._on_run)
-        QShortcut(QKeySequence("Ctrl+R"), self._window, self._on_reset)
 
     def _on_run(self):
         code = self._window.get_code()
