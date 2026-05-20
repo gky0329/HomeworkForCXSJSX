@@ -13,6 +13,13 @@ class StructMember(BaseModel):
     value: str = ""
 
 
+class LambdaCapture(BaseModel):
+    name: str = ""
+    type: str = ""
+    value: str = ""
+    by_ref: bool = False
+
+
 class Variable(BaseModel):
     name: str
     type: str
@@ -23,6 +30,12 @@ class Variable(BaseModel):
     element_count: Optional[int] = None
     elements: List[ArrayElement] = Field(default_factory=list)
     members: List[StructMember] = Field(default_factory=list)
+    is_object: bool = False
+    class_name: str = ""
+    base_classes: List[str] = Field(default_factory=list)
+    virtual_methods: List[str] = Field(default_factory=list)
+    is_function_object: bool = False
+    captures: List[LambdaCapture] = Field(default_factory=list)
 
 
 class StackFrame(BaseModel):
@@ -39,6 +52,10 @@ class HeapBlock(BaseModel):
     element_count: Optional[int] = None
     elements: List[ArrayElement] = Field(default_factory=list)
     members: List[StructMember] = Field(default_factory=list)
+    is_object: bool = False
+    class_name: str = ""
+    base_classes: List[str] = Field(default_factory=list)
+    virtual_methods: List[str] = Field(default_factory=list)
 
 
 class PointerEdge(BaseModel):

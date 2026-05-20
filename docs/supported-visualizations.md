@@ -148,7 +148,96 @@
 
 ---
 
-## 7. 测试用例
+## 7. 面向对象 — 类、继承、多态 (is_object)
+
+### 7.1 类实例化
+
+```json
+{
+  "name": "a",
+  "type": "class Animal",
+  "value": "<Animal object>",
+  "address": "0xS001",
+  "is_pointer": false,
+  "is_object": true,
+  "class_name": "Animal",
+  "virtual_methods": ["speak()"],
+  "members": [
+    {"name": "_vptr", "type": "vtable*", "value": "&Animal::vtable"},
+    {"name": "name", "type": "string", "value": "Tom"}
+  ]
+}
+```
+
+- Canvas: Class header `a: Animal` → `[vtable] speak()` → `.name: string = Tom`
+
+### 7.2 继承 (base_classes)
+
+```json
+{
+  "name": "d",
+  "type": "class Dog",
+  "value": "<Dog object>",
+  "is_object": true,
+  "class_name": "Dog",
+  "base_classes": ["Animal"],
+  "virtual_methods": ["speak()"],
+  "members": [
+    {"name": "_vptr", "type": "vtable*", "value": "&Dog::vtable"},
+    {"name": "name", "type": "string", "value": "Buddy"},
+    {"name": "breed", "type": "string", "value": "Golden"}
+  ]
+}
+```
+
+- Canvas: 橙色 `⬆ extends Animal` 提示 + 所有成员（含继承的 name）
+
+### 7.3 多态指针
+
+基类指针 `Animal* p` 指向派生类对象 `Dog`：
+- `p` 的 type 为 `"Animal*"`，value = target_address
+- Edge 指向的堆块 class_name 为 `"Dog"`，包含 Dog 全部成员
+- Canvas 通过观察指针箭头指向的实际 class_name 理解多态
+
+---
+
+## 8. Lambda / 函数对象 (is_function_object)
+
+```json
+{
+  "name": "f",
+  "type": "lambda",
+  "value": "<lambda>",
+  "address": "0xS003",
+  "is_pointer": false,
+  "is_function_object": true,
+  "captures": [
+    {"name": "x", "type": "int", "value": "10", "by_ref": false},
+    {"name": "y", "type": "int", "value": "20", "by_ref": true}
+  ]
+}
+```
+
+- Canvas: `f: λ` → `λ [callable]` → `[capture] x: int = 10` → `[&capture] y: int = 20`
+
+---
+
+## 9. 测试用例
+
+### 继承 + 多态测试
+```cpp
+class Animal { virtual void speak() {} };
+class Dog : public Animal { void speak() override {} };
+Animal* a = new Dog();
+```
+预期: stack 上 `a: Animal*` 指针 → heap 上 Dog 对象，显示 `⬆ extends Animal` + `[vtable] speak()`
+
+### Lambda 测试
+```cpp
+int x = 10;
+auto f = [x, &y]() { return x + y; };
+```
+预期: stack 上 `f: λ [x=10, &y=...]`
 
 ### 数组测试
 ```cpp

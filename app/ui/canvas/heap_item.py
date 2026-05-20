@@ -29,7 +29,9 @@ class HeapItem(QGraphicsRectItem):
     def _rebuild_cells(self):
         block = self.block
 
-        if block.is_array and block.elements:
+        if block.is_object:
+            self._build_object(block)
+        elif block.is_array and block.elements:
             self._build_array(block)
         elif block.members:
             self._build_struct(block)
@@ -102,6 +104,48 @@ class HeapItem(QGraphicsRectItem):
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, 20 + i * member_h)
             self._value_label = label
+
+    def _build_object(self, block: HeapBlock):
+        extra_lines = 0
+        if block.base_classes:
+            extra_lines += 1
+        if block.virtual_methods:
+            extra_lines += 1
+        n_members = len([m for m in block.members if m.name != "_vptr"])
+        member_h = 18
+        w = 180
+        h = 26 + extra_lines * 16 + max(1, n_members) * member_h + 6
+        self.setRect(0, 0, w, h)
+
+        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
+        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setPlainText(f"[{block.address}] {block.class_name or block.type}")
+        self._addr_label.setPos(4, 2)
+
+        y = 20
+        if block.base_classes:
+            bl = QGraphicsTextItem(f"  ⬆ extends {', '.join(block.base_classes)}", self)
+            bl.setDefaultTextColor(QColor("#CE9178"))
+            bl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            bl.setPos(6, y)
+            y += 16
+
+        if block.virtual_methods:
+            vl = QGraphicsTextItem(f"  [vtable] {' '.join(block.virtual_methods)}", self)
+            vl.setDefaultTextColor(QColor("#DCDCAA"))
+            vl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            vl.setPos(6, y)
+            y += 16
+
+        for m in block.members:
+            if m.name == "_vptr":
+                continue
+            label = QGraphicsTextItem(f"  .{m.name}: {m.type} = {m.value}", self)
+            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+            label.setPos(6, y)
+            y += member_h
 
     def paint(self, painter: QPainter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

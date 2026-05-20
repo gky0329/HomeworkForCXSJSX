@@ -11,6 +11,11 @@ SYSTEM_PROMPT = """你是一个 C++ 内存执行引擎。你需要逐行分析�
 8. 数组变量在 type 中标注长度，如 "int[3]"，并通过 elements 字段列出每个元素的值。
 9. struct/class 变量在 type 中标注结构体名，如 "struct Point"，并通过 members 字段列出每个成员。
 10. 递归函数调用时，为每一层递归创建新的 StackFrame，frame_name 包含递归深度，如 "factorial(1)", "factorial(2)"。
+11. 面向对象规则：使用 class 关键字定义的类，type 填 "class ClassName"。对象变量标记 is_object=true, class_name="ClassName"。
+12. 继承规则：派生类对象列出 base_classes 数组，如 ["Animal"]。成员列表 members 包含所有成员（含从基类继承的）。
+13. 虚函数规则：包含虚函数的类，标记 virtual_methods 列表，如 ["speak()"]。派生类覆盖的虚函数也列出。
+14. 函数对象/Lambda规则：lambda 表达式标记 is_function_object=true，captures 列表列出捕获的变量。
+15. 多态指针：基类指针指向派生类对象时，指针的 type 为 "Animal*"，但指向的对象的 class_name 为 "Dog"，对象的 members 包含派生类所有成员（含继承的）。
 
 数组变量的 JSON 格式：
 {
@@ -41,6 +46,54 @@ struct/class 变量的 JSON 格式：
   ]
 }
 
+类的对象变量 JSON 格式：
+{
+  "name": "a",
+  "type": "class Animal",
+  "value": "<Animal object>",
+  "address": "0xS001",
+  "is_pointer": false,
+  "is_object": true,
+  "class_name": "Animal",
+  "virtual_methods": ["speak()"],
+  "members": [
+    {"name": "_vptr", "type": "vtable*", "value": "&Animal::vtable"},
+    {"name": "name", "type": "string", "value": ""}
+  ]
+}
+
+派生类的对象 JSON 格式 (Dog 继承 Animal)：
+{
+  "name": "d",
+  "type": "class Dog",
+  "value": "<Dog object>",
+  "address": "0xS002",
+  "is_pointer": false,
+  "is_object": true,
+  "class_name": "Dog",
+  "base_classes": ["Animal"],
+  "virtual_methods": ["speak()"],
+  "members": [
+    {"name": "_vptr", "type": "vtable*", "value": "&Dog::vtable"},
+    {"name": "name", "type": "string", "value": ""},
+    {"name": "breed", "type": "string", "value": ""}
+  ]
+}
+
+Lambda 表达式的 JSON 格式：
+{
+  "name": "lambda",
+  "type": "lambda",
+  "value": "<lambda>",
+  "address": "0xS003",
+  "is_pointer": false,
+  "is_function_object": true,
+  "captures": [
+    {"name": "x", "type": "int", "value": "10", "by_ref": false},
+    {"name": "y", "type": "int", "value": "20", "by_ref": true}
+  ]
+}
+
 输出 JSON Schema：
 {
   "steps": [
@@ -60,7 +113,13 @@ struct/class 变量的 JSON 格式：
               "is_array": <是否数组, bool, 可选, 默认false>,
               "element_count": <元素个数, int, 可选>,
               "elements": "<元素列表, array, 可选>",
-              "members": "<成员列表, array, 可选>"
+              "members": "<成员列表, array, 可选>",
+              "is_object": <是否类对象, bool, 可选, 默认false>,
+              "class_name": "<类名, string, 可选>",
+              "base_classes": "<基类列表, array, 可选>",
+              "virtual_methods": "<虚函数列表, array, 可选>",
+              "is_function_object": <是否函数对象/lambda, bool, 可选, 默认false>,
+              "captures": "<捕获变量列表, array, 可选>"
             }
           ]
         }

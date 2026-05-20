@@ -20,7 +20,17 @@ class VarItem(QGraphicsTextItem):
 
     def _update_text(self):
         v = self.variable
-        if v.is_array and v.elements:
+        if v.is_function_object:
+            caps = [f"{'&' if c.by_ref else ''}{c.name}={c.value}" for c in v.captures]
+            self.setPlainText(
+                f"  {v.name}: λ = [{', '.join(caps)}]" if caps else f"  {v.name}: λ"
+            )
+        elif v.is_object:
+            bases = f" : {', '.join(v.base_classes)}" if v.base_classes else ""
+            self.setPlainText(
+                f"  {v.name}: {v.class_name or v.type}{bases}"
+            )
+        elif v.is_array and v.elements:
             items = [e.value for e in v.elements]
             self.setPlainText(
                 f"  {v.name}: {v.type} = [{', '.join(items)}]"
@@ -73,7 +83,11 @@ class StackItem(QGraphicsRectItem):
             self.var_items[var.address] = item
             y_offset += self.VAR_HEIGHT
 
-            if var.is_array and var.elements:
+            if var.is_object:
+                y_offset = self._draw_object(var, y_offset)
+            elif var.is_function_object:
+                y_offset = self._draw_function_object(var, y_offset)
+            elif var.is_array and var.elements:
                 y_offset = self._draw_array_cells(var, y_offset)
             elif var.members:
                 y_offset = self._draw_struct_members(var, y_offset)
@@ -116,10 +130,79 @@ class StackItem(QGraphicsRectItem):
             y += 18
         return y
 
+    def _draw_object(self, var, y_offset: float) -> float:
+        y = y_offset
+        if var.base_classes:
+            bases_label = QGraphicsTextItem(
+                f"  ⬆ extends {', '.join(var.base_classes)}", self
+            )
+            bases_label.setDefaultTextColor(QColor("#CE9178"))
+            bases_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            bases_label.setPos(self.PADDING + 12, y)
+            y += 16
+
+        if var.virtual_methods:
+            vtable_label = QGraphicsTextItem(
+                f"  [vtable] {' '.join(var.virtual_methods)}", self
+            )
+            vtable_label.setDefaultTextColor(QColor("#DCDCAA"))
+            vtable_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            vtable_label.setPos(self.PADDING + 12, y)
+            y += 16
+
+        for m in var.members:
+            if m.name == "_vptr":
+                continue
+            color = "#9CDCFE"
+            label = QGraphicsTextItem(
+                f"    .{m.name}: {m.type} = {m.value}", self
+            )
+            label.setDefaultTextColor(QColor(color))
+            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+            label.setPos(self.PADDING + 12, y)
+            y += 18
+        return y
+
+    def _draw_function_object(self, var, y_offset: float) -> float:
+        y = y_offset
+        lambda_label = QGraphicsTextItem("  λ [callable]", self)
+        lambda_label.setDefaultTextColor(QColor("#DCDCAA"))
+        lambda_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+        lambda_label.setPos(self.PADDING + 12, y)
+        y += 16
+        for c in var.captures:
+            ref = "&" if c.by_ref else ""
+            label = QGraphicsTextItem(
+                f"    [{ref}capture] {c.name}: {c.type} = {c.value}", self
+            )
+            label.setDefaultTextColor(QColor("#CE9178"))
+            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            label.setPos(self.PADDING + 12, y)
+            y += 16
+        return y
+
     def _calc_width(self, frame: StackFrame) -> float:
         max_text = frame.frame_name
         for var in frame.variables:
-            if var.is_array and var.elements:
+            if var.is_object:
+                text = f"  {var.name}: {var.class_name or var.type}"
+                if len(text) > len(max_text):
+                    max_text = text
+                for m in var.members:
+                    if m.name == "_vptr":
+                        continue
+                    t = f"    .{m.name}: {m.type} = {m.value}"
+                    if len(t) > len(max_text):
+                        max_text = t
+            elif var.is_function_object:
+                text = f"  {var.name}: λ"
+                if len(text) > len(max_text):
+                    max_text = text
+                for c in var.captures:
+                    t = f"    [capture] {c.name}: {c.type} = {c.value}"
+                    if len(t) > len(max_text):
+                        max_text = t
+            elif var.is_array and var.elements:
                 w = (len(var.elements) * 34) + self.PADDING * 2 + 16
                 if w > max_text:
                     max_text = "x" * int(w / 8)
