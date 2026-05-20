@@ -16,6 +16,10 @@ SYSTEM_PROMPT = """你是一个 C++ 内存执行引擎。你需要逐行分析�
 13. 虚函数规则：包含虚函数的类，标记 virtual_methods 列表，如 ["speak()"]。派生类覆盖的虚函数也列出。
 14. 函数对象/Lambda规则：lambda 表达式标记 is_function_object=true，captures 列表列出捕获的变量。
 15. 多态指针：基类指针指向派生类对象时，指针的 type 为 "Animal*"，但指向的对象的 class_name 为 "Dog"，对象的 members 包含派生类所有成员（含继承的）。
+16. 构造函数/析构函数规则：对象通过构造函数创建时，标记 is_constructed=true。构造函数执行（如 `Fraction f(1,2)`）产生一条 MemoryState。析构函数执行（对象离开作用域或 delete）时，标记 is_destroyed=true。
+17. 引用规则：`int& ref = a;` — 引用变量标记 is_reference=true，type="int&"，value 填被引用变量的 address，如 "0xS001"。引用不产生指针箭头（不是 PointerEdge），它只是别名。
+18. std::vector 规则：vector 内部 buffer 在堆上，用一个 HeapBlock 表示。该 HeapBlock 有 is_array=true, container_size=<元素个数>, container_capacity=<容量>, elements 列表。栈上的 vector 变量包含 _size, _capacity, _data 三个成员，其中 _data 是指向堆 buffer 的指针。
+19. 运算符重载规则：`a + b` 等运算符产生临时结果对象，标记 is_temporary=true。临时对象在表达式结束后消失（下一步中不再出现）。operator= 赋值运算符修改成员值，被修改的变量闪烁。
 
 数组变量的 JSON 格式：
 {
@@ -94,6 +98,69 @@ Lambda 表达式的 JSON 格式：
   ]
 }
 
+构造/析构的 JSON 格式（Fraction f(1,2)）：
+{
+  "name": "f",
+  "type": "class Fraction",
+  "value": "<Fraction object>",
+  "address": "0xS001",
+  "is_pointer": false,
+  "is_object": true,
+  "class_name": "Fraction",
+  "is_constructed": true,
+  "is_destroyed": false,
+  "members": [
+    {"name": "m_numerator", "type": "int", "value": "1"},
+    {"name": "m_denominator", "type": "int", "value": "2"}
+  ]
+}
+// 析构时 is_destroyed 变为 true
+
+引用的 JSON 格式：
+{
+  "name": "ref",
+  "type": "int&",
+  "value": "0xS001",
+  "address": "0xS002",
+  "is_pointer": false,
+  "is_reference": true
+}
+// 引用不产生 PointerEdge，它的 value 是被引用变量的 address
+
+std::vector 的 heap buffer JSON 格式：
+{
+  "address": "0xH001",
+  "type": "std::vector<int>::buffer",
+  "value": "[10, 20, 30]",
+  "is_freed": false,
+  "is_array": true,
+  "container_size": 3,
+  "container_capacity": 4,
+  "elements": [
+    {"index": 0, "value": "10"},
+    {"index": 1, "value": "20"},
+    {"index": 2, "value": "30"}
+  ]
+}
+// 栈上的 vector 变量：members 包含 _size(3), _capacity(4), _data(0xH001指针)
+// _data 是 is_pointer=true 的成员，通过 PointerEdge 连接到 heap buffer
+
+运算符重载的临时对象 JSON 格式（a+b 产生临时结果）：
+{
+  "name": "temp",
+  "type": "class Cents",
+  "value": "<temp object>",
+  "address": "0xS003",
+  "is_pointer": false,
+  "is_object": true,
+  "class_name": "Cents",
+  "is_temporary": true,
+  "members": [
+    {"name": "m_cents", "type": "int", "value": "15"}
+  ]
+}
+// is_temporary=true 的对象在下一行自动消失
+
 输出 JSON Schema：
 {
   "steps": [
@@ -119,7 +186,11 @@ Lambda 表达式的 JSON 格式：
               "base_classes": "<基类列表, array, 可选>",
               "virtual_methods": "<虚函数列表, array, 可选>",
               "is_function_object": <是否函数对象/lambda, bool, 可选, 默认false>,
-              "captures": "<捕获变量列表, array, 可选>"
+              "captures": "<捕获变量列表, array, 可选>",
+              "is_constructed": <是否构造完成, bool, 可选, 默认false>,
+              "is_destroyed": <是否已析构, bool, 可选, 默认false>,
+              "is_reference": <是否引用, bool, 可选, 默认false>,
+              "is_temporary": <是否临时对象, bool, 可选, 默认false>
             }
           ]
         }
@@ -129,7 +200,9 @@ Lambda 表达式的 JSON 格式：
           "address": "<地址, string>",
           "type": "<类型, string>",
           "value": "<值, string>",
-          "is_freed": <是否已释放, bool>
+          "is_freed": <是否已释放, bool>,
+          "container_size": <容器当前元素个数, int, 可选>,
+          "container_capacity": <容器容量, int, 可选>
         }
       ],
       "edges": [

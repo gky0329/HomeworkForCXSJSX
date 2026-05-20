@@ -36,6 +36,10 @@ class Variable(BaseModel):
     virtual_methods: List[str] = Field(default_factory=list)
     is_function_object: bool = False
     captures: List[LambdaCapture] = Field(default_factory=list)
+    is_constructed: bool = False
+    is_destroyed: bool = False
+    is_reference: bool = False
+    is_temporary: bool = False
 
 
 class StackFrame(BaseModel):
@@ -56,6 +60,10 @@ class HeapBlock(BaseModel):
     class_name: str = ""
     base_classes: List[str] = Field(default_factory=list)
     virtual_methods: List[str] = Field(default_factory=list)
+    container_size: Optional[int] = None
+    container_capacity: Optional[int] = None
+    is_constructed: bool = False
+    is_destroyed: bool = False
 
 
 class PointerEdge(BaseModel):

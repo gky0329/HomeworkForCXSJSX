@@ -5,7 +5,7 @@ from PySide6.QtGui import QFont, QColor, QPen, QBrush
 from app.core.memory_model import Variable, StackFrame
 from app.ui.theme.colors import (
     STACK_BORDER, STACK_BG, STACK_TITLE, STACK_VAR_TEXT,
-    HEAP_BORDER, HEAP_BG,
+    HEAP_BORDER, HEAP_BG, EDGE_DANGLING,
 )
 
 
@@ -20,15 +20,28 @@ class VarItem(QGraphicsTextItem):
 
     def _update_text(self):
         v = self.variable
-        if v.is_function_object:
+        badges = []
+        if v.is_destroyed:
+            badges.append("dtor")
+        elif v.is_constructed:
+            badges.append("ctor")
+        if v.is_temporary:
+            badges.append("temp")
+        badge_str = f" [{', '.join(badges)}]" if badges else ""
+
+        if v.is_reference:
+            self.setPlainText(
+                f"  &{v.name}: {v.type} → {v.value}"
+            )
+        elif v.is_function_object:
             caps = [f"{'&' if c.by_ref else ''}{c.name}={c.value}" for c in v.captures]
             self.setPlainText(
-                f"  {v.name}: λ = [{', '.join(caps)}]" if caps else f"  {v.name}: λ"
+                f"  {v.name}: λ = [{', '.join(caps)}]{badge_str}" if caps else f"  {v.name}: λ{badge_str}"
             )
         elif v.is_object:
             bases = f" : {', '.join(v.base_classes)}" if v.base_classes else ""
             self.setPlainText(
-                f"  {v.name}: {v.class_name or v.type}{bases}"
+                f"  {v.name}: {v.class_name or v.type}{bases}{badge_str}"
             )
         elif v.is_array and v.elements:
             items = [e.value for e in v.elements]
@@ -42,7 +55,7 @@ class VarItem(QGraphicsTextItem):
             )
         else:
             self.setPlainText(
-                f"  {v.name}: {v.type} = {v.value}"
+                f"  {v.name}: {v.type} = {v.value}{badge_str}"
             )
 
     def update_value(self, new_value: str):
@@ -132,6 +145,24 @@ class StackItem(QGraphicsRectItem):
 
     def _draw_object(self, var, y_offset: float) -> float:
         y = y_offset
+        if var.is_destroyed:
+            badge = QGraphicsTextItem("  💀 destroyed", self)
+            badge.setDefaultTextColor(QColor(EDGE_DANGLING))
+            badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            badge.setPos(self.PADDING + 12, y)
+            y += 16
+        elif var.is_constructed:
+            badge = QGraphicsTextItem("  ⚡ constructed", self)
+            badge.setDefaultTextColor(QColor("#4EC9B0"))
+            badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            badge.setPos(self.PADDING + 12, y)
+            y += 16
+        if var.is_temporary:
+            badge = QGraphicsTextItem("  ⏳ temporary", self)
+            badge.setDefaultTextColor(QColor("#DCDCAA"))
+            badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            badge.setPos(self.PADDING + 12, y)
+            y += 16
         if var.base_classes:
             bases_label = QGraphicsTextItem(
                 f"  ⬆ extends {', '.join(var.base_classes)}", self

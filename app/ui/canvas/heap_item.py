@@ -64,14 +64,28 @@ class HeapItem(QGraphicsRectItem):
         cell_h = 28
         gap = 3
         n = len(block.elements)
+        extra_label_h = 0
+        if block.container_size is not None and block.container_capacity is not None:
+            extra_label_h = 14
         w = max(80, n * (cell_w + gap) + 10)
-        self.setRect(0, 0, w, cell_h + 24)
+        self.setRect(0, 0, w, cell_h + 24 + extra_label_h)
 
         self._addr_label = QGraphicsTextItem(self)
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
         self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
         self._addr_label.setPlainText(f"[{block.address}] {block.type}")
         self._addr_label.setPos(4, 2)
+
+        y = 20
+        if block.container_size is not None and block.container_capacity is not None:
+            sz_label = QGraphicsTextItem(
+                f"  size={block.container_size} cap={block.container_capacity}",
+                self
+            )
+            sz_label.setDefaultTextColor(QColor("#DCDCAA"))
+            sz_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8))
+            sz_label.setPos(4, y)
+            y += 14
 
         for elem in block.elements:
             x = 6 + elem.index * (cell_w + gap)
@@ -107,6 +121,10 @@ class HeapItem(QGraphicsRectItem):
 
     def _build_object(self, block: HeapBlock):
         extra_lines = 0
+        if block.is_destroyed:
+            extra_lines += 1
+        elif block.is_constructed:
+            extra_lines += 1
         if block.base_classes:
             extra_lines += 1
         if block.virtual_methods:
@@ -124,6 +142,18 @@ class HeapItem(QGraphicsRectItem):
         self._addr_label.setPos(4, 2)
 
         y = 20
+        if block.is_destroyed:
+            badge = QGraphicsTextItem("  💀 destroyed", self)
+            badge.setDefaultTextColor(QColor(EDGE_DANGLING))
+            badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            badge.setPos(6, y)
+            y += 16
+        elif block.is_constructed:
+            badge = QGraphicsTextItem("  ⚡ constructed", self)
+            badge.setDefaultTextColor(QColor("#4EC9B0"))
+            badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            badge.setPos(6, y)
+            y += 16
         if block.base_classes:
             bl = QGraphicsTextItem(f"  ⬆ extends {', '.join(block.base_classes)}", self)
             bl.setDefaultTextColor(QColor("#CE9178"))

@@ -222,7 +222,116 @@
 
 ---
 
-## 9. 测试用例
+## 10. 面向对象进阶
+
+### 10.1 构造函数 (is_constructed) / 析构函数 (is_destroyed)
+
+```json
+{
+  "name": "f",
+  "type": "class Fraction",
+  "is_object": true, "class_name": "Fraction",
+  "is_constructed": true, "is_destroyed": false,
+  "members": [
+    {"name": "m_numerator", "type": "int", "value": "1"},
+    {"name": "m_denominator", "type": "int", "value": "2"}
+  ]
+}
+```
+
+- Canvas: `⚡ constructed` 绿色标签 → 成员列表
+- 析构时 `is_destroyed=true` → `💀 destroyed` 红色标签
+
+### 10.2 引用 (is_reference)
+
+```json
+{
+  "name": "ref", "type": "int&",
+  "value": "0xS001", "address": "0xS002",
+  "is_reference": true
+}
+```
+
+- Canvas: `&ref: int& → 0xS001` — 引用变量标签，区别于指针（无箭头）
+
+### 10.3 std::vector 容器
+
+栈上 vector 变量（Object + members 含 _data 指针）:
+```json
+{
+  "name": "v", "type": "std::vector<int>", "is_object": true,
+  "members": [
+    {"name": "_size", "type": "int", "value": "3"},
+    {"name": "_capacity", "type": "int", "value": "4"},
+    {"name": "_data", "type": "int*", "value": "0xH001", "is_pointer": true}
+  ]
+}
+```
+
+堆上 buffer（HeapBlock）:
+```json
+{
+  "address": "0xH001", "type": "std::vector<int>::buffer",
+  "is_array": true, "container_size": 3, "container_capacity": 4,
+  "elements": [
+    {"index":0,"value":"10"}, {"index":1,"value":"20"}, {"index":2,"value":"30"}
+  ]
+}
+```
+
+- Canvas: buffer 上方显示 `size=3 cap=4`，下方元素 cells + Edge 从 `_data` 指向 buffer
+
+### 10.4 运算符重载临时对象 (is_temporary)
+
+```json
+{
+  "name": "temp", "type": "class Cents",
+  "is_object": true, "is_temporary": true,
+  "members": [{"name":"m_cents","type":"int","value":"15"}]
+}
+```
+
+- Canvas: `⏳ temporary` 黄色标签，下一行消失
+
+---
+
+## 11. 测试用例
+
+### 构造函数/析构函数测试
+```cpp
+class Fraction {
+    int m_num, m_den;
+public:
+    Fraction(int n, int d) : m_num(n), m_den(d) {}
+    ~Fraction() {}
+};
+Fraction f(1, 2);
+```
+预期: `f: Fraction [ctor]` → 离开作用域后 `[dtor]`
+
+### 引用测试
+```cpp
+int a = 42;
+int& ref = a;
+ref = 100;
+```
+预期: `&ref: int& → 0xS001`，a 的值变 100 闪烁
+
+### std::vector 测试
+```cpp
+std::vector<int> v;
+v.push_back(10);
+v.push_back(20);
+```
+预期: 堆 buffer `size=2 cap=N [10][20]`，扩容时 cap 变化
+
+### 运算符重载测试
+```cpp
+class Cents { int m_cents; };
+Cents a{5}, b{10};
+Cents sum = a + b;
+```
+预期: temp 对象 `[temp]` 出现后消失，sum 赋值后显示
 
 ### 继承 + 多态测试
 ```cpp
