@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont, QColor, QPen, QBrush, QPainter
 from app.core.memory_model import HeapBlock
 from app.ui.theme.colors import (
     HEAP_BORDER, HEAP_BG, HEAP_TEXT, EDGE_DANGLING, CANVAS_BG,
+    STACK_VAR_TEXT,
 )
 
 
@@ -18,33 +19,89 @@ class HeapItem(QGraphicsRectItem):
         self.block = block
         self.address = block.address
         self._on_item_moved = on_item_moved
+        self._value_label = None
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
 
+        self._rebuild_cells()
+
+    def _rebuild_cells(self):
+        block = self.block
+
+        if block.is_array and block.elements:
+            self._build_array(block)
+        elif block.members:
+            self._build_struct(block)
+        else:
+            self._build_plain(block)
+
+    def _build_plain(self, block: HeapBlock):
         self.setRect(0, 0, self.WIDTH, self.HEIGHT)
 
         self._addr_label = QGraphicsTextItem(self)
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
         self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setPlainText(f"[{block.address}]")
+        self._addr_label.setPos(4, 2)
 
         self._type_label = QGraphicsTextItem(self)
         self._type_label.setDefaultTextColor(QColor(HEAP_TEXT))
         self._type_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+        self._type_label.setPlainText(block.type)
+        self._type_label.setPos(4, 18)
 
         self._value_label = QGraphicsTextItem(self)
         self._value_label.setDefaultTextColor(QColor(HEAP_TEXT))
         self._value_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11, QFont.Weight.Bold))
-
-        self._rebuild_labels()
-
-    def _rebuild_labels(self):
-        self._addr_label.setPlainText(f"[{self.block.address}]")
-        self._addr_label.setPos(4, 2)
-        self._type_label.setPlainText(self.block.type)
-        self._type_label.setPos(4, 18)
-        self._value_label.setPlainText(self.block.value)
+        self._value_label.setPlainText(block.value)
         self._value_label.setPos(4, 38)
+
+    def _build_array(self, block: HeapBlock):
+        cell_w = 36
+        cell_h = 28
+        gap = 3
+        n = len(block.elements)
+        w = max(80, n * (cell_w + gap) + 10)
+        self.setRect(0, 0, w, cell_h + 24)
+
+        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
+        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setPlainText(f"[{block.address}] {block.type}")
+        self._addr_label.setPos(4, 2)
+
+        for elem in block.elements:
+            x = 6 + elem.index * (cell_w + gap)
+            y = 20
+            cell = QGraphicsRectItem(x, y, cell_w, cell_h, self)
+            cell.setPen(QPen(QColor(HEAP_BORDER), 1))
+            cell.setBrush(QBrush(QColor("#4A3626")))
+            label = QGraphicsTextItem(f"[{elem.index}]\n{elem.value}", cell)
+            label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
+            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8))
+            label.setPos(2, 1)
+
+    def _build_struct(self, block: HeapBlock):
+        member_h = 20
+        w = 160
+        h = 24 + len(block.members) * member_h + 6
+        self.setRect(0, 0, w, h)
+
+        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
+        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setPlainText(f"[{block.address}] {block.type}")
+        self._addr_label.setPos(4, 2)
+
+        for i, m in enumerate(block.members):
+            label = QGraphicsTextItem(
+                f"  .{m.name}: {m.type} = {m.value}", self
+            )
+            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+            label.setPos(6, 20 + i * member_h)
+            self._value_label = label
 
     def paint(self, painter: QPainter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -62,7 +119,8 @@ class HeapItem(QGraphicsRectItem):
 
     def update_value(self, new_value: str):
         self.block.value = new_value
-        self._value_label.setPlainText(new_value)
+        if hasattr(self, '_value_label') and self._value_label is not None:
+            self._value_label.setPlainText(new_value)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
