@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QFont, QColor, QPen, QBrush
 
 from app.core.memory_model import Variable, StackFrame
@@ -111,6 +111,9 @@ class StackItem(QGraphicsRectItem):
         width = self._calc_width(frame)
         height = y_offset + 4
         self.setRect(0, 0, width, height)
+
+        if any(v.is_temporary for v in frame.variables):
+            self.setPen(QPen(QColor("#DCDCAA"), 1.5, Qt.PenStyle.DashLine))
 
     def _draw_array_cells(self, var: Variable, start_y: float) -> float:
         cell_w = 32

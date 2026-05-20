@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem
 from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtGui import QPen, QColor
 
 from app.core.memory_model import MemoryState, PointerEdge
 from app.ui.canvas.stack_item import StackItem
@@ -56,11 +57,37 @@ class MemoryCanvas:
             self._scene.addItem(item)
             self._heap_items.append(item)
             self._address_to_item[block.address] = item
-            heap_y += HeapItem.HEIGHT + ITEM_GAP
+            heap_y += item.rect().height() + ITEM_GAP
 
         self._render_edges(state.edges)
 
+        self._render_ref_edges(state)
+
         self._auto_center()
+
+    def _render_ref_edges(self, state: MemoryState):
+        for frame in state.stack:
+            for var in frame.variables:
+                if not var.is_reference:
+                    continue
+                target_addr = var.value
+                if not target_addr.startswith("0xS") and not target_addr.startswith("0xH"):
+                    continue
+                ref_item = self._address_to_item.get(var.address)
+                tgt_item = self._address_to_item.get(target_addr)
+                if ref_item is None or tgt_item is None:
+                    continue
+                edge = EdgeItem(
+                    source_addr=var.address,
+                    target_addr=target_addr,
+                    is_dangling=False,
+                    address_map=self._address_to_item,
+                )
+                edge.setPen(QPen(QColor("#4EC9B0"), 1, Qt.PenStyle.DotLine))
+                self._scene.addItem(edge)
+                self._edge_items.append(edge)
+                self._edge_by_source.setdefault(var.address, []).append(edge)
+                self._edge_by_target.setdefault(target_addr, []).append(edge)
 
     def _auto_center(self):
         rect = self._content_bounds()

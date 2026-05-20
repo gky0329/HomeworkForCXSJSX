@@ -41,9 +41,11 @@ class CanvasAnimator:
         self._pending = 0
 
         self._animate_added_heap(diff)
+        self._animate_added_vars(diff)
         self._animate_modified_vars(diff)
         self._animate_modified_heap(diff)
         self._animate_freed_heap(diff)
+        self._animate_removed_vars(diff)
         self._animate_removed_edges(diff)
 
         if self._pending == 0 and self._on_finished:
@@ -93,6 +95,35 @@ class CanvasAnimator:
         x = start_x + (target_x - start_x) * eased
         item.setPos(QPointF(x, target_y))
         item.setOpacity(eased)
+
+    def _animate_added_vars(self, diff: DiffResult):
+        for var in diff.added_vars:
+            item = self._find_var_item(var.address)
+            if item is None:
+                continue
+            target_y = item.pos().y()
+            item.setOpacity(0.0)
+            self._pending += 1
+            self._tween(
+                duration_ms=350,
+                on_update=lambda t, it=item, ty=target_y: (
+                    None if not self._alive(it) else it.setOpacity(min(t * 3, 1.0))
+                ),
+            )
+
+    def _animate_removed_vars(self, diff: DiffResult):
+        for var in diff.removed_vars:
+            item = self._find_var_item(var.address)
+            if item is None:
+                continue
+            item.setOpacity(1.0)
+            self._pending += 1
+            self._tween(
+                duration_ms=400,
+                on_update=lambda t, it=item: (
+                    None if not self._alive(it) else it.setOpacity(1.0 - t)
+                ),
+            )
 
     def _animate_modified_vars(self, diff: DiffResult):
         for change in diff.modified_vars:

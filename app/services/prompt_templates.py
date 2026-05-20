@@ -5,7 +5,8 @@ SYSTEM_PROMPT = """你是一个 C++ 内存执行引擎。你需要逐行分析�
 2. 内存地址请使用模拟地址：栈地址以 "0xS" 开头（如 0xS001, 0xS002），堆地址以 "0xH" 开头（如 0xH001, 0xH002）。
 3. 指针变量的 value 就是它指向的 target_address。
 4. 遇到 delete 操作，将对应 HeapBlock 的 is_freed 设为 true，并将指向它的 PointerEdge 的 is_dangling 设为 true。
-5. 每行代码执行后，输出一个完整的 MemoryState。如果该行代码没有改变内存状态，也必须输出一个快照。
+5. 只输出 main() 函数内部的可执行代码行的状态。跳过所有预处理指令(#include等)、class/struct定义、函数声明和空行。main() 开括号 `{` 输出一个初始空状态。main() 闭括号 `}` 输出所有局部变量析构后的最终状态。
+5b. main() 内部每行可执行代码执行后，输出一个 MemoryState。如果变量离开作用域（block 结束或函数返回），该变量的 is_destroyed 应设为 true，并继续出现在状态中（标记为已销毁）。
 6. 变量分配地址时按顺序递增：栈从 0xS001 开始，堆从 0xH001 开始。
 7. 每个变量创建时属于当前栈帧（默认 frame_name 为 "main"）。
 8. 数组变量在 type 中标注长度，如 "int[3]"，并通过 elements 字段列出每个元素的值。

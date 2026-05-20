@@ -63,12 +63,14 @@ class HeapItem(QGraphicsRectItem):
         cell_w = 36
         cell_h = 28
         gap = 3
+        cols = max(1, min(len(block.elements), 4))
         n = len(block.elements)
         extra_label_h = 0
         if block.container_size is not None and block.container_capacity is not None:
             extra_label_h = 14
-        w = max(80, n * (cell_w + gap) + 10)
-        self.setRect(0, 0, w, cell_h + 24 + extra_label_h)
+        rows = (n + cols - 1) // cols
+        w = max(80, cols * (cell_w + gap) + 10)
+        self.setRect(0, 0, w, cell_h * rows + 24 + extra_label_h)
 
         self._addr_label = QGraphicsTextItem(self)
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
@@ -88,9 +90,11 @@ class HeapItem(QGraphicsRectItem):
             y += 14
 
         for elem in block.elements:
-            x = 6 + elem.index * (cell_w + gap)
-            y = 20
-            cell = QGraphicsRectItem(x, y, cell_w, cell_h, self)
+            row = elem.index // cols
+            col = elem.index % cols
+            x = 6 + col * (cell_w + gap)
+            cy = y + row * cell_h
+            cell = QGraphicsRectItem(x, cy, cell_w, cell_h, self)
             cell.setPen(QPen(QColor(HEAP_BORDER), 1))
             cell.setBrush(QBrush(QColor("#4A3626")))
             label = QGraphicsTextItem(f"[{elem.index}]\n{elem.value}", cell)
