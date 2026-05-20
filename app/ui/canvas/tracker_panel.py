@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QScrollArea, QPushButton,
+    QScrollArea, QPushButton, QGraphicsDropShadowEffect,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QMimeData, QPoint
+from PySide6.QtGui import QFont, QColor, QDrag
 from PySide6.QtGui import QFont, QColor
 
 from app.core.memory_model import MemoryState, Variable
@@ -46,9 +47,31 @@ CARD_STYLE = (
     f"border-radius: 8px; }}"
 )
 CARD_DESTROYED = (
-    f"QFrame {{ background-color: {CANVAS_BG}; "
-    f"border: 1px dashed {EDGE_DANGLING}; border-radius: 8px; }}"
-)
+
+
+class DragChipButton(QPushButton):
+    def __init__(self, text: str, address: str, parent=None):
+        super().__init__(text, parent)
+        self._address = address
+        self._drag_start: QPoint | None = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is None:
+            super().mouseMoveEvent(event)
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < 10:
+            return
+        mime = QMimeData()
+        mime.setText(self._address)
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        self._drag_start = None
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 class TrackerPanel(QWidget):
@@ -148,7 +171,7 @@ class TrackerPanel(QWidget):
                 tracked = var.address in self._tracked_addresses
                 prefix = "✓ " if tracked else "+ "
                 text = f"{prefix}{var.name} = {var.value}"
-                btn = QPushButton(text)
+                btn = DragChipButton(text, var.address)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
                 if tracked:

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout,
     QLabel, QPushButton, QMenu, QTabWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QWheelEvent, QAction, QKeySequence, QShortcut,
 )
@@ -43,9 +43,12 @@ TAB_STYLE = (
 
 
 class CanvasView(QGraphicsView):
+    variable_dropped = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._zoom_level = 1.0
+        self.setAcceptDrops(True)
         self.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -66,6 +69,26 @@ class CanvasView(QGraphicsView):
                 self._zoom_level = new_zoom
                 self.scale(factor, factor)
         event.accept()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasText():
+            address = event.mimeData().text()
+            self.variable_dropped.emit(address)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def zoom_in(self):
         if self._zoom_level * ZOOM_FACTOR <= ZOOM_MAX:
@@ -161,6 +184,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 6)
 
         self.tracker_panel = TrackerPanel()
+        self.canvas_view.variable_dropped.connect(self.tracker_panel._toggle_track)
 
         tab = QWidget()
         layout = QVBoxLayout(tab)
