@@ -47,6 +47,9 @@ CARD_STYLE = (
     f"border-radius: 8px; }}"
 )
 CARD_DESTROYED = (
+    f"QFrame {{ background-color: {CANVAS_BG}; "
+    f"border: 1px dashed {EDGE_DANGLING}; border-radius: 8px; }}"
+)
 
 
 class DragChipButton(QPushButton):
