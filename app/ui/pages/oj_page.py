@@ -220,6 +220,7 @@ class OJPage(QWidget):
     def _on_run(self):
         problem = self._problem_edit.toPlainText().strip()
         code = self._code_edit.toPlainText().strip()
+        self._autogen = not code and bool(problem)
         if not code:
             code = problem
         if not code:
@@ -227,7 +228,6 @@ class OJPage(QWidget):
 
         self._run_btn.setEnabled(False)
         self._run_btn.setText("Analyzing...")
-        self._autogen = not code
 
         self._worker = OJWorker(problem, code, self._config_path)
         self._worker.finished.connect(self._on_result)
