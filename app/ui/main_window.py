@@ -1,14 +1,13 @@
 from pathlib import Path
+from collections.abc import Callable
 
 from PySide6.QtWidgets import (
-    QMainWindow, QSplitter, QPlainTextEdit, QGraphicsView,
+    QApplication, QMainWindow, QSplitter, QPlainTextEdit, QGraphicsView,
     QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout,
     QLabel, QPushButton, QMenu, QTabWidget,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import (
-    QFont, QColor, QPainter, QWheelEvent, QAction, QKeySequence, QShortcut,
-)
+from PySide6.QtCore import Qt, Signal, QEvent, QPointF
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
 
 from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY
 from app.ui.pages.file_import_page import FileImportPage
@@ -17,6 +16,7 @@ from app.ui.pages.review_page import ReviewPage
 from app.ui.pages.home_page import HomePage
 from app.ui.pages.knowledge_page import KnowledgePage
 from app.ui.canvas.tracker_panel import TrackerPanel
+from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
 
 
 ZOOM_FACTOR = 1.15
@@ -48,6 +48,8 @@ class CanvasView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._zoom_level = 1.0
+        self._panning = False
+        self._pan_last_pos = QPointF()
         self.setAcceptDrops(True)
         self.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -69,6 +71,37 @@ class CanvasView(QGraphicsView):
                 self._zoom_level = new_zoom
                 self.scale(factor, factor)
         event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_last_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._panning:
+            delta = event.position() - self._pan_last_pos
+            self._pan_last_pos = event.position()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - int(delta.x())
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - int(delta.y())
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
+            self._panning = False
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -114,6 +147,9 @@ class MainWindow(QMainWindow):
     def __init__(self, config_path: Path | None = None):
         super().__init__()
         self._config_path = config_path
+        self._global_shortcuts: ShortcutRegistry | None = None
+        self._code_shortcuts: ShortcutRegistry | None = None
+        self._code_key_actions: dict[int, Callable[[], None]] = {}
         self.setWindowTitle("C++ Memory Visualizer")
         self.setMinimumSize(1200, 700)
         self._setup_ui()
@@ -122,6 +158,10 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._setup_statusbar()
         self._setup_overlay()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     def _setup_ui(self):
         self._tabs = QTabWidget()
@@ -238,9 +278,64 @@ class MainWindow(QMainWindow):
         self._overlay.setGeometry(self.centralWidget().rect())
 
     def _setup_shortcuts(self):
-        QShortcut(QKeySequence("Ctrl+="), self, self.canvas_view.zoom_in)
-        QShortcut(QKeySequence("Ctrl+-"), self, self.canvas_view.zoom_out)
-        QShortcut(QKeySequence("Ctrl+0"), self, self.canvas_view.reset_view)
+        self._global_shortcuts = ShortcutRegistry(self)
+        self._global_shortcuts.register_many([
+            ShortcutBinding(
+                sequence="Ctrl+=",
+                name="zoom_in",
+                description="Zoom in the canvas",
+                callback=self.canvas_view.zoom_in,
+                context=Qt.ShortcutContext.WindowShortcut,
+            ),
+            ShortcutBinding(
+                sequence="Ctrl+-",
+                name="zoom_out",
+                description="Zoom out the canvas",
+                callback=self.canvas_view.zoom_out,
+                context=Qt.ShortcutContext.WindowShortcut,
+            ),
+            ShortcutBinding(
+                sequence="Ctrl+0",
+                name="zoom_reset",
+                description="Reset canvas zoom",
+                callback=self.canvas_view.reset_view,
+                context=Qt.ShortcutContext.WindowShortcut,
+            ),
+        ])
+
+        self._code_shortcuts = ShortcutRegistry(self._code_tab)
+        self._code_key_actions = {
+            Qt.Key.Key_PageUp: self.btn_prev.click,
+            Qt.Key.Key_PageDown: self.btn_next.click,
+            Qt.Key.Key_F5: self.btn_run.click,
+            Qt.Key.Key_F6: self.btn_reset.click,
+        }
+        self._code_shortcuts.register_many([
+            ShortcutBinding(
+                sequence="PageUp",
+                name="prev step",
+                description="Go to the previous execution step",
+                callback=self.btn_prev.click,
+            ),
+            ShortcutBinding(
+                sequence="PageDown",
+                name="next step",
+                description="Go to the next execution step",
+                callback=self.btn_next.click,
+            ),
+            ShortcutBinding(
+                sequence="F5",
+                name="run",
+                description="Run the current code",
+                callback=self.btn_run.click,
+            ),
+            ShortcutBinding(
+                sequence="F6",
+                name="reset",
+                description="Reset the current execution",
+                callback=self.btn_reset.click,
+            ),
+        ])
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Main")
@@ -251,6 +346,7 @@ class MainWindow(QMainWindow):
         self.btn_next = QPushButton("Next Step")
         self.btn_prev = QPushButton("Prev Step")
         self.btn_reset = QPushButton("Reset")
+        self.btn_run.setObjectName("run")
         self.btn_next.setEnabled(False)
         self.btn_prev.setEnabled(False)
         self.btn_reset.setEnabled(False)
@@ -320,3 +416,20 @@ class MainWindow(QMainWindow):
 
     def get_code(self) -> str:
         return self.code_editor.toPlainText().strip()
+
+    def eventFilter(self, obj, event):
+        if self._current_code_tab_active():
+            if event.type() in (
+                QEvent.Type.ShortcutOverride,
+                QEvent.Type.KeyPress,
+            ):
+                key = getattr(event, "key", lambda: None)()
+                if key in self._code_key_actions and not event.modifiers():
+                    event.accept()
+                    if event.type() == QEvent.Type.KeyPress:
+                        self._code_key_actions[key]()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _current_code_tab_active(self) -> bool:
+        return self._tabs.currentWidget() is self._code_tab
