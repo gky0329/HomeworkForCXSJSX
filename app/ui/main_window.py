@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout,
     QLabel, QPushButton, QMenu, QTabWidget,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QPointF
+from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
 
 from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY
@@ -134,8 +134,37 @@ class CanvasView(QGraphicsView):
             self.scale(1 / ZOOM_FACTOR, 1 / ZOOM_FACTOR)
 
     def zoom_fit(self):
-        self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        fit_rect = self._fit_bounds()
+        if not fit_rect.isValid() or fit_rect.isEmpty():
+            return
+        self.fitInView(fit_rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._zoom_level = self.transform().m11()
+
+    def _fit_bounds(self):
+        scene = self.scene()
+        if scene is None:
+            return QRectF()
+
+        scene_rect = scene.sceneRect()
+        bounds = QRectF()
+
+        for item in scene.items():
+            if item.parentItem() is not None or not item.isVisible():
+                continue
+
+            visual_bounds = getattr(item, "visual_bounds", None)
+            if callable(visual_bounds):
+                item_bounds = item.mapRectToScene(visual_bounds())
+            else:
+                item_bounds = item.sceneBoundingRect()
+
+            item_bounds = item_bounds.intersected(scene_rect)
+            if item_bounds.isEmpty():
+                continue
+
+            bounds = item_bounds if bounds.isNull() else bounds.united(item_bounds)
+
+        return bounds.adjusted(-24.0, -24.0, 24.0, 24.0)
 
     def reset_view(self):
         self.resetTransform()

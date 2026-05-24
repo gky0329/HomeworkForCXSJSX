@@ -47,6 +47,11 @@ class EdgeItem(QGraphicsPathItem):
         angle = atan2(tgt_pos.y() - c2.y(), tgt_pos.x() - c2.x())
         self._arrow_polygon = self._make_arrow(tgt_pos, angle)
 
+    def visual_bounds(self) -> QRectF:
+        bounds = self.path().boundingRect()
+        bounds = bounds.united(self._arrow_polygon.boundingRect())
+        return bounds.adjusted(-3.0, -3.0, 3.0, 3.0)
+
     def _make_arrow(self, tip: QPointF, angle: float) -> QPolygonF:
         p1 = tip
         p2 = QPointF(
