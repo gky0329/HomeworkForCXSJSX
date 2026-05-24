@@ -280,6 +280,17 @@ class HeapItem(QGraphicsRectItem):
         if clamped != current:
             self.setPos(clamped)
 
+    def visual_bounds(self):
+        """Return the full visual bounds of this heap block, including child items."""
+        bounds = self.mapRectToParent(self.rect())
+        for child in self.childItems():
+            try:
+                child_bounds = child.mapToParent(child.boundingRect()).boundingRect()
+                bounds = bounds.united(child_bounds)
+            except Exception:
+                continue
+        return bounds
+
     def _refresh_plain_geometry(self, block: HeapBlock):
         addr_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
         type_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
@@ -367,7 +378,10 @@ class HeapItem(QGraphicsRectItem):
             self._value_label.setPlainText(new_value)
         self._refresh_geometry()
         if self._on_item_moved:
-            self._on_item_moved(self)
+            try:
+                self._on_item_moved(self, 'resize')
+            except TypeError:
+                self._on_item_moved(self)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:

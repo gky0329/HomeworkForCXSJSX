@@ -203,7 +203,11 @@ class StackItem(QGraphicsRectItem):
         self.setRect(0, 0, width, total_h)
         self._clamp_within_scene()
         if self._on_item_moved:
-            self._on_item_moved(self)
+            try:
+                self._on_item_moved(self, 'resize')
+            except TypeError:
+                # fallback for older callbacks that don't accept cause
+                self._on_item_moved(self)
 
     def _clamp_within_scene(self):
         scene = self.scene()
@@ -221,6 +225,20 @@ class StackItem(QGraphicsRectItem):
         )
         if clamped != current:
             self.setPos(clamped)
+
+    def visual_bounds(self):
+        """Return the full visual bounds of this stack frame, including child text.
+
+        This can be larger than the frame rect when text extends beyond the box.
+        """
+        bounds = self.mapRectToParent(self.rect())
+        for child in self.childItems():
+            try:
+                child_bounds = child.mapToParent(child.boundingRect()).boundingRect()
+                bounds = bounds.united(child_bounds)
+            except Exception:
+                continue
+        return bounds
 
     def _calc_height(self, frame: StackFrame) -> float:
         y_offset = self.TITLE_HEIGHT

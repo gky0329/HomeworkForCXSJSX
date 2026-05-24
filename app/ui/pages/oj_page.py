@@ -264,6 +264,7 @@ class OJPage(QWidget):
 
         if trace.steps:
             self._memory_canvas.render_state(trace.steps[0])
+            self._canvas_view.zoom_fit()
             self._update_controls()
 
     def _build_analysis(self, a: dict):
