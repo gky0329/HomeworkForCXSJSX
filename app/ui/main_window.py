@@ -4,7 +4,7 @@ from collections.abc import Callable
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QSplitter, QPlainTextEdit, QGraphicsView,
     QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout,
-    QLabel, QPushButton, QMenu, QTabWidget,
+    QLabel, QPushButton, QMenu, QTabWidget, QCheckBox,
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
@@ -406,6 +406,10 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.btn_zoom_out)
         toolbar.addWidget(self.btn_zoom_in)
         toolbar.addWidget(self.btn_zoom_fit)
+
+        self.auto_fit_check = QCheckBox("Auto Fit")
+        self.auto_fit_check.setChecked(True)
+        toolbar.addWidget(self.auto_fit_check)
 
         spacer = QWidget()
         spacer.setFixedWidth(16)

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.ui.widgets.error_dialog import show_error_dialog
+from PySide6.QtCore import QTimer
 from app.core.memory_model import ExecutionTrace, MemoryState
 from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
@@ -60,6 +61,8 @@ class Engine:
             self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
+            if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+                QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
                 f"Ready — {len(trace.steps)} steps loaded"
@@ -100,10 +103,11 @@ class Engine:
 
         diff = self._diff_engine.diff(prev_state, curr_state)
         self._animator.stop_all()
-        self._canvas.clear()
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
         self._animator.animate_diff(diff)
+        if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
 
     def _on_prev(self):
@@ -113,9 +117,10 @@ class Engine:
         self._current_index -= 1
         curr_state = self._trace.steps[self._current_index]
         self._animator.stop_all()
-        self._canvas.clear()
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
+        if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
 
     def _on_reset(self):

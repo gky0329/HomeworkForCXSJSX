@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QGraphicsView, QGraphicsScene,
     QSplitter, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QRectF
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent
 
 from app.core.memory_model import ExecutionTrace
@@ -253,18 +253,10 @@ class OJPage(QWidget):
 
         if self._autogen:
             refs = analysis.get("reference_answers", [])
-            if refs:
-                gen_code = refs[0].get("code", "") or refs[0].get("explanation", "")
-                if gen_code:
-                    self._code_edit.setPlainText(gen_code)
-                    self._autogen = False
 
-        error_store.log_activity("OJ Analysis", f"Analyzed {len(trace.steps)} steps")
-        self._build_analysis(analysis)
 
         if trace.steps:
             self._memory_canvas.render_state(trace.steps[0])
-            self._canvas_view.zoom_fit()
             self._update_controls()
 
     def _build_analysis(self, a: dict):
@@ -426,7 +418,6 @@ class OJPage(QWidget):
         self._current_index -= 1
         curr_state = self._trace.steps[self._current_index]
         self._animator.stop_all()
-        self._memory_canvas.clear()
         self._memory_canvas.render_state(curr_state)
         self._update_controls()
 
@@ -441,7 +432,6 @@ class OJPage(QWidget):
         curr_state = self._trace.steps[self._current_index]
         diff = self._diff_engine.diff(prev_state, curr_state)
         self._animator.stop_all()
-        self._memory_canvas.clear()
         self._memory_canvas.render_state(curr_state)
         self._animator.animate_diff(diff)
         self._update_controls()
@@ -501,7 +491,7 @@ class OJPage(QWidget):
         parent_layout.addLayout(self._test_list)
 
         run_row = QHBoxLayout()
-        self._run_tests_btn = QPushButton("Compile & Run Tests")
+        self._run_tests_btn = QPushButton("Run Tests")
         self._run_tests_btn.clicked.connect(self._on_compile_run)
         self._run_tests_btn.setVisible(False)
         run_row.addWidget(self._run_tests_btn)
@@ -573,6 +563,38 @@ class OJPage(QWidget):
     @staticmethod
     def _create_canvas_view() -> QGraphicsView:
         class _OJCanvasView(QGraphicsView):
+            def zoom_fit(self):
+                fit_rect = self._fit_bounds()
+                if not fit_rect.isValid() or fit_rect.isEmpty():
+                    return
+                self.fitInView(fit_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+            def _fit_bounds(self):
+                scene = self.scene()
+                if scene is None:
+                    return QRectF()
+
+                scene_rect = scene.sceneRect()
+                bounds = QRectF()
+
+                for item in scene.items():
+                    if item.parentItem() is not None or not item.isVisible():
+                        continue
+
+                    visual_bounds = getattr(item, "visual_bounds", None)
+                    if callable(visual_bounds):
+                        item_bounds = item.mapRectToScene(visual_bounds())
+                    else:
+                        item_bounds = item.sceneBoundingRect()
+
+                    item_bounds = item_bounds.intersected(scene_rect)
+                    if item_bounds.isEmpty():
+                        continue
+
+                    bounds = item_bounds if bounds.isNull() else bounds.united(item_bounds)
+
+                return bounds.adjusted(-24.0, -24.0, 24.0, 24.0)
+
             def wheelEvent(self, event: QWheelEvent):
                 event.accept()
         return _OJCanvasView()

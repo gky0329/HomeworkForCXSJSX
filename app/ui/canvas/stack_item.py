@@ -127,6 +127,25 @@ class StackItem(QGraphicsRectItem):
         if any(v.is_temporary for v in frame.variables):
             self.setPen(QPen(QColor("#DCDCAA"), 1.5, Qt.PenStyle.DashLine))
 
+    def _clear_children(self):
+        for child in list(self.childItems()):
+            child.setParentItem(None)
+            if child.scene() is not None:
+                child.scene().removeItem(child)
+
+    def update_frame(self, frame: StackFrame):
+        self.frame = frame
+        self.var_items = {}
+        self._layout_items = []
+        self._array_cells = []
+        self._clear_children()
+
+        self._title_item = QGraphicsTextItem(self)
+        self._title_item.setDefaultTextColor(QColor(STACK_TITLE))
+        self._title_item.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11, QFont.Weight.Bold))
+
+        self._build(frame)
+
     def refresh_geometry(self):
         # First, compute a baseline width from heuristics
         heuristic_w = self._calc_width(self.frame)
