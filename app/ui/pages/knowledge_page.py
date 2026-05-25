@@ -281,7 +281,25 @@ class KnowledgePage(QWidget):
             f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
         )
         concept_name = name
-        def on_explain(btn=explain_btn, n=concept_name):
+        desc = kp.get("description", "")
+        if desc:
+            self._detail_layout.addSpacing(4)
+            self._detail_layout.addWidget(
+                mlabel(f"AI Explanation:", ACCENT, 12, True)
+            )
+            self._detail_layout.addWidget(mlabel(desc, TEXT_PRIMARY, 12))
+
+        def on_explain(btn=explain_btn, n=concept_name, kp_dict=kp):
+            kps = error_store.get_knowledge_points()
+            cached = next((k.get("description", "") for k in kps if k["name"] == n), "")
+            if cached:
+                self._detail_layout.addWidget(
+                    mlabel(f"AI Explanation for '{n}':", ACCENT, 12, True)
+                )
+                self._detail_layout.addWidget(mlabel(cached, TEXT_PRIMARY, 12))
+                self._detail_layout.addStretch()
+                return
+
             btn.setEnabled(False)
             btn.setText("Asking AI...")
             worker = AIExplainWorker(
@@ -291,6 +309,7 @@ class KnowledgePage(QWidget):
             def on_done(text):
                 btn.setEnabled(True)
                 btn.setText("Explain with AI")
+                error_store.set_knowledge_description(n, text)
                 self._detail_layout.addWidget(
                     mlabel(f"AI Explanation for '{n}':", ACCENT, 12, True)
                 )

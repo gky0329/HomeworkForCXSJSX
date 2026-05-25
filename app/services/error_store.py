@@ -151,9 +151,20 @@ def add_knowledge_point(name: str, source: str = ""):
             "name": name,
             "source": source,
             "count": 1,
+            "description": "",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         _save(KNOWLEDGE_PATH, kps)
+
+
+def set_knowledge_description(name: str, description: str):
+    with _lock:
+        kps = _load(KNOWLEDGE_PATH)
+        for kp in kps:
+            if kp["name"] == name:
+                kp["description"] = description
+                _save(KNOWLEDGE_PATH, kps)
+                return
 
 
 def get_knowledge_points() -> list:
