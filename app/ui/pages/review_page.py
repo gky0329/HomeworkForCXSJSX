@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
+from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -202,6 +203,35 @@ class ReviewPage(QWidget):
         save_timer.timeout.connect(debounced_save)
         notes_edit.textChanged.connect(save_timer.start)
         self._reveal_stack.addWidget(notes_edit)
+
+        hint_btn = QPushButton("AI Hint")
+        hint_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
+            f"border-radius: 6px; padding: 6px 16px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+        )
+        q_text = card.get("question", "")
+        kp = card.get("knowledge_point", "")
+        def on_hint(btn=hint_btn):
+            btn.setEnabled(False)
+            btn.setText("Thinking...")
+            worker = AIExplainWorker(
+                HINT_PROMPT,
+                f"知识点：{kp}\n题目：{q_text}\n请给提示",
+            )
+            def on_done(text):
+                btn.setEnabled(True)
+                btn.setText("AI Hint")
+                self._reveal_stack.addWidget(mlabel(f"💡 {text}", ACCENT, 12))
+            def on_err(msg):
+                btn.setEnabled(True)
+                btn.setText("AI Hint (failed)")
+            worker.finished.connect(on_done)
+            worker.error.connect(on_err)
+            worker.start()
+        hint_btn.clicked.connect(on_hint)
+        self._reveal_stack.addWidget(hint_btn)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)

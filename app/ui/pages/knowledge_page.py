@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QMargins
 
 from app.services import error_store
+from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -270,5 +271,38 @@ class KnowledgePage(QWidget):
             btn.setEnabled(False)
         add_review_btn.clicked.connect(add_to_review)
         self._detail_layout.addWidget(add_review_btn)
+
+        self._detail_layout.addSpacing(4)
+        explain_btn = QPushButton("Explain with AI")
+        explain_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
+            f"border-radius: 4px; padding: 4px 12px; font-size: 11px; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+        )
+        concept_name = name
+        def on_explain(btn=explain_btn, n=concept_name):
+            btn.setEnabled(False)
+            btn.setText("Asking AI...")
+            worker = AIExplainWorker(
+                EXPLAIN_PROMPT,
+                f"请解释 C++ 知识点：{n}",
+            )
+            def on_done(text):
+                btn.setEnabled(True)
+                btn.setText("Explain with AI")
+                self._detail_layout.addWidget(
+                    mlabel(f"AI Explanation for '{n}':", ACCENT, 12, True)
+                )
+                self._detail_layout.addWidget(mlabel(text, TEXT_PRIMARY, 12))
+                self._detail_layout.addStretch()
+            def on_err(msg):
+                btn.setEnabled(True)
+                btn.setText("Explain with AI (failed)")
+            worker.finished.connect(on_done)
+            worker.error.connect(on_err)
+            worker.start()
+        explain_btn.clicked.connect(on_explain)
+        self._detail_layout.addWidget(explain_btn)
 
         self._detail_layout.addStretch()

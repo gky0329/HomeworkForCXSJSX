@@ -88,3 +88,56 @@ class AIService:
         raise RuntimeError(
             f"AI API call failed after {max_retries + 1} attempts: {last_error}"
         )
+
+    async def chat_text(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_retries: int = 1,
+        model: str | None = None,
+    ) -> str:
+        if not self.api_key:
+            raise RuntimeError("API key not configured.")
+
+        url = f"{self.api_base.rstrip('/')}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
+            except httpx.ConnectError as e:
+                last_error = RuntimeError(f"Cannot reach API: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+            except httpx.TimeoutException as e:
+                last_error = RuntimeError(f"Request timed out: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(1)
+                    continue
+
+        raise RuntimeError(
+            f"AI API call failed after {max_retries + 1} attempts: {last_error}"
+        )
