@@ -19,7 +19,7 @@ from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ_AUTOGEN_TEMPLATE
 from app.services.compile_runner import compile_and_run
-from app.ui.widgets.helpers import clear_layout
+from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -335,14 +335,8 @@ class OJPage(QWidget):
 
         code = kp.get("code", "")
         if code:
-            cf = QFrame()
-            cf.setStyleSheet(CODE_BG)
-            cl = QVBoxLayout(cf)
-            cl.setContentsMargins(6, 4, 6, 4)
-            c = QLabel(code)
-            c.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
-            c.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
-            cl.addWidget(c)
+            cf = build_code_block(code, text_color=TEXT_PRIMARY,
+                                  bg_color=CANVAS_BG, border_color=BORDER)
             vbox.addWidget(cf)
 
         review_btn = QPushButton("Add to Review")
@@ -396,15 +390,8 @@ class OJPage(QWidget):
 
         code = ref.get("code", "")
         if code:
-            cf = QFrame()
-            cf.setStyleSheet(CODE_BG)
-            cl = QVBoxLayout(cf)
-            cl.setContentsMargins(6, 4, 6, 4)
-            c = QLabel(code)
-            c.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
-            c.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
-            c.setWordWrap(True)
-            cl.addWidget(c)
+            cf = build_code_block(code, text_color=TEXT_PRIMARY,
+                                  bg_color=CANVAS_BG, border_color=BORDER)
             vbox.addWidget(cf)
 
         self._analysis_layout.addWidget(card)
