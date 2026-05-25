@@ -17,7 +17,7 @@ from app.services.file_service import (
 from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
-from app.ui.widgets.helpers import clear_layout
+from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -287,28 +287,15 @@ class FileImportPage(QWidget):
 
         code = kp.get("code_snippet", "")
         if code:
-            code_frame = QFrame()
-            code_frame.setStyleSheet(
-                f"background-color: {CANVAS_BG}; border: 1px solid {BORDER}; "
-                "border-radius: 4px; padding: 6px; margin: 4px 0;"
-            )
-            cf_layout = QVBoxLayout(code_frame)
-            cf_layout.setContentsMargins(6, 4, 6, 4)
-
-            code_label = QLabel(code)
-            code_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
-            code_label.setStyleSheet(
-                f"color: {TEXT_PRIMARY}; background: transparent; border: none;"
-            )
-            code_label.setWordWrap(True)
-            cf_layout.addWidget(code_label)
+            code_frame = build_code_block(code, text_color=TEXT_PRIMARY,
+                                           bg_color=CANVAS_BG, border_color=BORDER)
 
             viz_btn = QPushButton("Visualize this code")
             viz_btn.setObjectName("visualizeBtn")
             viz_btn.clicked.connect(
                 lambda checked=None, c=code: self.visualize_requested.emit(c)
             )
-            cf_layout.addWidget(viz_btn)
+            code_frame.layout().addWidget(viz_btn)
 
             layout.addWidget(code_frame)
 

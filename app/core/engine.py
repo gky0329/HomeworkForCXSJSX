@@ -60,6 +60,7 @@ class Engine:
             self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
+            self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
                 f"Ready — {len(trace.steps)} steps loaded"
@@ -127,7 +128,32 @@ class Engine:
         self._window.step_label.setText("Ready")
         self._update_controls()
 
-    def _update_controls(self):
+    def _ingest_knowledge(self, trace: ExecutionTrace):
+        concepts: set[str] = set()
+        for step in trace.steps:
+            for frame in step.stack:
+                for var in frame.variables:
+                    if var.is_object and var.class_name:
+                        concepts.add(var.class_name)
+                    if var.is_array:
+                        concepts.add("数组")
+                    if var.is_function_object:
+                        concepts.add("Lambda/函数对象")
+                    if var.virtual_methods:
+                        concepts.add("虚函数/多态")
+                    if var.is_reference:
+                        concepts.add("引用")
+                    if var.is_pointer:
+                        concepts.add("指针")
+                    if var.base_classes:
+                        concepts.add("继承")
+                    if var.is_constructed:
+                        concepts.add("构造/析构")
+            for block in step.heap:
+                if block.is_array:
+                    concepts.add("堆数组")
+        for c in concepts:
+            error_store.add_knowledge_point(c, "code_editor")
         total = len(self._trace.steps) if self._trace else 0
         current = self._current_index + 1 if self._current_index >= 0 else 0
 

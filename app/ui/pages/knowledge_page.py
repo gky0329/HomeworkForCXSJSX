@@ -9,7 +9,7 @@ from app.services import error_store
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT,
+    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING,
 )
 
 
@@ -246,5 +246,29 @@ class KnowledgePage(QWidget):
                 self._detail_layout.addWidget(
                     mlabel(f"  [{reviewed}] {q}", TEXT_SECONDARY, 11)
                 )
+
+        self._detail_layout.addSpacing(8)
+        add_review_btn = QPushButton("Add to Review")
+        add_review_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+            f"border-radius: 4px; padding: 4px 12px; font-size: 11px; }}"
+            f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+        )
+        kp_name = name
+        def add_to_review(btn=add_review_btn, n=kp_name):
+            error_store.add_error(
+                knowledge_point=n, question=f"Review {n}",
+                user_answer="", correct_answer=f"Study concept: {n}",
+            )
+            btn.setText("✓ Added")
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: #1A3A2A; "
+                f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                f"border-radius: 4px; padding: 4px 12px; font-size: 11px; }}"
+            )
+            btn.setEnabled(False)
+        add_review_btn.clicked.connect(add_to_review)
+        self._detail_layout.addWidget(add_review_btn)
 
         self._detail_layout.addStretch()
