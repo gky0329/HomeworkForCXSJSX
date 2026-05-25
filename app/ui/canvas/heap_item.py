@@ -55,6 +55,8 @@ class HeapItem(QGraphicsRectItem):
         self.block = block
         self.address = block.address
         self._value_label = None
+        # Restore visibility in case a previous "freed" animation faded this item out.
+        self.setOpacity(1.0)
         self._rebuild_cells()
         if self._on_item_moved:
             try:
