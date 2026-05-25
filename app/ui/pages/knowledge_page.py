@@ -289,39 +289,39 @@ class KnowledgePage(QWidget):
             )
             self._detail_layout.addWidget(mlabel(desc, TEXT_PRIMARY, 12))
 
-        def on_explain(btn=explain_btn, n=concept_name, kp_dict=kp):
+        def on_explain():
             kps = error_store.get_knowledge_points()
-            cached = next((k.get("description", "") for k in kps if k["name"] == n), "")
+            cached = next((k.get("description", "") for k in kps if k["name"] == concept_name), "")
             if cached:
                 self._detail_layout.addWidget(
-                    mlabel(f"AI Explanation for '{n}':", ACCENT, 12, True)
+                    mlabel(f"AI Explanation for '{concept_name}':", ACCENT, 12, True)
                 )
                 self._detail_layout.addWidget(mlabel(cached, TEXT_PRIMARY, 12))
                 self._detail_layout.addStretch()
                 return
 
-            btn.setEnabled(False)
-            btn.setText("Asking AI...")
+            explain_btn.setEnabled(False)
+            explain_btn.setText("Asking AI...")
             worker = AIExplainWorker(
                 EXPLAIN_PROMPT,
-                f"请解释 C++ 知识点：{n}",
+                f"请解释 C++ 知识点：{concept_name}",
             )
             def on_done(text):
-                btn.setEnabled(True)
-                btn.setText("Explain with AI")
-                error_store.set_knowledge_description(n, text)
+                explain_btn.setEnabled(True)
+                explain_btn.setText("Explain with AI")
+                error_store.set_knowledge_description(concept_name, text)
                 self._detail_layout.addWidget(
-                    mlabel(f"AI Explanation for '{n}':", ACCENT, 12, True)
+                    mlabel(f"AI Explanation for '{concept_name}':", ACCENT, 12, True)
                 )
                 self._detail_layout.addWidget(mlabel(text, TEXT_PRIMARY, 12))
                 self._detail_layout.addStretch()
             def on_err(msg):
-                btn.setEnabled(True)
-                btn.setText("Explain with AI (failed)")
+                explain_btn.setEnabled(True)
+                explain_btn.setText("Explain with AI (failed)")
             worker.finished.connect(on_done)
             worker.error.connect(on_err)
             worker.start()
-        explain_btn.clicked.connect(on_explain)
+        explain_btn.clicked.connect(lambda checked=None: on_explain())
         self._detail_layout.addWidget(explain_btn)
 
         self._detail_layout.addStretch()

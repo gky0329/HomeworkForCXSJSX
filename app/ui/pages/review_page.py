@@ -148,6 +148,44 @@ class ReviewPage(QWidget):
 
         v.addStretch()
 
+        hint_row = QHBoxLayout()
+        hint_btn = QPushButton("AI Hint")
+        hint_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
+            f"border-radius: 6px; padding: 6px 16px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+        )
+        q_text = card.get("question", "")
+        kp_text = card.get("knowledge_point", "")
+        hint_label = QLabel("")
+        hint_label.setWordWrap(True)
+        hint_label.setVisible(False)
+        hint_label.setStyleSheet(f"color: {ACCENT}; font-size: 12px; padding: 4px 0;")
+        def on_hint():
+            hint_btn.setEnabled(False)
+            hint_btn.setText("Thinking...")
+            worker = AIExplainWorker(
+                HINT_PROMPT,
+                f"知识点：{kp_text}\n题目：{q_text}\n请给提示",
+            )
+            def on_done(text):
+                hint_btn.setEnabled(True)
+                hint_btn.setText("AI Hint")
+                hint_label.setText(f"💡 {text}")
+                hint_label.setVisible(True)
+            def on_err(msg):
+                hint_btn.setEnabled(True)
+                hint_btn.setText("AI Hint (failed)")
+            worker.finished.connect(on_done)
+            worker.error.connect(on_err)
+            worker.start()
+        hint_btn.clicked.connect(lambda checked=None: on_hint())
+        hint_row.addWidget(hint_btn)
+        hint_row.addStretch()
+        v.addLayout(hint_row)
+        v.addWidget(hint_label)
+
         reveal_widget = QWidget()
         reveal_widget.setObjectName("reveal_area")
         reveal_layout = QVBoxLayout(reveal_widget)
@@ -203,35 +241,6 @@ class ReviewPage(QWidget):
         save_timer.timeout.connect(debounced_save)
         notes_edit.textChanged.connect(save_timer.start)
         self._reveal_stack.addWidget(notes_edit)
-
-        hint_btn = QPushButton("AI Hint")
-        hint_btn.setStyleSheet(
-            f"QPushButton {{ background-color: transparent; "
-            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"border-radius: 6px; padding: 6px 16px; font-size: 12px; }}"
-            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
-        )
-        q_text = card.get("question", "")
-        kp = card.get("knowledge_point", "")
-        def on_hint(btn=hint_btn):
-            btn.setEnabled(False)
-            btn.setText("Thinking...")
-            worker = AIExplainWorker(
-                HINT_PROMPT,
-                f"知识点：{kp}\n题目：{q_text}\n请给提示",
-            )
-            def on_done(text):
-                btn.setEnabled(True)
-                btn.setText("AI Hint")
-                self._reveal_stack.addWidget(mlabel(f"💡 {text}", ACCENT, 12))
-            def on_err(msg):
-                btn.setEnabled(True)
-                btn.setText("AI Hint (failed)")
-            worker.finished.connect(on_done)
-            worker.error.connect(on_err)
-            worker.start()
-        hint_btn.clicked.connect(on_hint)
-        self._reveal_stack.addWidget(hint_btn)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
