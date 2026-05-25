@@ -64,7 +64,6 @@ class Engine:
             self._window.statusBar().showMessage(
                 f"Ready — {len(trace.steps)} steps loaded"
             )
-            self._window.canvas_view.zoom_fit()
         else:
             self._current_index = -1
             self._window.statusBar().showMessage("AI returned empty trace")
