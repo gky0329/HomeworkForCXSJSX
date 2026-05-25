@@ -91,6 +91,8 @@ class MemoryCanvas:
 
         self._render_ref_edges(state)
 
+        self._auto_center()
+
     def _render_ref_edges(self, state: MemoryState):
         for frame in state.stack:
             for var in frame.variables:
