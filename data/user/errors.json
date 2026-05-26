@@ -23,12 +23,12 @@
     "correct_answer": "Study concept: Pointers",
     "context": "",
     "timestamp": "2026-05-25T03:57:39.723061+00:00",
-    "reviewed": false,
-    "review_count": 0,
-    "n": 0,
-    "ef": 2.5,
+    "reviewed": true,
+    "review_count": 1,
+    "n": 1,
+    "ef": 2.6,
     "interval": 1,
-    "next_review": "2026-05-25T03:57:39.723061+00:00",
+    "next_review": "2026-05-27T00:47:26.838153+00:00",
     "notes": ""
   },
   {
