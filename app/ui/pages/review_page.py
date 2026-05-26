@@ -165,7 +165,7 @@ class ReviewPage(QWidget):
         def on_hint():
             hint_btn.setEnabled(False)
             hint_btn.setText("Thinking...")
-            worker = AIExplainWorker(
+            self._hint_worker = AIExplainWorker(
                 HINT_PROMPT,
                 f"知识点：{kp_text}\n题目：{q_text}\n请给提示",
             )
@@ -177,9 +177,9 @@ class ReviewPage(QWidget):
             def on_err(msg):
                 hint_btn.setEnabled(True)
                 hint_btn.setText("AI Hint (failed)")
-            worker.finished.connect(on_done)
-            worker.error.connect(on_err)
-            worker.start()
+            self._hint_worker.finished.connect(on_done)
+            self._hint_worker.error.connect(on_err)
+            self._hint_worker.start()
         hint_btn.clicked.connect(lambda checked=None: on_hint())
         hint_row.addWidget(hint_btn)
         hint_row.addStretch()

@@ -302,7 +302,7 @@ class KnowledgePage(QWidget):
 
             explain_btn.setEnabled(False)
             explain_btn.setText("Asking AI...")
-            worker = AIExplainWorker(
+            self._explain_worker = AIExplainWorker(
                 EXPLAIN_PROMPT,
                 f"请解释 C++ 知识点：{concept_name}",
             )
@@ -318,9 +318,9 @@ class KnowledgePage(QWidget):
             def on_err(msg):
                 explain_btn.setEnabled(True)
                 explain_btn.setText("Explain with AI (failed)")
-            worker.finished.connect(on_done)
-            worker.error.connect(on_err)
-            worker.start()
+            self._explain_worker.finished.connect(on_done)
+            self._explain_worker.error.connect(on_err)
+            self._explain_worker.start()
         explain_btn.clicked.connect(lambda checked=None: on_explain())
         self._detail_layout.addWidget(explain_btn)
 
