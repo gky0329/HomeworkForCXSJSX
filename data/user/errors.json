@@ -8,11 +8,11 @@
     "context": "",
     "timestamp": "2026-05-25T03:57:41.564276+00:00",
     "reviewed": true,
-    "review_count": 1,
-    "n": 1,
-    "ef": 2.6,
-    "interval": 1,
-    "next_review": "2026-05-26T03:57:47.883553+00:00",
+    "review_count": 2,
+    "n": 2,
+    "ef": 2.7,
+    "interval": 6,
+    "next_review": "2026-06-02T01:39:41.485251+00:00",
     "notes": ""
   },
   {

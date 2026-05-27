@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSplitter, QFrame, QTextEdit, QDialog, QLineEdit,
+    QFrame, QTextEdit, QDialog, QLineEdit,
     QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QTimer

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFileDialog, QScrollArea, QFrame, QComboBox,
     QSplitter,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
 
 from app.services.file_service import (

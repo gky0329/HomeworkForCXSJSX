@@ -1,10 +1,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QScrollArea, QPushButton, QGraphicsDropShadowEffect,
+    QScrollArea, QPushButton,
 )
 from PySide6.QtCore import Qt, QTimer, QMimeData, QPoint
 from PySide6.QtGui import QFont, QColor, QDrag
-from PySide6.QtGui import QFont, QColor
 
 from app.core.memory_model import MemoryState, Variable
 from app.ui.widgets.helpers import clear_layout
