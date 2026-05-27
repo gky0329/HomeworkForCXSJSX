@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.ui.widgets.error_dialog import show_error_dialog
+from PySide6.QtCore import QTimer
 from app.core.memory_model import ExecutionTrace, MemoryState
 from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
@@ -101,10 +102,11 @@ class Engine:
 
         diff = self._diff_engine.diff(prev_state, curr_state)
         self._animator.stop_all()
-        self._canvas.clear()
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
         self._animator.animate_diff(diff)
+        if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
 
     def _on_prev(self):
@@ -114,9 +116,10 @@ class Engine:
         self._current_index -= 1
         curr_state = self._trace.steps[self._current_index]
         self._animator.stop_all()
-        self._canvas.clear()
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
+        if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
 
     def _on_reset(self):
@@ -154,6 +157,19 @@ class Engine:
                     concepts.add("堆数组")
         for c in concepts:
             error_store.add_knowledge_point(c, "code_editor")
+
+    def _update_controls(self):
+        total = len(self._trace.steps) if self._trace else 0
+        current = self._current_index + 1 if self._current_index >= 0 else 0
+
+        self._window.btn_next.setEnabled(
+            self._trace is not None and self._current_index + 1 < total
+        )
+        self._window.btn_prev.setEnabled(
+            self._trace is not None and self._current_index > 0
+        )
+        self._window.btn_reset.setEnabled(self._trace is not None)
+        self._window.set_step_info(current, total)
         total = len(self._trace.steps) if self._trace else 0
         current = self._current_index + 1 if self._current_index >= 0 else 0
 

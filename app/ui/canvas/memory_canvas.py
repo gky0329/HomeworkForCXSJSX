@@ -26,6 +26,7 @@ class MemoryCanvas:
         self._edge_by_target: dict[str, list[EdgeItem]] = {}
         self._next_layout_frame: int = 0
         self._position_cache: dict[tuple[str, str, int], QPointF] = {}
+        self._heap_index_cache: list[QPointF] = []
 
     def clear(self):
         all_items = self._stack_items + self._heap_items + self._edge_items
@@ -39,8 +40,17 @@ class MemoryCanvas:
         self._edge_by_source.clear()
         self._edge_by_target.clear()
 
+    def _clear_edges(self):
+        for edge in self._edge_items:
+            if edge.scene() is not None:
+                self._scene.removeItem(edge)
+        self._edge_items.clear()
+        self._edge_by_source.clear()
+        self._edge_by_target.clear()
+
     def _snapshot_positions(self):
         cache: dict[tuple[str, str, int], QPointF] = {}
+        heap_index_cache: list[QPointF] = []
 
         stack_name_counts: dict[str, int] = {}
         for item in self._stack_items:
@@ -51,38 +61,83 @@ class MemoryCanvas:
 
         for item in self._heap_items:
             cache[("heap", getattr(item, "address", ""), 0)] = QPointF(item.pos())
+            heap_index_cache.append(QPointF(item.pos()))
 
         self._position_cache = cache
+        self._heap_index_cache = heap_index_cache
 
     def render_state(self, state: MemoryState):
         self._snapshot_positions()
-        self.clear()
+        self._clear_edges()
+
+        existing_stack: dict[tuple[str, str, int], StackItem] = {}
+        stack_name_counts: dict[str, int] = {}
+        remaining_stack: list[StackItem] = list(self._stack_items)
+        for item in self._stack_items:
+            frame_name = getattr(getattr(item, "frame", None), "frame_name", "")
+            index = stack_name_counts.get(frame_name, 0)
+            stack_name_counts[frame_name] = index + 1
+            existing_stack[("stack", frame_name, index)] = item
+
+        existing_heap: dict[str, HeapItem] = {item.address: item for item in self._heap_items}
+        remaining_heap: list[HeapItem] = list(self._heap_items)
+
+        self._stack_items = []
+        self._heap_items = []
+        self._address_to_item.clear()
 
         stack_y = START_Y
-        stack_name_counts: dict[str, int] = {}
+        stack_name_counts = {}
         for frame in state.stack:
-            item = StackItem(frame, on_item_moved=self._on_item_moved)
             frame_index = stack_name_counts.get(frame.frame_name, 0)
             stack_name_counts[frame.frame_name] = frame_index + 1
-            preferred_pos = self._position_cache.get(("stack", frame.frame_name, frame_index))
-            item.setPos(preferred_pos if preferred_pos is not None else QPointF(STACK_ITEM_X, stack_y))
-            self._scene.addItem(item)
-            self._register_layout_frame(item, fixed_zero=(frame.frame_name == "main"))
+            key = ("stack", frame.frame_name, frame_index)
+            item = existing_stack.pop(key, None)
+            if item is None and remaining_stack:
+                item = remaining_stack.pop(0)
+            if item is None:
+                item = StackItem(frame, on_item_moved=self._on_item_moved)
+                preferred_pos = self._position_cache.get(key)
+                item.setPos(preferred_pos if preferred_pos is not None else QPointF(STACK_ITEM_X, stack_y))
+                self._scene.addItem(item)
+                self._register_layout_frame(item, fixed_zero=(frame.frame_name == "main"))
+            else:
+                if item in remaining_stack:
+                    remaining_stack.remove(item)
+                item.update_frame(frame)
             self._stack_items.append(item)
             for addr, var_item in item.var_items.items():
                 self._address_to_item[addr] = var_item
             stack_y += item.rect().height() + ITEM_GAP
 
         heap_y = START_Y
-        for block in state.heap:
-            item = HeapItem(block, on_item_moved=self._on_item_moved)
-            preferred_pos = self._position_cache.get(("heap", block.address, 0))
-            item.setPos(preferred_pos if preferred_pos is not None else QPointF(HEAP_ITEM_X, heap_y))
-            self._scene.addItem(item)
-            self._register_layout_frame(item, fixed_zero=False)
+        for idx, block in enumerate(state.heap):
+            item = existing_heap.pop(block.address, None)
+            if item is None and remaining_heap:
+                item = remaining_heap.pop(0)
+            if item is None:
+                item = HeapItem(block, on_item_moved=self._on_item_moved)
+                preferred_pos = self._position_cache.get(("heap", block.address, 0))
+                if preferred_pos is None and idx < len(self._heap_index_cache):
+                    preferred_pos = self._heap_index_cache[idx]
+                item.setPos(preferred_pos if preferred_pos is not None else QPointF(HEAP_ITEM_X, heap_y))
+                self._scene.addItem(item)
+                self._register_layout_frame(item, fixed_zero=False)
+            else:
+                if item in remaining_heap:
+                    remaining_heap.remove(item)
+                item.update_block(block)
             self._heap_items.append(item)
             self._address_to_item[block.address] = item
             heap_y += item.rect().height() + ITEM_GAP
+
+        # remove items that are no longer present
+        for item in list(existing_stack.values()) + remaining_stack:
+            if item.scene() is not None:
+                self._scene.removeItem(item)
+        for item in list(existing_heap.values()) + remaining_heap:
+            if item.scene() is not None:
+                self._scene.removeItem(item)
 
         # Resolve overlaps once in layout order before edges are created.
         self._resolve_layout_once()

@@ -51,6 +51,19 @@ class HeapItem(QGraphicsRectItem):
             if child.scene() is not None:
                 child.scene().removeItem(child)
 
+    def update_block(self, block: HeapBlock):
+        self.block = block
+        self.address = block.address
+        self._value_label = None
+        # Restore visibility in case a previous "freed" animation faded this item out.
+        self.setOpacity(1.0)
+        self._rebuild_cells()
+        if self._on_item_moved:
+            try:
+                self._on_item_moved(self, 'resize')
+            except TypeError:
+                self._on_item_moved(self)
+
     def _build_plain(self, block: HeapBlock):
         addr_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
         type_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
