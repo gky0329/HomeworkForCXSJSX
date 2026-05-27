@@ -170,14 +170,3 @@ class Engine:
         )
         self._window.btn_reset.setEnabled(self._trace is not None)
         self._window.set_step_info(current, total)
-        total = len(self._trace.steps) if self._trace else 0
-        current = self._current_index + 1 if self._current_index >= 0 else 0
-
-        self._window.btn_next.setEnabled(
-            self._trace is not None and self._current_index + 1 < total
-        )
-        self._window.btn_prev.setEnabled(
-            self._trace is not None and self._current_index > 0
-        )
-        self._window.btn_reset.setEnabled(self._trace is not None)
-        self._window.set_step_info(current, total)

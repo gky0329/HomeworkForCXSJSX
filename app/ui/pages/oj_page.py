@@ -253,10 +253,18 @@ class OJPage(QWidget):
 
         if self._autogen:
             refs = analysis.get("reference_answers", [])
+            if refs:
+                gen_code = refs[0].get("code", "") or refs[0].get("explanation", "")
+                if gen_code:
+                    self._code_edit.setPlainText(gen_code)
+                    self._autogen = False
 
+        error_store.log_activity("OJ Analysis", f"Analyzed {len(trace.steps)} steps")
+        self._build_analysis(analysis)
 
         if trace.steps:
             self._memory_canvas.render_state(trace.steps[0])
+            self._canvas_view.zoom_fit()
             self._update_controls()
 
     def _build_analysis(self, a: dict):
