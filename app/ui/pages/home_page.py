@@ -17,9 +17,10 @@ SUBTITLE = f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 2px 0;"
 STAT_NUM = f"color: {STACK_BORDER}; font-size: 26px; font-weight: bold;"
 STAT_LABEL = f"color: {TEXT_SECONDARY}; font-size: 11px;"
 CARD_BG = (
-    f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"QFrame#statCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
     f"border-radius: 10px; }}"
-    f"QFrame:hover {{ border-color: {STACK_BORDER}; }}"
+    f"QFrame#statCard:hover {{ border-color: {STACK_BORDER}; }}"
+    f"QFrame#statCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 LINK_BTN = (
     f"QPushButton {{ background-color: {SURFACE}; color: {ACCENT}; "
@@ -75,10 +76,12 @@ class HomePage(QWidget):
             ("Review Mistakes", "Review", "Practice with spaced repetition\nto master C++ concepts"),
         ]:
             card = QFrame()
+            card.setObjectName("quickCard")
             card.setStyleSheet(
-                f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+                f"QFrame#quickCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
                 f"border-radius: 8px; padding: 10px 14px; }}"
-                f"QFrame:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
+                f"QFrame#quickCard:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
+                f"QFrame#quickCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )
             card.setCursor(Qt.CursorShape.PointingHandCursor)
             idx = TAB_NAMES.get(tab, 0)
@@ -146,6 +149,7 @@ class HomePage(QWidget):
 
     def _stat_card(self, num: str, label: str, tab_name: str | None) -> QFrame:
         card = QFrame()
+        card.setObjectName("statCard")
         card.setStyleSheet(CARD_BG)
 
         if tab_name:

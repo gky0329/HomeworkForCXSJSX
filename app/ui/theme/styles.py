@@ -20,6 +20,20 @@ QMainWindow {{
     background-color: {CANVAS_BG};
 }}
 
+/* ── Kill inherited borders on containers ─────────── */
+QFrame, QGroupBox {{
+    border: none;
+    background: transparent;
+}}
+
+/* ── Typography ────────────────────────────────────── */
+QLabel {{
+    color: {TEXT_PRIMARY};
+    font-size: 14px;
+    border: none;
+    background: transparent;
+}}
+
 /* ── Typography scale ──────────────────────────────────
    24px bold  → page title
    18px bold  → section header
@@ -59,31 +73,20 @@ QPushButton:disabled {{
     font-weight: normal;
 }}
 
-/* ── Card pattern (QFrame) ───────────────────────────── */
-QFrame[kb-card="true"] {{
-    background-color: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: 10px;
-    padding: 16px;
-}}
-QFrame[kb-card="true"]:hover {{
-    border-color: {STACK_BORDER};
-}}
-
 /* ── Code Editor ─────────────────────────────────────── */
 QPlainTextEdit {{
     background-color: {EDITOR_BG};
     color: {EDITOR_TEXT};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 12px 14px;
-    font-size: 14px;
+    border: none;
+    border-left: 2px solid {BORDER};
+    padding: 14px 16px;
+    font-size: 15px;
     line-height: 1.6;
     selection-background-color: {EDITOR_SELECTION};
     selection-color: {TEXT_PRIMARY};
 }}
 QPlainTextEdit:focus {{
-    border-color: {BORDER_FOCUS};
+    border-left: 2px solid {ACCENT};
 }}
 
 /* ── Tab Bar ─────────────────────────────────────────── */
@@ -222,17 +225,17 @@ QScrollArea {{
 QComboBox {{
     background-color: {EDITOR_BG};
     color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: 5px;
+    border: none;
+    border-bottom: 1px solid {BORDER};
     padding: 5px 10px;
     min-height: 26px;
     font-size: 12px;
 }}
 QComboBox:hover {{
-    border-color: {ACCENT};
+    border-bottom: 1px solid {ACCENT};
 }}
 QComboBox:focus {{
-    border-color: {BORDER_FOCUS};
+    border-bottom: 1px solid {ACCENT};
 }}
 QComboBox::drop-down {{
     border: none;
@@ -273,14 +276,13 @@ QSlider::handle:horizontal:hover {{
 QCheckBox {{
     color: {TEXT_PRIMARY};
     spacing: 8px;
-    font-size: 12px;
+    font-size: 13px;
 }}
 QCheckBox::indicator {{
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
     border: 1.5px solid {BORDER};
-    border-radius: 4px;
-    background-color: {EDITOR_BG};
+    background-color: transparent;
 }}
 QCheckBox::indicator:checked {{
     background-color: {ACCENT};
@@ -294,45 +296,45 @@ QCheckBox::indicator:hover {{
 QLineEdit {{
     background-color: {EDITOR_BG};
     color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: 5px;
-    padding: 7px 10px;
-    font-size: 13px;
+    border: none;
+    border-bottom: 1px solid {BORDER};
+    padding: 8px 4px;
+    font-size: 14px;
     selection-background-color: {ACCENT};
 }}
 QLineEdit:focus {{
-    border-color: {BORDER_FOCUS};
+    border-bottom: 1px solid {ACCENT};
 }}
 QLineEdit:disabled {{
     color: {TEXT_MUTED};
-    background-color: {CANVAS_BG};
+    background-color: transparent;
 }}
 
 QTextEdit {{
     background-color: {EDITOR_BG};
     color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: 5px;
-    padding: 8px 10px;
-    font-size: 13px;
+    border: none;
+    border-bottom: 1px solid {BORDER};
+    padding: 10px 4px;
+    font-size: 14px;
     selection-background-color: {ACCENT};
 }}
 QTextEdit:focus {{
-    border-color: {BORDER_FOCUS};
+    border-bottom: 1px solid {ACCENT};
 }}
 
 /* ── List Widget ─────────────────────────────────────── */
 QListWidget {{
-    background-color: {EDITOR_BG};
+    background-color: transparent;
     color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 4px 0;
+    border: none;
+    padding: 0;
     outline: none;
+    font-size: 14px;
 }}
 QListWidget::item {{
-    padding: 8px 14px;
-    border-bottom: 1px solid {CANVAS_BG};
+    padding: 10px 14px;
+    border-bottom: 1px solid {BORDER};
 }}
 QListWidget::item:selected {{
     background-color: {ACCENT};
@@ -358,9 +360,8 @@ QToolTip {{
     background-color: {SURFACE};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
-    border-radius: 5px;
     padding: 5px 10px;
-    font-size: 12px;
+    font-size: 13px;
 }}
 
 /* ── Progress-like highlight ─────────────────────────── */

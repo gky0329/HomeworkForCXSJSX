@@ -71,8 +71,9 @@ RATE_STYLES = {
 }
 
 CARD_STYLE = (
-    f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"QFrame#reviewCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
     f"border-radius: 12px; }}"
+    f"QFrame#reviewCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
 NOTES_STYLE = (
@@ -192,6 +193,7 @@ class ReviewPage(QWidget):
         main.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         c = QFrame()
+        c.setObjectName("reviewCard")
         c.setStyleSheet(CARD_STYLE)
         c.setMaximumWidth(680)
         v = QVBoxLayout(c)

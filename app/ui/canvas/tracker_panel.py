@@ -42,12 +42,14 @@ TRACK_ALL_BTN = (
     f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
 )
 CARD_STYLE = (
-    f"QFrame {{ background-color: #1E2A38; border: 2px solid {STACK_BORDER}; "
+    f"QFrame#trackCard {{ background-color: #1E2A38; border: 2px solid {STACK_BORDER}; "
     f"border-radius: 8px; }}"
+    f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 CARD_DESTROYED = (
-    f"QFrame {{ background-color: {CANVAS_BG}; "
+    f"QFrame#trackCardDestroyed {{ background-color: {CANVAS_BG}; "
     f"border: 1px dashed {EDGE_DANGLING}; border-radius: 8px; }}"
+    f"QFrame#trackCardDestroyed QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
 
@@ -275,6 +277,7 @@ class TrackerPanel(QWidget):
         vbox.setSpacing(2)
 
         if var is None:
+            card.setObjectName("trackCardDestroyed")
             card.setStyleSheet(CARD_DESTROYED)
             nl = QLabel(self._addr_name(address))
             nl.setStyleSheet(
@@ -286,6 +289,7 @@ class TrackerPanel(QWidget):
             vbox.addWidget(dl)
             return card
 
+        card.setObjectName("trackCard")
         card.setStyleSheet(CARD_STYLE)
 
         nl = QLabel(var.name)
@@ -314,6 +318,7 @@ class TrackerPanel(QWidget):
             return
 
         if var is None:
+            card.setObjectName("trackCardDestroyed")
             card.setStyleSheet(CARD_DESTROYED)
             value_label = card.findChild(QLabel, "value_label")
             if value_label:
@@ -323,6 +328,7 @@ class TrackerPanel(QWidget):
                 )
             return
 
+        card.setObjectName("trackCard")
         card.setStyleSheet(CARD_STYLE)
         value_label = card.findChild(QLabel, "value_label")
         if value_label is None:
@@ -335,8 +341,9 @@ class TrackerPanel(QWidget):
                 f"color: {HIGHLIGHT}; font-weight: bold;"
             )
             card.setStyleSheet(
-                f"QFrame {{ background-color: #2A2A10; "
+                f"QFrame#trackCard {{ background-color: #2A2A10; "
                 f"border: 2px solid {HIGHLIGHT}; border-radius: 8px; }}"
+                f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )
 
             def restore(addr=addr, lbl=value_label, card=card):
@@ -347,6 +354,7 @@ class TrackerPanel(QWidget):
                     if v:
                         lbl.setText(f"{v.type}  =  {v.value}")
                 lbl.setStyleSheet(f"color: {TEXT_PRIMARY};")
+                card.setObjectName("trackCard")
                 card.setStyleSheet(CARD_STYLE)
 
             QTimer.singleShot(1200, restore)

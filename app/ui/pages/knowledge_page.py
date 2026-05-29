@@ -61,12 +61,6 @@ def _code_block(match: re.Match) -> str:
     )
 
 
-CARD_BG = (
-    f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
-    f"border-radius: 10px; }}"
-    f"QFrame:hover {{ border-color: {STACK_BORDER}; }}"
-)
-
 TOGGLE_ACTIVE = (
     f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
     f"border: none; border-radius: 4px; padding: 4px 12px; font-size: 12px; font-weight: bold; }}"
@@ -165,10 +159,10 @@ class KnowledgePage(QWidget):
         self._search.setPlaceholderText("Search concepts...")
         self._search.setFixedWidth(220)
         self._search.setStyleSheet(
-            f"QLineEdit {{ background-color: {CANVAS_BG}; "
-            f"color: {TEXT_PRIMARY}; border: 1px solid {BORDER}; "
-            f"border-radius: 6px; padding: 6px 12px; font-size: 13px; }}"
-            f"QLineEdit:focus {{ border-color: {ACCENT}; }}"
+            f"QLineEdit {{ background-color: transparent; "
+            f"color: {TEXT_PRIMARY}; border: none; border-bottom: 1px solid {BORDER}; "
+            f"padding: 6px 4px; font-size: 14px; }}"
+            f"QLineEdit:focus {{ border-bottom: 1px solid {ACCENT}; }}"
         )
         self._search.textChanged.connect(self._on_search)
         header.addWidget(self._search)
@@ -186,8 +180,9 @@ class KnowledgePage(QWidget):
         self._concept_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._concept_list.setWordWrap(True)
         self._concept_list.setStyleSheet(
-            f"QListWidget {{ background-color: {CANVAS_BG}; "
-            f"border: 1px solid {BORDER}; border-radius: 8px; "
+            f"QListWidget {{ background-color: transparent; "
+            f"color: {TEXT_PRIMARY}; border: none; "
+            f"font-size: 14px; }}"
             f"color: {TEXT_PRIMARY}; font-size: 13px; }}"
             f"QListWidget::item {{ padding: 10px 14px; min-height: 32px; "
             f"border-bottom: 1px solid {BORDER}; }}"
@@ -202,9 +197,11 @@ class KnowledgePage(QWidget):
         self._detail_label = mlabel("Select a concept", TEXT_SECONDARY, 13)
         right_layout.addWidget(self._detail_label)
         self._detail = QFrame()
+        self._detail.setObjectName("kbDetail")
         self._detail.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE}; "
-            f"border: 1px solid {BORDER}; border-radius: 10px; padding: 16px; }}"
+            f"QFrame#kbDetail {{ background-color: {SURFACE}; "
+            f"border: none; padding: 16px; }}"
+            f"QFrame#kbDetail QLabel {{ border: none; background: transparent; outline: none; }}"
         )
         self._detail_layout = QVBoxLayout(self._detail)
         self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)

@@ -32,8 +32,9 @@ SCENE_W = 1000
 SCENE_H = 1200
 
 CARD = (
-    f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"QFrame#ojCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
     f"border-radius: 6px; margin: 3px 0; }}"
+    f"QFrame#ojCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 SECTION_TITLE = (
     f"color: {STACK_BORDER}; font-size: 14px; font-weight: bold; "
@@ -313,6 +314,7 @@ class OJPage(QWidget):
 
     def _add_section_card(self, title_text: str, body: str):
         card = QFrame()
+        card.setObjectName("ojCard")
         card.setStyleSheet(CARD)
         vbox = QVBoxLayout(card)
         vbox.setContentsMargins(10, 8, 10, 8)
@@ -331,6 +333,7 @@ class OJPage(QWidget):
 
     def _add_kp_card(self, kp: dict):
         card = QFrame()
+        card.setObjectName("ojCard")
         card.setStyleSheet(CARD)
         vbox = QVBoxLayout(card)
         vbox.setContentsMargins(10, 6, 10, 6)
@@ -383,9 +386,11 @@ class OJPage(QWidget):
 
     def _add_ref_card(self, ref: dict):
         card = QFrame()
+        card.setObjectName("ojRefCard")
         card.setStyleSheet(
-            f"QFrame {{ background-color: #1A2A1A; border: 1px solid #4EC9B0; "
+            f"QFrame#ojRefCard {{ background-color: #1A2A1A; border: 1px solid #4EC9B0; "
             f"border-radius: 6px; margin: 3px 0; }}"
+            f"QFrame#ojRefCard QLabel {{ border: none; background: transparent; outline: none; }}"
         )
         vbox = QVBoxLayout(card)
         vbox.setContentsMargins(10, 6, 10, 6)

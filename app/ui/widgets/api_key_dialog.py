@@ -33,6 +33,22 @@ class ApiKeyDialog(QDialog):
         layout.addWidget(desc)
 
         input_style = (
+            "QLineEdit { padding: 8px; font-size: 13px; border: none; border-bottom: 1px solid #3E3E3E; "
+            "background-color: transparent; color: #D4D4D4; }"
+            "QLineEdit:focus { border-bottom: 1px solid #007ACC; }"
+        )
+        combo_style = (
+            "QComboBox { padding: 6px 8px; font-size: 13px; border: none; border-bottom: 1px solid #3E3E3E; "
+            "background-color: transparent; color: #D4D4D4; } "
+            "QComboBox:focus { border-bottom: 1px solid #007ACC; } "
+            "QComboBox::drop-down { border: none; } "
+            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #808080; font-size: 12px;")
+        layout.addWidget(desc)
+
+        input_style = (
             "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; "
             "border-radius: 4px; background-color: #1E1E1E; color: #D4D4D4; }"
         )
