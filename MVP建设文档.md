@@ -1,5 +1,8 @@
 # MVP 建设文档 — C++ Memory Visualizer
 
+> **Status: MVP COMPLETE + Post-MVP features added (2026-05-30)**
+> Post-MVP additions: OJ Analysis, File Import, Review (SM-2), Knowledge Base + Graph, Settings, AI explanations (markdown), Auto-play, Lazy API prompt
+
 > 本文档是工程级路线图，精确到文件、验收标准和验证命令。
 > 架构和数据契约详见 `need.md` 和 `架构设计文档v2.md`。
 

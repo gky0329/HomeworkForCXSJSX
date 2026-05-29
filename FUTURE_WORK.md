@@ -1,6 +1,36 @@
 # FUTURE WORK — C++ Memory Visualizer
 
-> Last updated: 2026-05-16
+> Last updated: 2026-05-30
+
+---
+
+## ✅ Already Done (since last update)
+
+| Item | Status |
+|------|--------|
+| PageUp/PageDown/F5/F6 shortcuts | ✅ `shortcut_registry.py` + `eventFilter` |
+| Loading overlay with Cancel + elapsed time | ✅ `main_window.py` |
+| Error dialog with Retry + raw response | ✅ `error_dialog.py` |
+| SM-2 spaced repetition | ✅ `error_store.py` — 4-button rating with interval prediction |
+| OJ auto-generate Reference Code | ✅ `OJ_AUTOGEN_TEMPLATE` |
+| Multi-model routing | ✅ `deepseek-chat` for code, `deepseek-reasoner` for OJ/File |
+| Canvas step animation (fly-in, flash, shake+fade) | ✅ `canvas_animator.py` |
+| Variable tracker with drag-drop | ✅ `tracker_panel.py` |
+| Knowledge graph (force-directed) | ✅ Merged into Knowledge Base with List/Graph toggle |
+| EdgeItem bezier routing (close-range left-to-left) | ✅ `edge_item.py` |
+| Keyboard shortcuts | ✅ |
+| AI Hint in Review | ✅ `AIExplainWorker` |
+| Auto-play with speed slider | ✅ `engine.py` + `main_window.py` |
+| Current line highlight in editor | ✅ `engine.py._highlight_current_line()` |
+| Lazy API key prompt (on first Run, not startup) | ✅ `main.py` + `engine.py` |
+| Settings dialog (API Key, Proxy, Model, Code Font Size) | ✅ `api_key_dialog.py` |
+| Example code dropdown (5 scenarios) | ✅ `main_window.py` |
+| Large Prev/Next buttons below canvas | ✅ |
+| Markdown rendering for AI explanations | ✅ `_md_to_html` in `knowledge_page.py` |
+| AI prompt standardization (no filler) | ✅ `ai_explain_worker.py`, `prompt_templates.py` |
+| Graph node click → AI explanation | ✅ callback pattern |
+| Global border-free QFrame/QGroupBox/QLabel | ✅ `styles.py` |
+| Bottom-border underline text inputs | ✅ `styles.py` |
 
 ---
 
@@ -14,26 +44,16 @@
 
 ### 1.2 复杂 C++ 语句支持
 - 见 `docs/future/complex-cpp-support.md`
-- 循环、函数调用栈、struct/class、数组、STL 容器、引用、smart pointers
 
-### 1.3 PPT 文件导入
-- 见 `docs/future/complex-cpp-support.md` (Future File Format 节)
-- `python-pptx` 提取 slide 文本，`_extract_pptx()` 注册到 `file_service.py`
-
-### 1.4 测试用例运行（OJ 模式增强）
-- 用户输入测试输入 → 编译运行 → 对比预期输出
+### 1.3 测试用例运行增强
 - 错误 diff 展示
 - 性能分析（时间/内存）
-- **AI 自动生成 Reference Code**：用户仅粘贴 Problem Description 时，AI 生成参考答案代码并自动填入右侧 Reference Code 编辑器
-- **多模型路由**：不同任务选用不同模型（代码执行 Trace 用 DeepSeek-Flash 性价比高，OJ 解答/代码生成用 DeepSeek-V4-Pro 保证质量）
 
-### 1.5 可视化更多 C++ 概念
+### 1.4 更多可视化概念
 | 概念 | 可视化方式 |
 |------|-----------|
-| 数组 | 连续矩形块 |
-| struct 成员 | 嵌套 StackItem |
 | 链表 | 链式 HeapItem + EdgeItem |
-| 递归调用栈 | 多 StackFrame 动画 |
+| 模板/泛型 | 类型展开 |
 
 ---
 
@@ -41,39 +61,35 @@
 
 ### 2.1 统一导航与状态管理
 - **现状**：Engine 和 OJPage 各自维护 step 导航逻辑（重复代码）
-- **目标**：提取 `StepController` 基类，Engine / OJPage 继承或组合
-- **连带收益**：快捷键统一、动画状态统一、undo/redo 支持
+- **目标**：提取 `StepController` 基类
 
 ### 2.2 跨模块数据流通
-- **OJ Analysis → Review**：错题自动入 Review（已部分实现）
-- **File Import → Code Editor**：Visualize 已实现
-- **Code Editor → Knowledge Graph**：每步执行涉及的知识点自动入库
-- **Review → Knowledge Graph**：错误知识点权重驱动图谱节点大小（已实现）
-- **目标**：任意模块产生的数据都能被其他模块感知和利用
+- ~~OJ → Review~~ ✅、~~File → Code~~ ✅、~~Code → KB~~ ✅、~~Review → Graph~~ ✅
 
 ### 2.3 UI 体验优化
-| 项目 | 现状 | 目标 |
-|------|------|------|
-| 面板拖拽 | 固定分栏 | 可拖拽调整大小、dock/undock |
-| 步骤动画 | 固定 400ms | 可调速 / 可跳过 |
-| 键盘快捷键 | Ctrl+/- 缩放 | PageUp=上一步, PageDown=下一步, F5=Run, F6=Reset |
-| 错误提示 | StatusBar 一行文字 | 弹窗显示原始 LLM 响应 + 重试按钮 |
-| Loading 状态 | 遮罩文字 | 进度条 / 预估时间 |
+| 项目 | 状态 |
+|------|------|
+| ~~步骤动画可调速~~ | ✅ auto-play speed slider |
+| ~~键盘快捷键~~ | ✅ |
+| ~~错误弹窗 + 重试~~ | ✅ |
+| ~~Loading 耗时显示~~ | ✅ |
+| Canvas 截图/PNG 导出 | TODO |
+| Dock/undock 面板 | TODO |
 
 ### 2.4 Canvas 增强
-- **Undo/Redo**：步骤回退时的 diff 反向动画
-- **多标签页 Canvas**：同时观察多个程序的内存状态
-- **性能**：> 50 items 时使用空间索引（R-tree）加速碰撞检测
-- **导出**：当前 Canvas 截图 / SVG 导出
+- Undo/Redo
+- 多标签页 Canvas
+- 性能：> 50 items 时使用空间索引
+- Canvas 导出
 
 ### 2.5 数据持久化与同步
-- **云端同步**：`data/user/` JSON 可选同步到 GitHub Gist
-- **历史记录**：保存最近 10 次执行记录，一键回放
-- **导出/导入**：错误集、知识图谱可导出为 Markdown / JSON
+- 云端同步
+- 历史记录：保存最近 N 次执行，一键回放
+- 导出/导入习题集
 
-### 2.6 Code Cleanup (代码质量)
-- 提取 `clear_layout()` 工具函数消除重复代码
-- `ai_service.py` `Optional[Path]` → `Path | None` 统一类型注解风格
-- `file_import_page.py` 和 `oj_page.py` 知识卡片构建逻辑去重
-- `canvas_animator.py` 定时器管理统一（已完成 gen counter）
-- `error_store.py` 索引 → UUID 迁移（已完成）
+### 2.6 Code Cleanup
+- ~~`clear_layout()` 工具函数~~ ✅
+- ~~类型注解统一~~ ✅
+- ~~canvas_animator gen counter~~ ✅
+- ~~error_store UUID~~ ✅
+- File/OJ 知识卡片去重
