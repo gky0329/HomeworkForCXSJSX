@@ -1,15 +1,16 @@
+import time
 from pathlib import Path
 from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QSplitter, QPlainTextEdit, QGraphicsView,
-    QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout,
-    QLabel, QPushButton, QMenu, QTabWidget, QCheckBox,
+    QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QMenu, QTabWidget, QCheckBox, QComboBox, QSlider,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF
+from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
 
-from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY
+from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT
 from app.ui.pages.file_import_page import FileImportPage
 from app.ui.pages.oj_page import OJPage
 from app.ui.pages.review_page import ReviewPage
@@ -40,6 +41,50 @@ TAB_STYLE = (
     "QTabBar::tab:selected { color: #D4D4D4; border-bottom: 2px solid #007ACC; }"
     "QTabBar::tab:hover { color: #D4D4D4; }"
 )
+
+EXAMPLE_CODES = {
+    "Basic Variables": (
+        "int a = 42;\n"
+        "int b = a + 10;\n"
+        "double pi = 3.14;\n"
+    ),
+    "Pointers": (
+        "int a = 42;\n"
+        "int* p = new int(100);\n"
+        "int* q = &a;\n"
+        "*p = 200;\n"
+        "delete p;\n"
+    ),
+    "Arrays": (
+        "int arr[3] = {10, 20, 30};\n"
+        "int* heap_arr = new int[3]{1, 2, 3};\n"
+        "arr[1] = 99;\n"
+        "delete[] heap_arr;\n"
+    ),
+    "Class & Destructor": (
+        "class Point {\n"
+        "public:\n"
+        "  int x, y;\n"
+        "  Point(int _x, int _y) : x(_x), y(_y) {}\n"
+        "  ~Point() { x = 0; y = 0; }\n"
+        "};\n"
+        "Point* pt = new Point(3, 4);\n"
+        "pt->x = 10;\n"
+        "delete pt;\n"
+    ),
+    "Inheritance": (
+        "class Animal {\n"
+        "public:\n"
+        "  virtual void speak() {}\n"
+        "};\n"
+        "class Dog : public Animal {\n"
+        "public:\n"
+        "  void speak() override {}\n"
+        "};\n"
+        "Animal* a = new Dog();\n"
+        "delete a;\n"
+    ),
+}
 
 
 class CanvasView(QGraphicsView):
@@ -179,6 +224,8 @@ class MainWindow(QMainWindow):
         self._global_shortcuts: ShortcutRegistry | None = None
         self._code_shortcuts: ShortcutRegistry | None = None
         self._code_key_actions: dict[int, Callable[[], None]] = {}
+        self._load_start_time: float = 0.0
+        self._elapsed_timer: QTimer | None = None
         self.setWindowTitle("C++ Memory Visualizer")
         self.setMinimumSize(1200, 700)
         self._setup_ui()
@@ -229,14 +276,9 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(2)
 
         self.code_editor = QPlainTextEdit()
-        self.code_editor.setPlainText(
-            "int a = 42;\n"
-            "int* p = new int(100);\n"
-            "int* q = &a;\n"
-            "*p = 200;\n"
-            "delete p;\n"
-        )
-        self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 14))
+        self.code_editor.setPlainText(EXAMPLE_CODES["Pointers"])
+        font_size = self._read_config_font_size()
+        self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText("// Enter C++ code here...")
 
         self.canvas_view = CanvasView()
@@ -246,8 +288,55 @@ class MainWindow(QMainWindow):
         self.canvas_scene.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.canvas_view.setScene(self.canvas_scene)
 
+        right_pane = QWidget()
+        right_layout = QVBoxLayout(right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        right_layout.addWidget(self.canvas_view, 1)
+
+        step_bar = QHBoxLayout()
+        step_bar.setContentsMargins(8, 4, 8, 4)
+        step_bar.setSpacing(8)
+
+        self.btn_prev_big = QPushButton("< Prev Step")
+        self.btn_prev_big.setStyleSheet(
+            "QPushButton { background-color: #007ACC; color: #FFFFFF; border: none; "
+            "border-radius: 4px; padding: 6px 16px; font-size: 13px; font-weight: bold; } "
+            "QPushButton:hover { background-color: #1A8CD8; } "
+            "QPushButton:disabled { background-color: #3E3E3E; color: #808080; }"
+        )
+        self.btn_prev_big.setEnabled(False)
+        step_bar.addWidget(self.btn_prev_big)
+
+        self.btn_next_big = QPushButton("Next Step >")
+        self.btn_next_big.setStyleSheet(self.btn_prev_big.styleSheet())
+        self.btn_next_big.setEnabled(False)
+        step_bar.addWidget(self.btn_next_big)
+
+        self.btn_autoplay = QPushButton("Auto Play")
+        self.btn_autoplay.setCheckable(True)
+        self.btn_autoplay.setEnabled(False)
+        self.btn_autoplay.setToolTip("Auto-advance through steps")
+        step_bar.addWidget(self.btn_autoplay)
+
+        self._speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self._speed_slider.setRange(200, 2000)
+        self._speed_slider.setValue(800)
+        self._speed_slider.setFixedWidth(80)
+        self._speed_slider.setToolTip("Auto-play speed (200ms fast — 2000ms slow)")
+        step_bar.addWidget(self._speed_slider)
+
+        speed_label = QLabel("speed")
+        speed_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
+        step_bar.addWidget(speed_label)
+
+        step_bar.addStretch()
+
+        right_layout.addLayout(step_bar, 0)
+
         splitter.addWidget(self.code_editor)
-        splitter.addWidget(self.canvas_view)
+        splitter.addWidget(right_pane)
         splitter.setSizes([500, 700])
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 6)
@@ -270,6 +359,7 @@ class MainWindow(QMainWindow):
 
     def _build_oj_tab(self) -> QWidget:
         self.oj_page = OJPage(self._config_path)
+        self.oj_page.visualize_requested.connect(self._on_visualize_from_file)
         return self.oj_page
 
     def _build_review_tab(self) -> QWidget:
@@ -280,27 +370,74 @@ class MainWindow(QMainWindow):
         self.knowledge_page = KnowledgePage()
         return self.knowledge_page
 
-    def _on_tab_changed(self, index: int):
-        if index == self._home_tab_index:
-            self.home_page.refresh()
-        elif index == self._review_tab_index:
-            self.review_page._refresh()
-        if self._overlay.isVisible():
-            self._overlay.setGeometry(self.centralWidget().rect())
-
     def _on_visualize_from_file(self, code: str):
         self.code_editor.setPlainText(code)
         self._tabs.setCurrentWidget(self._code_tab)
-        self.statusBar().showMessage("Code loaded from PDF — click Run to visualize")
+        self.statusBar().showMessage("Code loaded — click Run to visualize")
 
     def _setup_overlay(self):
-        self._overlay = QLabel("Analyzing code with AI...", self.centralWidget())
-        self._overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._overlay.setStyleSheet(
-            "QLabel { background-color: rgba(30,30,30,230); color: #FFD700; "
-            "font-size: 24px; font-weight: bold; }"
+        container = QWidget(self.centralWidget())
+        container.setStyleSheet(
+            "background-color: rgba(30,30,30,230);"
         )
-        self._overlay.setVisible(False)
+        container.setVisible(False)
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(12)
+
+        self._overlay_label = QLabel("Analyzing code with AI...")
+        self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._overlay_label.setStyleSheet(
+            "QLabel { color: #FFD700; font-size: 24px; font-weight: bold; background: transparent; }"
+        )
+        layout.addWidget(self._overlay_label)
+
+        self._overlay_time = QLabel("")
+        self._overlay_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._overlay_time.setStyleSheet(
+            "QLabel { color: #808080; font-size: 14px; background: transparent; }"
+        )
+        layout.addWidget(self._overlay_time)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedWidth(120)
+        cancel_btn.setStyleSheet(
+            "QPushButton { background-color: #3E3E3E; color: #D4D4D4; border: 1px solid #555; "
+            "border-radius: 4px; padding: 6px 16px; font-size: 13px; } "
+            "QPushButton:hover { background-color: #555; }"
+        )
+        cancel_layout = QHBoxLayout()
+        cancel_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cancel_layout.addWidget(cancel_btn)
+        layout.addLayout(cancel_layout)
+
+        self._overlay = container
+
+        cancel_btn.clicked.connect(self._on_cancel_loading)
+        self._elapsed_timer = QTimer()
+        self._elapsed_timer.timeout.connect(self._update_elapsed)
+
+    def _on_cancel_loading(self):
+        if hasattr(self, "_engine") and self._engine is not None:
+            self._engine.cancel_current_run()
+
+    def _update_elapsed(self):
+        elapsed = int(time.time() - self._load_start_time)
+        self._overlay_time.setText(f"{elapsed}s elapsed...")
+
+    def show_loading(self, visible: bool):
+        self._overlay.setVisible(visible)
+        if visible:
+            self._overlay.setGeometry(self.centralWidget().rect())
+            self._overlay.raise_()
+            self._load_start_time = time.time()
+            self._overlay_label.setText("Analyzing code with AI...")
+            self._overlay_time.setText("")
+            self._elapsed_timer.start(1000)
+        else:
+            self._elapsed_timer.stop()
+            self._overlay_time.setText("")
+        self.btn_run.setEnabled(not visible)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -371,6 +508,22 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
+        example_label = QLabel("Example:")
+        example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding-left: 4px;")
+        toolbar.addWidget(example_label)
+        self._example_combo = QComboBox()
+        self._example_combo.addItems(list(EXAMPLE_CODES.keys()))
+        self._example_combo.setCurrentText("Pointers")
+        self._example_combo.setStyleSheet(
+            "QComboBox { padding: 4px 8px; font-size: 12px; border: 1px solid #3E3E3E; "
+            "border-radius: 3px; background-color: #1E1E1E; color: #D4D4D4; min-width: 140px; } "
+            "QComboBox::drop-down { border: none; } "
+            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
+        )
+        self._example_combo.currentTextChanged.connect(self._on_example_changed)
+        toolbar.addWidget(self._example_combo)
+        toolbar.addSeparator()
+
         self.btn_run = QPushButton("Run")
         self.btn_next = QPushButton("Next Step")
         self.btn_prev = QPushButton("Prev Step")
@@ -407,8 +560,14 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.btn_zoom_in)
         toolbar.addWidget(self.btn_zoom_fit)
 
+        toolbar.addSeparator()
+        self.btn_settings = QPushButton("Settings")
+        self.btn_settings.clicked.connect(self._on_api_settings)
+        toolbar.addWidget(self.btn_settings)
+
         self.auto_fit_check = QCheckBox("Auto Fit")
         self.auto_fit_check.setChecked(True)
+        self.auto_fit_check.setToolTip("Auto-fit canvas content on each step")
         toolbar.addWidget(self.auto_fit_check)
 
         spacer = QWidget()
@@ -418,6 +577,18 @@ class MainWindow(QMainWindow):
         self.step_label = QLabel("Ready")
         self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; padding: 0 8px;")
         toolbar.addWidget(self.step_label)
+
+    def _on_example_changed(self, name: str):
+        if name in EXAMPLE_CODES:
+            self.code_editor.setPlainText(EXAMPLE_CODES[name])
+
+    def _on_tab_changed(self, index: int):
+        if index == self._home_tab_index:
+            self.home_page.refresh()
+        elif index == self._review_tab_index:
+            self.review_page._refresh()
+        if self._overlay.isVisible():
+            self._overlay.setGeometry(self.centralWidget().rect())
 
     def _setup_menubar(self):
         settings_menu = QMenu("Settings", self)
@@ -433,13 +604,6 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready — Enter C++ code and click Run")
-
-    def show_loading(self, visible: bool):
-        self._overlay.setVisible(visible)
-        if visible:
-            self._overlay.raise_()
-            self._overlay.setGeometry(self.centralWidget().rect())
-        self.btn_run.setEnabled(not visible)
 
     def set_step_info(self, current: int, total: int):
         if total > 0:
@@ -466,3 +630,15 @@ class MainWindow(QMainWindow):
 
     def _current_code_tab_active(self) -> bool:
         return self._tabs.currentWidget() is self._code_tab
+
+    def _read_config_font_size(self) -> int:
+        try:
+            import yaml
+            config_path = self._config_path or Path(__file__).parent.parent.parent / "config.yaml"
+            if config_path.exists():
+                with open(config_path, "r") as f:
+                    cfg = yaml.safe_load(f) or {}
+                return int(cfg.get("ui", {}).get("code_font_size", 14))
+        except Exception:
+            pass
+        return 14

@@ -78,16 +78,20 @@ class OJWorker(QThread):
             ))
             data = json.loads(raw)
             trace = ExecutionTrace.model_validate(data)
+            analysis = {
+                "overview": data.get("overview", ""),
+                "solution_approach": data.get("solution_approach", ""),
+                "knowledge_points": data.get("knowledge_points", []),
+                "complexity": data.get("complexity", ""),
+                "common_mistakes": data.get("common_mistakes", []),
+                "reference_answers": data.get("reference_answers", []),
+            }
+            missing = [k for k, v in analysis.items() if not v and k != "knowledge_points"]
+            if missing:
+                logger.warning("OJ analysis missing fields: %s", ", ".join(missing))
             self.finished.emit({
                 "trace": trace,
-                "analysis": {
-                    "overview": data.get("overview", ""),
-                    "solution_approach": data.get("solution_approach", ""),
-                    "knowledge_points": data.get("knowledge_points", []),
-                    "complexity": data.get("complexity", ""),
-                    "common_mistakes": data.get("common_mistakes", []),
-                    "reference_answers": data.get("reference_answers", []),
-                },
+                "analysis": analysis,
             })
         except Exception as e:
             logger.error("OJWorker failed: %s", e)
@@ -95,6 +99,8 @@ class OJWorker(QThread):
 
 
 class OJPage(QWidget):
+    visualize_requested = Signal(str)
+
     def __init__(self, config_path: Path | None = None, parent=None):
         super().__init__(parent)
         self._config_path = config_path
@@ -401,6 +407,16 @@ class OJPage(QWidget):
             cf = build_code_block(code, text_color=TEXT_PRIMARY,
                                   bg_color=CANVAS_BG, border_color=BORDER)
             vbox.addWidget(cf)
+
+            viz = QPushButton("Visualize this code")
+            viz.setStyleSheet(
+                f"QPushButton {{ background-color: #007ACC; color: white; "
+                f"border: none; border-radius: 3px; padding: 3px 10px; "
+                f"font-size: 11px; margin-top: 4px; }}"
+                f"QPushButton:hover {{ background-color: #1A8CD8; }}"
+            )
+            viz.clicked.connect(lambda: self.visualize_requested.emit(code))
+            vbox.addWidget(viz)
 
         self._analysis_layout.addWidget(card)
 

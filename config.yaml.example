@@ -8,6 +8,7 @@ llm:
   model: deepseek-chat
   provider: deepseek
   temperature: 0.0
+  # proxy: http://127.0.0.1:7890  # optional, for users behind a proxy
 ui:
   code_font_size: 14
   font_family: JetBrains Mono, Menlo, SF Mono, Courier New, monospace

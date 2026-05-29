@@ -28,11 +28,11 @@ class VarItem(QGraphicsTextItem):
         v = self.variable
         badges = []
         if v.is_destroyed:
-            badges.append("dtor")
+            badges.append("💀 destroyed")
         elif v.is_constructed:
-            badges.append("ctor")
+            badges.append("⚡ constructed")
         if v.is_temporary:
-            badges.append("temp")
+            badges.append("⏳ temporary")
         badge_str = f" [{', '.join(badges)}]" if badges else ""
 
         if v.is_reference:

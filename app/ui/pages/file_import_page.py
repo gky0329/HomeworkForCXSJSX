@@ -86,12 +86,7 @@ class ProcessWorker(QThread):
                 user_message=user_msg,
                 model="deepseek-reasoner",
             ))
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                raise RuntimeError(
-                    f"LLM returned invalid JSON: {e}\n\n---RAW RESPONSE---\n{raw[:2000]}"
-                ) from e
+            data = json.loads(raw)
             self.finished.emit(data)
         except Exception as e:
             logger.error("ProcessWorker failed: %s", e)

@@ -9,13 +9,15 @@ from app.ui.theme.colors import EDGE_SOLID, EDGE_DANGLING
 class EdgeItem(QGraphicsPathItem):
     ARROW_SIZE = 8.0
 
-    def __init__(self, source_addr: str, target_addr: str, is_dangling: bool, address_map: dict):
+    def __init__(self, source_addr: str, target_addr: str, is_dangling: bool,
+                 address_map: dict):
         super().__init__()
         self.source_addr = source_addr
         self.target_addr = target_addr
         self._is_dangling = is_dangling
         self._address_map = address_map
         self._arrow_polygon = QPolygonF()
+        self.setZValue(1)
         self.recalc()
 
     def recalc(self):
@@ -26,8 +28,33 @@ class EdgeItem(QGraphicsPathItem):
 
         src_br = src_item.sceneBoundingRect()
         tgt_br = tgt_item.sceneBoundingRect()
-        src_pos = QPointF(src_br.right(), src_br.center().y())
-        tgt_pos = QPointF(tgt_br.left(), tgt_br.center().y())
+
+        src_center = src_br.center()
+        tgt_center = tgt_br.center()
+        h_dist = abs(tgt_center.x() - src_center.x())
+        close = h_dist < 150
+
+        if close:
+            src_pos = QPointF(src_br.left(), src_center.y())
+            tgt_pos = QPointF(tgt_br.left(), tgt_center.y())
+        else:
+            src_pos = QPointF(src_br.right(), src_center.y())
+            tgt_pos = QPointF(tgt_br.left(), tgt_center.y())
+
+        vert_gap = abs(tgt_pos.y() - src_pos.y())
+        if close:
+            cx_offset = min(30.0, h_dist * 0.6 + 10)
+            if src_pos.y() < tgt_pos.y():
+                c1 = QPointF(src_pos.x() - cx_offset, src_pos.y())
+                c2 = QPointF(tgt_pos.x() - cx_offset, tgt_pos.y())
+            else:
+                c1 = QPointF(src_pos.x() - cx_offset, src_pos.y())
+                c2 = QPointF(tgt_pos.x() - cx_offset, tgt_pos.y())
+        else:
+            dx = tgt_pos.x() - src_pos.x()
+            cx_offset = max(abs(dx) * 0.4, 40.0)
+            c1 = QPointF(src_pos.x() + cx_offset, src_pos.y())
+            c2 = QPointF(tgt_pos.x() - cx_offset, tgt_pos.y())
 
         color = QColor(EDGE_DANGLING) if self._is_dangling else QColor(EDGE_SOLID)
         style = Qt.PenStyle.DashLine if self._is_dangling else Qt.PenStyle.SolidLine
@@ -35,12 +62,6 @@ class EdgeItem(QGraphicsPathItem):
 
         path = QPainterPath()
         path.moveTo(src_pos)
-
-        dx = tgt_pos.x() - src_pos.x()
-        cx_offset = max(abs(dx) * 0.4, 40.0)
-        c1 = QPointF(src_pos.x() + cx_offset, src_pos.y())
-        c2 = QPointF(tgt_pos.x() - cx_offset, tgt_pos.y())
-
         path.cubicTo(c1, c2, tgt_pos)
         self.setPath(path)
 

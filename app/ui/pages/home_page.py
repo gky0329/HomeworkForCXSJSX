@@ -60,6 +60,48 @@ class HomePage(QWidget):
 
         main.addSpacing(8)
 
+        quick_label = QLabel("Quick Start")
+        quick_label.setStyleSheet(
+            f"color: {STACK_BORDER}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+        )
+        main.addWidget(quick_label)
+
+        quick_row = QHBoxLayout()
+        quick_row.setSpacing(10)
+
+        for label, tab, desc in [
+            ("Write Code", "Code Editor", "Run C++ code and watch\nmemory state step by step"),
+            ("Import & Learn", "File Import", "Upload PDF/DOCX/CPP files\nand extract knowledge points"),
+            ("Review Mistakes", "Review", "Practice with spaced repetition\nto master C++ concepts"),
+        ]:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+                f"border-radius: 8px; padding: 10px 14px; }}"
+                f"QFrame:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
+            )
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            idx = TAB_NAMES.get(tab, 0)
+            card.mousePressEvent = lambda e, i=idx: self.tab_switch_requested.emit(i)
+
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(0, 0, 0, 0)
+            card_layout.setSpacing(4)
+
+            title_lbl = QLabel(label)
+            title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold;")
+            card_layout.addWidget(title_lbl)
+
+            desc_lbl = QLabel(desc)
+            desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px;")
+            card_layout.addWidget(desc_lbl)
+
+            quick_row.addWidget(card)
+
+        main.addLayout(quick_row)
+
+        main.addSpacing(8)
+
         actions = QHBoxLayout()
         actions.setSpacing(12)
 

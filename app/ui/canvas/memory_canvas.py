@@ -170,20 +170,6 @@ class MemoryCanvas:
                 self._edge_by_source.setdefault(var.address, []).append(edge)
                 self._edge_by_target.setdefault(target_addr, []).append(edge)
 
-    def _auto_center(self):
-        rect = self._content_bounds()
-        if rect.isValid() and not rect.isEmpty():
-            self._view.centerOn(rect.center())
-
-    def _content_bounds(self) -> QRectF:
-        items = self._stack_items + self._heap_items
-        if not items:
-            return QRectF()
-        rect = self._item_visual_bounds(items[0])
-        for it in items[1:]:
-            rect = rect.united(self._item_visual_bounds(it))
-        return rect
-
     def _on_item_moved(self, item: QGraphicsItem, cause: str = "move"):
         # Update edges for moved/changed item
         if isinstance(item, StackItem):
@@ -298,7 +284,7 @@ class MemoryCanvas:
             edge.recalc()
 
     def _render_edges(self, edges: list[PointerEdge]):
-        for edge_data in edges:
+        for idx, edge_data in enumerate(edges):
             edge = EdgeItem(
                 source_addr=edge_data.source_address,
                 target_addr=edge_data.target_address,

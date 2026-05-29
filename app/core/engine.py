@@ -1,19 +1,39 @@
+import os
 from pathlib import Path
 
-from app.ui.widgets.error_dialog import show_error_dialog
+import yaml
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+
 from app.core.memory_model import ExecutionTrace, MemoryState
 from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
+from app.ui.widgets import error_dialog
 from app.services import error_store
+
+
+def _has_api_key() -> bool:
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        return True
+    try:
+        config_path = Path(__file__).parent.parent.parent / "config.yaml"
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                cfg = yaml.safe_load(f) or {}
+            key = cfg.get("llm", {}).get("api_key", "")
+            return bool(key and key.strip())
+    except Exception:
+        pass
+    return False
 
 
 class Engine:
     def __init__(self, window: MainWindow, config_path: Path | None = None):
         self._window = window
+        self._window._engine = self
         self._config_path = config_path
         self._canvas = MemoryCanvas(window.canvas_view, window.canvas_scene)
         self._diff_engine = StateDiffEngine()
@@ -22,6 +42,9 @@ class Engine:
         self._current_index: int = -1
         self._worker: ExecutionWorker | None = None
         self._last_code: str = ""
+        self._auto_play_timer = QTimer()
+        self._auto_play_timer.timeout.connect(self._on_next)
+        self._auto_play_ms = 800
 
         self._connect_signals()
 
@@ -30,20 +53,40 @@ class Engine:
         self._window.btn_next.clicked.connect(self._on_next)
         self._window.btn_prev.clicked.connect(self._on_prev)
         self._window.btn_reset.clicked.connect(self._on_reset)
+        self._window.btn_next_big.clicked.connect(self._on_next)
+        self._window.btn_prev_big.clicked.connect(self._on_prev)
+        self._window.btn_autoplay.toggled.connect(self._toggle_autoplay)
+        self._window._speed_slider.valueChanged.connect(self._set_autoplay_speed)
 
-    def _on_run(self):
-        code = self._window.get_code()
-        if not code:
-            self._window.statusBar().showMessage("No code to run")
-            return
-        self._last_code = code
-
+    def cancel_current_run(self):
         if self._worker is not None and self._worker.isRunning():
             try:
                 self._worker.finished.disconnect(self._on_trace_ready)
                 self._worker.error.disconnect(self._on_trace_error)
             except Exception:
                 pass
+            self._worker.quit()
+            self._worker.wait(1000)
+        self._window.show_loading(False)
+        self._window.statusBar().showMessage("Ready — Enter C++ code and click Run")
+
+    def _on_run(self):
+        if not _has_api_key():
+            from app.ui.widgets.api_key_dialog import show_api_key_dialog
+            show_api_key_dialog(self._window)
+            if not _has_api_key():
+                self._window.statusBar().showMessage(
+                    "API key not configured — click Settings or set DEEPSEEK_API_KEY"
+                )
+                return
+
+        code = self._window.get_code()
+        if not code:
+            self._window.statusBar().showMessage("No code to run")
+            return
+        self._last_code = code
+
+        self.cancel_current_run()
 
         self._window.show_loading(True)
         self._window.statusBar().showMessage("Sending code to AI...")
@@ -64,13 +107,14 @@ class Engine:
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
-                f"Ready — {len(trace.steps)} steps loaded"
+                f"Step 1/{len(trace.steps)} — Press PageDown for next step"
             )
         else:
             self._current_index = -1
             self._window.statusBar().showMessage("AI returned empty trace")
 
         self._update_controls()
+        self._highlight_current_line()
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
@@ -83,7 +127,7 @@ class Engine:
             display_msg = parts[0].strip()
             raw = parts[1].strip()
 
-        show_error_dialog(
+        error_dialog.show_error_dialog(
             self._window,
             "Execution Error",
             display_msg,
@@ -93,7 +137,13 @@ class Engine:
         )
 
     def _on_next(self):
-        if self._trace is None or self._current_index + 1 >= len(self._trace.steps):
+        if self._trace is None:
+            self._auto_play_timer.stop()
+            return
+        if self._current_index + 1 >= len(self._trace.steps):
+            self._auto_play_timer.stop()
+            self._window.btn_autoplay.setChecked(False)
+            self._update_controls()
             return
 
         prev_state = self._trace.steps[self._current_index]
@@ -108,6 +158,7 @@ class Engine:
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
             QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
+        self._highlight_current_line()
 
     def _on_prev(self):
         if self._trace is None or self._current_index <= 0:
@@ -121,15 +172,65 @@ class Engine:
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
             QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
         self._update_controls()
+        self._highlight_current_line()
 
     def _on_reset(self):
+        self._auto_play_timer.stop()
         self._trace = None
         self._current_index = -1
         self._animator.stop_all()
         self._canvas.clear()
         self._window.tracker_panel.clear()
         self._window.step_label.setText("Ready")
+        self._window.statusBar().showMessage("Ready — Enter C++ code and click Run")
         self._update_controls()
+
+    def _toggle_autoplay(self, active: bool):
+        if active:
+            self._auto_play_timer.start(self._auto_play_ms)
+            self._on_next()
+        else:
+            self._auto_play_timer.stop()
+
+    def _set_autoplay_speed(self, ms: int):
+        self._auto_play_ms = ms
+        if self._auto_play_timer.isActive():
+            self._auto_play_timer.setInterval(ms)
+
+    def _highlight_current_line(self):
+        if self._trace is None or self._current_index < 0:
+            return
+        try:
+            step = self._trace.steps[self._current_index]
+        except IndexError:
+            return
+
+        editor = self._window.code_editor
+        editor.blockSignals(True)
+
+        cursor = editor.textCursor()
+        fmt_clear = QTextCharFormat()
+        fmt_clear.setBackground(QColor(0, 0, 0, 0))
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.setCharFormat(fmt_clear)
+
+        line = max(0, step.line_number - 1)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        for _ in range(line):
+            cursor.movePosition(QTextCursor.MoveOperation.Down)
+
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+
+        fmt_highlight = QTextCharFormat()
+        fmt_highlight.setBackground(QColor("#2A4A2A"))
+        cursor.setCharFormat(fmt_highlight)
+
+        cursor.clearSelection()
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        editor.setTextCursor(cursor)
+        editor.ensureCursorVisible()
+        editor.blockSignals(False)
 
     def _ingest_knowledge(self, trace: ExecutionTrace):
         concepts: set[str] = set()
@@ -162,11 +263,19 @@ class Engine:
         total = len(self._trace.steps) if self._trace else 0
         current = self._current_index + 1 if self._current_index >= 0 else 0
 
-        self._window.btn_next.setEnabled(
-            self._trace is not None and self._current_index + 1 < total
-        )
-        self._window.btn_prev.setEnabled(
-            self._trace is not None and self._current_index > 0
-        )
+        has_next = self._trace is not None and self._current_index + 1 < total
+        has_prev = self._trace is not None and self._current_index > 0
+
+        self._window.btn_next.setEnabled(has_next)
+        self._window.btn_prev.setEnabled(has_prev)
+        self._window.btn_next_big.setEnabled(has_next)
+        self._window.btn_prev_big.setEnabled(has_prev)
         self._window.btn_reset.setEnabled(self._trace is not None)
         self._window.set_step_info(current, total)
+        self._window.btn_autoplay.setEnabled(has_next)
+        if not has_next:
+            self._window.btn_autoplay.setChecked(False)
+        self._window.statusBar().showMessage(
+            f"Step {current}/{total} — "
+            f"{'PageDown=next PageUp=prev' if self._trace else 'Enter C++ code and click Run'}"
+        )

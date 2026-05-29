@@ -1,19 +1,34 @@
 import json
+import os
 import threading
 import uuid
 import math
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-DATA_DIR = Path(__file__).parent.parent.parent / "data" / "user"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-ERRORS_PATH = DATA_DIR / "errors.json"
-KNOWLEDGE_PATH = DATA_DIR / "knowledge.json"
-ACTIVITY_PATH = DATA_DIR / "activity.json"
-SCORES_PATH = DATA_DIR / "scores.json"
-DEPS_PATH = DATA_DIR / "dependencies.json"
+_DATA_DIR = Path(__file__).parent.parent.parent / "data" / "user"
+ERRORS_PATH = _DATA_DIR / "errors.json"
+KNOWLEDGE_PATH = _DATA_DIR / "knowledge.json"
+ACTIVITY_PATH = _DATA_DIR / "activity.json"
+SCORES_PATH = _DATA_DIR / "scores.json"
+DEPS_PATH = _DATA_DIR / "dependencies.json"
 
 _lock = threading.RLock()
+
+
+def _ensure_data_dir():
+    try:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        import tempfile
+        _fallback = Path(tempfile.gettempdir()) / "cxx_visualizer"
+        _fallback.mkdir(parents=True, exist_ok=True)
+        global ERRORS_PATH, KNOWLEDGE_PATH, ACTIVITY_PATH, SCORES_PATH, DEPS_PATH
+        ERRORS_PATH = _fallback / "errors.json"
+        KNOWLEDGE_PATH = _fallback / "knowledge.json"
+        ACTIVITY_PATH = _fallback / "activity.json"
+        SCORES_PATH = _fallback / "scores.json"
+        DEPS_PATH = _fallback / "dependencies.json"
 
 
 def _load(path: Path) -> list:
@@ -24,8 +39,11 @@ def _load(path: Path) -> list:
 
 
 def _save(path: Path, data: list):
-    with open(path, "w", encoding="utf-8") as f:
+    _ensure_data_dir()
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
 
 
 def add_error(knowledge_point: str, question: str,

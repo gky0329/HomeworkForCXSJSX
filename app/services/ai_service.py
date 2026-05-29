@@ -22,6 +22,7 @@ class AIService:
         self.model = llm_cfg.get("model", "deepseek-chat")
         self.max_tokens = llm_cfg.get("max_tokens", 4096)
         self.temperature = llm_cfg.get("temperature", 0.0)
+        self._proxy = llm_cfg.get("proxy") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
 
     async def chat_json(
         self,
@@ -56,16 +57,19 @@ class AIService:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=60.0, proxy=self._proxy, trust_env=False) as client:
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     data = response.json()
                     content = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(content)
-                    return json.dumps(parsed, ensure_ascii=False)
+                    return content
 
             except httpx.ConnectError as e:
-                last_error = RuntimeError(f"Cannot reach API — check network: {e}")
+                last_error = RuntimeError(
+                    f"Cannot reach API — check network. "
+                    f"If you need a proxy, set llm.proxy in config.yaml or HTTPS_PROXY env var. "
+                    f"Error: {e}"
+                )
                 if attempt < max_retries:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -117,13 +121,17 @@ class AIService:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=60.0, proxy=self._proxy, trust_env=False) as client:
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     data = response.json()
                     return data["choices"][0]["message"]["content"]
             except httpx.ConnectError as e:
-                last_error = RuntimeError(f"Cannot reach API: {e}")
+                last_error = RuntimeError(
+                    f"Cannot reach API — check network. "
+                    f"If you need a proxy, set llm.proxy in config.yaml or HTTPS_PROXY env var. "
+                    f"Error: {e}"
+                )
                 if attempt < max_retries:
                     await asyncio.sleep(2 ** attempt)
                     continue

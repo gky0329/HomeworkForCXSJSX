@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox,
+    QPushButton, QMessageBox, QComboBox, QSpinBox,
 )
 from PySide6.QtCore import Qt
 import os
@@ -10,51 +10,110 @@ import yaml
 class ApiKeyDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Configure API Key")
-        self.setMinimumWidth(420)
+        self.setWindowTitle("Settings")
+        self.setMinimumWidth(460)
         self.setModal(True)
         self._setup_ui()
         self._load_existing()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
-        title = QLabel("DeepSeek API Key")
+        title = QLabel("Settings")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #569CD6;")
         layout.addWidget(title)
 
         desc = QLabel(
-            "Enter your DeepSeek API key to enable AI-powered code execution.\n"
-            "Get one at: https://platform.deepseek.com/api_keys"
+            "Configure your DeepSeek API key and connection settings.\n"
+            "Get an API key at: https://platform.deepseek.com/api_keys"
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #808080; font-size: 12px;")
         layout.addWidget(desc)
 
-        self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-        self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._key_input.setStyleSheet(
+        input_style = (
             "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; "
             "border-radius: 4px; background-color: #1E1E1E; color: #D4D4D4; }"
         )
+        label_style = "color: #D4D4D4; font-size: 12px; font-weight: bold; margin-top: 6px;"
+        hint_style = "color: #808080; font-size: 11px;"
+
+        api_label = QLabel("API Key")
+        api_label.setStyleSheet(label_style)
+        layout.addWidget(api_label)
+
+        self._key_input = QLineEdit()
+        self._key_input.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+        self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._key_input.setStyleSheet(input_style)
         layout.addWidget(self._key_input)
 
-        btn_layout = QHBoxLayout()
-
+        show_layout = QHBoxLayout()
         self._show_btn = QPushButton("Show")
         self._show_btn.setCheckable(True)
         self._show_btn.toggled.connect(self._toggle_visibility)
-        btn_layout.addWidget(self._show_btn)
+        show_layout.addWidget(self._show_btn)
+        show_layout.addStretch()
+        layout.addLayout(show_layout)
 
-        btn_layout.addStretch()
+        proxy_label = QLabel("Proxy (optional)")
+        proxy_label.setStyleSheet(label_style)
+        layout.addWidget(proxy_label)
 
-        skip_btn = QPushButton("Skip (Offline)")
+        self._proxy_input = QLineEdit()
+        self._proxy_input.setPlaceholderText("e.g. http://127.0.0.1:7890")
+        self._proxy_input.setStyleSheet(input_style)
+        layout.addWidget(self._proxy_input)
+
+        proxy_hint = QLabel("Leave empty if no proxy. Required for mainland China users to access DeepSeek API.")
+        proxy_hint.setWordWrap(True)
+        proxy_hint.setStyleSheet(hint_style)
+        layout.addWidget(proxy_hint)
+
+        model_label = QLabel("Model")
+        model_label.setStyleSheet(label_style)
+        layout.addWidget(model_label)
+
+        self._model_combo = QComboBox()
+        self._model_combo.addItems(["deepseek-chat", "deepseek-reasoner"])
+        self._model_combo.setStyleSheet(
+            "QComboBox { padding: 6px 8px; font-size: 13px; border: 1px solid #3E3E3E; "
+            "border-radius: 4px; background-color: #1E1E1E; color: #D4D4D4; } "
+            "QComboBox::drop-down { border: none; } "
+            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
+        )
+        layout.addWidget(self._model_combo)
+
+        model_hint = QLabel("deepseek-chat: fast, good for simple code.  deepseek-reasoner: accurate, better for complex C++.")
+        model_hint.setWordWrap(True)
+        model_hint.setStyleSheet(hint_style)
+        layout.addWidget(model_hint)
+
+        row = QHBoxLayout()
+        row.setSpacing(16)
+
+        font_col = QVBoxLayout()
+        font_label = QLabel("Code Font Size")
+        font_label.setStyleSheet(label_style)
+        font_col.addWidget(font_label)
+        self._font_spin = QSpinBox()
+        self._font_spin.setRange(8, 32)
+        self._font_spin.setValue(14)
+        self._font_spin.setStyleSheet(input_style.replace("QLineEdit", "QSpinBox"))
+        font_col.addWidget(self._font_spin)
+        row.addLayout(font_col)
+        row.addStretch()
+        layout.addLayout(row)
+
+        btn_layout = QHBoxLayout()
+        skip_btn = QPushButton("Cancel")
         skip_btn.clicked.connect(self.reject)
         btn_layout.addWidget(skip_btn)
 
-        save_btn = QPushButton("Save & Continue")
+        btn_layout.addStretch()
+
+        save_btn = QPushButton("Save")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self._save_and_accept)
         btn_layout.addWidget(save_btn)
@@ -70,28 +129,42 @@ class ApiKeyDialog(QDialog):
             self._show_btn.setText("Show")
 
     def _load_existing(self):
-        env_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        if env_key:
-            self._key_input.setText(env_key)
-            return
-
         try:
             from pathlib import Path
             config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
             if config_path.exists():
                 with open(config_path, "r") as f:
                     cfg = yaml.safe_load(f) or {}
-                api_key = cfg.get("llm", {}).get("api_key", "")
-                if api_key:
-                    self._key_input.setText(api_key)
+                llm_cfg = cfg.get("llm", {})
+                ui_cfg = cfg.get("ui", {})
+
+                env_key = os.environ.get("DEEPSEEK_API_KEY", "")
+                if env_key:
+                    self._key_input.setText(env_key)
+                else:
+                    api_key = llm_cfg.get("api_key", "")
+                    if api_key:
+                        self._key_input.setText(api_key)
+
+                proxy = llm_cfg.get("proxy", "")
+                if proxy:
+                    self._proxy_input.setText(proxy)
+
+                model = llm_cfg.get("model", "deepseek-chat")
+                idx = self._model_combo.findText(model)
+                if idx >= 0:
+                    self._model_combo.setCurrentIndex(idx)
+
+                font_size = ui_cfg.get("code_font_size", 14)
+                self._font_spin.setValue(int(font_size))
         except Exception:
             pass
 
     def _save_and_accept(self):
         key = self._key_input.text().strip()
-        if not key:
-            self.accept()
-            return
+        proxy = self._proxy_input.text().strip()
+        model = self._model_combo.currentText()
+        font_size = self._font_spin.value()
 
         try:
             from pathlib import Path
@@ -104,15 +177,36 @@ class ApiKeyDialog(QDialog):
 
             if "llm" not in cfg:
                 cfg["llm"] = {}
-            cfg["llm"]["api_key"] = key
+            if key:
+                cfg["llm"]["api_key"] = key
+            if proxy:
+                cfg["llm"]["proxy"] = proxy
+            elif "proxy" in cfg["llm"]:
+                del cfg["llm"]["proxy"]
+            cfg["llm"]["model"] = model
+
+            if "ui" not in cfg:
+                cfg["ui"] = {}
+            cfg["ui"]["code_font_size"] = font_size
 
             with open(config_path, "w") as f:
                 yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
 
-            os.environ["DEEPSEEK_API_KEY"] = key
+            if key:
+                os.environ["DEEPSEEK_API_KEY"] = key
+
+            if self.parent():
+                try:
+                    code_editor = self.parent().code_editor
+                    current_font = code_editor.font()
+                    current_font.setPointSize(font_size)
+                    code_editor.setFont(current_font)
+                except Exception:
+                    pass
+
             self.accept()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to save API key: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to save settings: {e}")
 
 
 def show_api_key_dialog(parent=None) -> bool:

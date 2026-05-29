@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
 from app.ui.main_window import MainWindow
-from app.ui.widgets.api_key_dialog import show_api_key_dialog
 from app.ui.theme.styles import GLOBAL_STYLESHEET
 from app.core.engine import Engine
 
@@ -33,9 +32,6 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("C++ Memory Visualizer")
     app.setStyleSheet(GLOBAL_STYLESHEET)
-
-    if not has_api_key(config):
-        show_api_key_dialog()
 
     config_path = Path(__file__).parent / "config.yaml"
 

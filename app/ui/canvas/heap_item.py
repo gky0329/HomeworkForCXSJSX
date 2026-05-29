@@ -143,6 +143,7 @@ class HeapItem(QGraphicsRectItem):
             label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
             label.setFont(cell_font)
             label.setPos(2, 1)
+            self._value_label = label
 
         self._refresh_geometry()
 
@@ -260,6 +261,7 @@ class HeapItem(QGraphicsRectItem):
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, y)
+            self._value_label = label
             y += member_h
 
         self._refresh_geometry()
