@@ -40,6 +40,11 @@ class GraphNode(QGraphicsEllipseItem):
         self._text.setPos(-trect.width() / 2, -trect.height() / 2)
 
 
+class _GraphCanvas(QGraphicsView):
+    def wheelEvent(self, event):
+        event.accept()
+
+
 class GraphPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,10 +77,7 @@ class GraphPage(QWidget):
         header.addWidget(self._stats_label)
         layout.addLayout(header)
 
-        cls = type("_GraphCanvas", (QGraphicsView,), {
-            "wheelEvent": lambda self, e: e.accept(),
-        })
-        self._view = cls()
+        self._view = _GraphCanvas()
         self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._view.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff

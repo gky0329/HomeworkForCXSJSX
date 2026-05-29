@@ -24,19 +24,41 @@ from app.ui.theme.colors import (
 
 
 def _md_to_html(text: str) -> str:
-    """Convert basic markdown to HTML for QLabel RichText."""
-    html = text
-    html = html.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Convert markdown to HTML for QLabel RichText rendering."""
+    text = re.sub(r'^好的[，,]\s*', '', text)
+    text = re.sub(r'^当然[，,]\s*', '', text)
+    text = re.sub(r'^我来解释.+?[：:]\s*', '', text)
+
+    html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    html = re.sub(r"```(\w*)\n(.*?)```", _code_block, html, flags=re.DOTALL)
+    html = re.sub(r"`([^`\n]+)`", r"<code style='background:#2D2D2D;color:#CE9178;padding:1px 5px;border-radius:3px;font-family:monospace;'>\1</code>", html)
+    html = re.sub(r"^\*\*\*(.+?)\*\*\*$", r"<h2 style='color:#9CDCFE;font-size:18px;font-weight:bold;margin:12px 0 4px 0;border-bottom:1px solid #3E3E3E;padding-bottom:4px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^## (.+)$", r"<h2 style='color:#9CDCFE;font-size:18px;font-weight:bold;margin:12px 0 4px 0;border-bottom:1px solid #3E3E3E;padding-bottom:4px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^### (.+)$", r"<h3 style='color:#569CD6;font-size:15px;font-weight:bold;margin:10px 0 3px 0;'>\1</h3>", html, flags=re.MULTILINE)
     html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
-    html = re.sub(r"`([^`]+)`", r"<code style='background:#2D2D2D;color:#CE9178;padding:1px 4px;border-radius:3px;'>\1</code>", html)
-    html = re.sub(r"^### (.+)$", r"<h3 style='color:#569CD6;font-size:15px;margin:10px 0 4px 0;'>\1</h3>", html, flags=re.MULTILINE)
-    html = re.sub(r"^## (.+)$", r"<h2 style='color:#569CD6;font-size:17px;margin:12px 0 4px 0;'>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^- (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
-    html = re.sub(r"^(\d+)\. (.+)$", r"<li>\2</li>", html, flags=re.MULTILINE)
+    html = re.sub(r"^- (.+)$", r"<li style='margin:2px 0;'>\1</li>", html, flags=re.MULTILINE)
+    html = re.sub(r"^(\d+)\. (.+)$", r"<li style='margin:2px 0;'>\2</li>", html, flags=re.MULTILINE)
+    html = re.sub(r"---", r"<hr style='border:none;border-top:1px solid #3E3E3E;margin:10px 0;'>", html)
     html = re.sub(r"\n\n", "<br><br>", html)
     html = re.sub(r"\n", "<br>", html)
-    html = f"<div style='line-height:1.6;'>{html}</div>"
-    return html
+    return f"<div style='line-height:1.7;'>{html}</div>"
+
+
+def _code_block(match: re.Match) -> str:
+    _lang = match.group(1)
+    code = match.group(2).strip()
+    code_escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    lines = code_escaped.split("\n")
+    numbered = "".join(
+        f"<span style='color:#808080;'>{i+1:>2} </span>{line}<br>"
+        for i, line in enumerate(lines)
+    )
+    return (
+        f"<div style='background:#1E1E1E;border:1px solid #3E3E3E;border-radius:6px;"
+        f"padding:10px 14px;margin:8px 0;font-family:monospace;font-size:12px;"
+        f"color:#D4D4D4;line-height:1.5;'>{numbered}</div>"
+    )
 
 
 CARD_BG = (
