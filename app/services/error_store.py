@@ -175,6 +175,13 @@ def add_knowledge_point(name: str, source: str = ""):
         _save(KNOWLEDGE_PATH, kps)
 
 
+def delete_knowledge_point(name: str):
+    with _lock:
+        kps = _load(KNOWLEDGE_PATH)
+        kps[:] = [kp for kp in kps if kp["name"] != name]
+        _save(KNOWLEDGE_PATH, kps)
+
+
 def set_knowledge_description(name: str, description: str):
     with _lock:
         kps = _load(KNOWLEDGE_PATH)

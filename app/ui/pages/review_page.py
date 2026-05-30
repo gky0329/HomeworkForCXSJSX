@@ -117,11 +117,6 @@ class ReviewPage(QWidget):
         self._add_btn.clicked.connect(self._on_add_error)
         header.addWidget(self._add_btn)
 
-        self._queue_btn = QPushButton("Queue")
-        self._queue_btn.setStyleSheet(self._add_btn.styleSheet())
-        self._queue_btn.clicked.connect(self._on_show_queue)
-        header.addWidget(self._queue_btn)
-
         layout.addLayout(header)
 
         self._progress = mlabel("", TEXT_SECONDARY, 12)
@@ -402,26 +397,6 @@ class ReviewPage(QWidget):
             a = a_edit.text().strip() or ""
             error_store.add_error(kp, q, "", a, "")
             self._load_cards()
-
-    def _on_show_queue(self):
-        queue = error_store.get_ucb_queue()
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Review Queue (UCB Priority)")
-        dialog.setMinimumWidth(420)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(mlabel("Review Priority", STACK_BORDER, 14, True))
-        for i, item in enumerate(queue[:8]):
-            row = QLabel(
-                f"  #{i + 1}  {item['name']}  "
-                f"[✓{item['correct']} ✗{item['wrong']}]  "
-                f"priority: {int(item['ucb'] * 100)}%"
-            )
-            row.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px; padding: 4px 0;")
-            layout.addWidget(row)
-        ok = QPushButton("OK")
-        ok.clicked.connect(dialog.accept)
-        layout.addWidget(ok)
-        dialog.exec()
 
     def _refresh(self):
         self._load_cards()

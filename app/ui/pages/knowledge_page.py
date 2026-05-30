@@ -357,6 +357,17 @@ class KnowledgePage(QWidget):
 
         self._detail_layout.addSpacing(4)
         self._add_review_button(name)
+
+        del_btn = QPushButton("Delete")
+        del_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {TEXT_MUTED}; border: 1px solid {BORDER}; "
+            f"padding: 4px 12px; font-size: 10px; }}"
+            f"QPushButton:hover {{ color: {EDGE_DANGLING}; border-color: {EDGE_DANGLING}; }}"
+        )
+        del_btn.clicked.connect(lambda: self._delete_concept(name))
+        self._detail_layout.addWidget(del_btn)
+
         self._detail_layout.addStretch()
 
     def _add_explain_button(self, concept_name: str):
@@ -436,6 +447,12 @@ class KnowledgePage(QWidget):
 
         btn.clicked.connect(lambda: add())
         self._detail_layout.addWidget(btn)
+
+    def _delete_concept(self, name: str):
+        error_store.delete_knowledge_point(name)
+        self._refresh()
+        clear_layout(self._detail_layout)
+        self._detail_label.setText("Select a concept")
 
     # ── Graph View ───────────────────────────────────────────────────────
 
