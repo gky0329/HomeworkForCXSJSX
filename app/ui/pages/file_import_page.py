@@ -35,7 +35,7 @@ PAGE_STYLE = f"""
 QFrame#resultCard {{
     background-color: {SURFACE};
     border: 1px solid {BORDER};
-    border-radius: 6px;
+    
     padding: 12px;
     margin: 4px 0;
 }}
@@ -43,7 +43,7 @@ QPushButton#visualizeBtn {{
     background-color: {ACCENT};
     color: #FFFFFF;
     border: none;
-    border-radius: 3px;
+    
     padding: 3px 10px;
     font-size: 11px;
 }}
@@ -62,7 +62,7 @@ QLabel#quizQuestion {{
 BTN_OPT = (
     f"QPushButton {{ background-color: {CANVAS_BG}; "
     f"color: {TEXT_PRIMARY}; border: 1px solid {BORDER}; "
-    f"border-radius: 6px; padding: 6px 14px; "
+    f"padding: 6px 14px; "
     f"font-size: 12px; text-align: left; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
 )
@@ -84,7 +84,6 @@ class ProcessWorker(QThread):
             raw = asyncio.run(service.chat_json(
                 system_prompt=PDF_SYSTEM_PROMPT,
                 user_message=user_msg,
-                model="deepseek-reasoner",
             ))
             data = json.loads(raw)
             self.finished.emit(data)
@@ -122,7 +121,7 @@ class FileImportPage(QWidget):
         self._type_combo.addItem("Plain Text", ".txt")
         self._type_combo.setStyleSheet(
             f"QComboBox {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
-            f"border: 1px solid {BORDER}; border-radius: 4px; padding: 4px 8px; }}"
+            f"border: 1px solid {BORDER}; padding: 4px 8px; }}"
         )
         toolbar.addWidget(self._type_combo)
 
@@ -220,6 +219,15 @@ class FileImportPage(QWidget):
         self._upload_btn.setEnabled(False)
         self._clear_results()
         self._status.setText("Processing with AI...")
+
+        if self._worker is not None and self._worker.isRunning():
+            try:
+                self._worker.finished.disconnect(self._on_result)
+                self._worker.error.disconnect(self._on_error)
+            except Exception:
+                pass
+            self._worker.quit()
+            self._worker.wait(1000)
 
         self._worker = ProcessWorker(self._file_text, self._config_path)
         self._worker.finished.connect(self._on_result)
@@ -343,21 +351,21 @@ class FileImportPage(QWidget):
                         btn.setStyleSheet(
                             f"QPushButton {{ background-color: #1A3A2A; "
                             f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                            f"border-radius: 6px; padding: 6px 14px; "
+                            f"padding: 6px 14px; "
                             f"font-size: 12px; text-align: left; font-weight: bold; }}"
                         )
                     else:
                         btn.setStyleSheet(
                             f"QPushButton {{ background-color: #3A1A1A; "
                             f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-                            f"border-radius: 6px; padding: 6px 14px; "
+                            f"padding: 6px 14px; "
                             f"font-size: 12px; text-align: left; font-weight: bold; }}"
                         )
                 elif i == answer_idx:
                     btn.setStyleSheet(
                         f"QPushButton {{ background-color: #1A3A2A; "
                         f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                        f"border-radius: 6px; padding: 6px 14px; "
+                        f"padding: 6px 14px; "
                         f"font-size: 12px; text-align: left; }}"
                     )
                 else:
@@ -383,7 +391,7 @@ class FileImportPage(QWidget):
                 wrong_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
                     f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-                    f"border-radius: 3px; padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
+                    f"padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
                     f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
                 )
                 q_text = q.get("question", "")
@@ -398,7 +406,7 @@ class FileImportPage(QWidget):
                     btn.setStyleSheet(
                         f"QPushButton {{ background-color: #1A3A2A; "
                         f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                        f"border-radius: 3px; padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
+                        f"padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
                     )
                     btn.setEnabled(False)
                 wrong_btn.clicked.connect(save_and_feedback)

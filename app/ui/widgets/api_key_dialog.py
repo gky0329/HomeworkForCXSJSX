@@ -3,8 +3,11 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QComboBox, QSpinBox,
 )
 from PySide6.QtCore import Qt
+import logging
 import os
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class ApiKeyDialog(QDialog):
@@ -50,7 +53,7 @@ class ApiKeyDialog(QDialog):
 
         input_style = (
             "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; "
-            "border-radius: 4px; background-color: #1E1E1E; color: #D4D4D4; }"
+            "background-color: #1E1E1E; color: #D4D4D4; }"
         )
         label_style = "color: #D4D4D4; font-size: 12px; font-weight: bold; margin-top: 6px;"
         hint_style = "color: #808080; font-size: 11px;"
@@ -95,7 +98,7 @@ class ApiKeyDialog(QDialog):
         self._model_combo.addItems(["deepseek-chat", "deepseek-reasoner"])
         self._model_combo.setStyleSheet(
             "QComboBox { padding: 6px 8px; font-size: 13px; border: 1px solid #3E3E3E; "
-            "border-radius: 4px; background-color: #1E1E1E; color: #D4D4D4; } "
+            "background-color: #1E1E1E; color: #D4D4D4; } "
             "QComboBox::drop-down { border: none; } "
             "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
         )
@@ -174,6 +177,7 @@ class ApiKeyDialog(QDialog):
                 font_size = ui_cfg.get("code_font_size", 14)
                 self._font_spin.setValue(int(font_size))
         except Exception:
+            logger.exception("Failed to load existing settings")
             pass
 
     def _save_and_accept(self):

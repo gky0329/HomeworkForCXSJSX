@@ -10,3 +10,4 @@ build/
 .Trash/
 config.yaml
 .vscode/
+data/user/

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -12,7 +12,7 @@ from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS,
+    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, SUCCESS_BG,
 )
 
 
@@ -46,25 +46,25 @@ def _predict_sm2(n: int, ef: float, interval: int, quality: int) -> str:
 RATE_STYLES = {
     "again": (
         f"QPushButton {{ background-color: #3A1A1A; color: {EDGE_DANGLING}; "
-        f"border: 1px solid {EDGE_DANGLING}; border-radius: 8px; "
+        f"border: 1px solid {EDGE_DANGLING}; "
         f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
         f"QPushButton:hover {{ background-color: #4A2A2A; }}"
     ),
     "hard": (
         f"QPushButton {{ background-color: #3A2A1A; color: #DCDCAA; "
-        f"border: 1px solid #DCDCAA; border-radius: 8px; "
+        f"border: 1px solid #DCDCAA; "
         f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
         f"QPushButton:hover {{ background-color: #4A3A2A; }}"
     ),
     "good": (
         f"QPushButton {{ background-color: #1A3A2A; color: {SUCCESS}; "
-        f"border: 1px solid {SUCCESS}; border-radius: 8px; "
+        f"border: 1px solid {SUCCESS}; "
         f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
         f"QPushButton:hover {{ background-color: #2A4A3A; }}"
     ),
     "easy": (
         f"QPushButton {{ background-color: #1A2A3A; color: #569CD6; "
-        f"border: 1px solid #569CD6; border-radius: 8px; "
+        f"border: 1px solid #569CD6; "
         f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
         f"QPushButton:hover {{ background-color: #2A3A4A; }}"
     ),
@@ -72,13 +72,13 @@ RATE_STYLES = {
 
 CARD_STYLE = (
     f"QFrame#reviewCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
-    f"border-radius: 12px; }}"
+    f"}}"
     f"QFrame#reviewCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
 NOTES_STYLE = (
     f"QTextEdit {{ background-color: {CANVAS_BG}; color: {TEXT_PRIMARY}; "
-    f"border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; "
+    f"border: 1px solid {BORDER}; padding: 8px; "
     f"font-size: 12px; }}"
 )
 
@@ -111,7 +111,7 @@ class ReviewPage(QWidget):
         self._add_btn = QPushButton("+ Add")
         self._add_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; color: {TEXT_SECONDARY}; "
-            f"border: 1px solid {BORDER}; border-radius: 4px; padding: 4px 12px; font-size: 11px; }}"
+            f"border: 1px solid {BORDER}; padding: 4px 12px; font-size: 11px; }}"
             f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT_PRIMARY}; }}"
         )
         self._add_btn.clicked.connect(self._on_add_error)
@@ -205,7 +205,7 @@ class ReviewPage(QWidget):
             kpl = QLabel(kp)
             kpl.setStyleSheet(
                 f"color: {HEAP_BORDER}; font-size: 12px; font-weight: bold; "
-                f"background-color: #3D2916; border-radius: 6px; "
+                f"background-color: #3D2916; "
                 f"padding: 4px 12px;"
             )
             kpl.setWordWrap(True)
@@ -216,8 +216,8 @@ class ReviewPage(QWidget):
         ql.setWordWrap(True)
         ql.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ql.setStyleSheet(
-            f"color: {TEXT_PRIMARY}; font-size: 18px; "
-            f"padding: 4px 0;"
+            f"color: {TEXT_PRIMARY}; font-size: 22px; font-weight: 700; "
+            f"padding: 8px 0; line-height: 1.4;"
         )
         v.addWidget(ql)
 
@@ -236,7 +236,7 @@ class ReviewPage(QWidget):
         hint_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"border-radius: 6px; padding: 6px 16px; font-size: 12px; }}"
+            f"padding: 6px 16px; font-size: 12px; }}"
             f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
         )
         q_text = card.get("question", "")
@@ -255,7 +255,7 @@ class ReviewPage(QWidget):
         reveal_btn = QPushButton("Show Answer")
         reveal_btn.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-            f"border: none; border-radius: 8px; padding: 12px 32px; "
+            f"border: none; padding: 12px 32px; "
             f"font-size: 15px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #1A8CD8; }}"
         )
@@ -272,6 +272,14 @@ class ReviewPage(QWidget):
         def on_hint():
             btn.setEnabled(False)
             btn.setText("Thinking...")
+            if self._hint_worker is not None and self._hint_worker.isRunning():
+                try:
+                    self._hint_worker.finished.disconnect()
+                    self._hint_worker.error.disconnect()
+                except Exception:
+                    pass
+                self._hint_worker.quit()
+                self._hint_worker.wait(1000)
             self._hint_worker = AIExplainWorker(
                 HINT_PROMPT,
                 f"知识点：{kp_text}\n题目：{q_text}\n请给提示",
@@ -301,9 +309,9 @@ class ReviewPage(QWidget):
         al.setWordWrap(True)
         al.setAlignment(Qt.AlignmentFlag.AlignCenter)
         al.setStyleSheet(
-            f"color: {SUCCESS}; font-size: 15px; font-weight: bold; "
-            f"background-color: #1A2A22; border-radius: 8px; "
-            f"padding: 14px;"
+            f"color: {SUCCESS}; font-size: 17px; font-weight: 700; "
+            f"background-color: {SUCCESS_BG}; "
+            f"padding: 16px; border-bottom: 2px solid {SUCCESS};"
         )
         self._reveal_area.addWidget(al)
 

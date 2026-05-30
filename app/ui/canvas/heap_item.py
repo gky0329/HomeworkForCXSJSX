@@ -7,12 +7,11 @@ from app.ui.theme.colors import (
     HEAP_BORDER, HEAP_BG, HEAP_TEXT, EDGE_DANGLING, CANVAS_BG,
     STACK_VAR_TEXT,
 )
+from app.ui.widgets.helpers import text_width
 
 
 def _text_width(text: str, font: QFont) -> float:
-    metrics = QFontMetricsF(font)
-    lines = text.splitlines() or [text]
-    return max(metrics.horizontalAdvance(line) for line in lines)
+    return text_width(text, font)
 
 
 class HeapItem(QGraphicsRectItem):

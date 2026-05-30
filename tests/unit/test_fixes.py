@@ -165,14 +165,13 @@ def test_extract_code_preserves_comments():
 # ── Phase 5: Graph page uses named class ───────────────────────────────
 
 def test_graph_page_named_canvas_class():
-    """graph_page defines _GraphCanvas as a named class, not type()."""
+    """knowledge_page defines _GraphCanvas as a named class."""
     from PySide6.QtWidgets import QApplication
     import sys
     QApplication.instance() or QApplication(sys.argv)
 
-    from app.ui.pages.graph_page import _GraphCanvas
-    assert _GraphCanvas.__name__ == "_GraphCanvas", f"expected _GraphCanvas, got {_GraphCanvas.__name__}"
-    assert issubclass(_GraphCanvas, object)
+    from app.ui.pages.knowledge_page import _GraphCanvas
+    assert _GraphCanvas.__name__ == "_GraphCanvas"
 
 
 # ── Runner ─────────────────────────────────────────────────────────────

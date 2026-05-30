@@ -12,26 +12,28 @@ from app.ui.theme.colors import (
 GLOBAL_STYLESHEET = f"""
 /* ═══════════════════════════════════════════════════════
    VS Code Dark+ — C++ Memory Visualizer
-   Hierarchy: ACCENT → action  SECONDARY → subtle
-              ERROR  → danger  SUCCESS → positive
+   Typography: H1=26px/800  H2=18px/700  H3=15px/600
+              Body=13px  Caption=11px
+   Color:    ACCENT=action  ERROR=danger  SUCCESS=positive
+             WARN=caution   INFO=neutral
    ═══════════════════════════════════════════════════════ */
 
 QMainWindow {{
     background-color: {CANVAS_BG};
 }}
 
-/* ── Kill inherited borders on containers ─────────── */
 QFrame, QGroupBox {{
     border: none;
     background: transparent;
 }}
 
-/* ── Typography ────────────────────────────────────── */
+/* ── Typography scale ──────────────────────────────── */
 QLabel {{
     color: {TEXT_PRIMARY};
-    font-size: 14px;
-    border: none;
+    font-size: 13px;
+    font-weight: 400;
     background: transparent;
+    border: none;
 }}
 
 /* ── Typography scale ──────────────────────────────────
@@ -55,7 +57,7 @@ QPushButton {{
     background-color: {ACCENT};
     color: #FFFFFF;
     border: none;
-    border-radius: 5px;
+    
     padding: 7px 18px;
     font-size: 13px;
     font-weight: 600;
@@ -150,13 +152,13 @@ QMenuBar {{
 }}
 QMenuBar::item:selected {{
     background-color: {ACCENT};
-    border-radius: 3px;
+    
 }}
 QMenu {{
     background-color: {SURFACE};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
-    border-radius: 6px;
+    
     padding: 6px 0;
 }}
 QMenu::item {{
@@ -193,7 +195,7 @@ QScrollBar:vertical {{
 }}
 QScrollBar::handle:vertical {{
     background-color: {BORDER};
-    border-radius: 4px;
+    
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
@@ -207,7 +209,7 @@ QScrollBar:horizontal {{
 }}
 QScrollBar::handle:horizontal {{
     background-color: {BORDER};
-    border-radius: 4px;
+    
     min-width: 30px;
 }}
 QScrollBar::handle:horizontal:hover {{
@@ -245,7 +247,7 @@ QComboBox QAbstractItemView {{
     background-color: {SURFACE};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
-    border-radius: 4px;
+    
     selection-background-color: {ACCENT};
     padding: 4px;
     outline: none;
@@ -255,21 +257,21 @@ QComboBox QAbstractItemView {{
 QSlider::groove:horizontal {{
     background: {BORDER};
     height: 4px;
-    border-radius: 2px;
+    
 }}
 QSlider::handle:horizontal {{
     background: {ACCENT};
     width: 14px;
     height: 14px;
     margin: -5px 0;
-    border-radius: 7px;
+    
 }}
 QSlider::handle:horizontal:hover {{
     background: {ACCENT_HOVER};
     width: 16px;
     height: 16px;
     margin: -6px 0;
-    border-radius: 8px;
+    
 }}
 
 /* ── Checkbox ────────────────────────────────────────── */
@@ -367,6 +369,6 @@ QToolTip {{
 /* ── Progress-like highlight ─────────────────────────── */
 QWidget[highlight="step"] {{
     background-color: {HIGHLIGHT_BG};
-    border-radius: 4px;
+    
 }}
 """

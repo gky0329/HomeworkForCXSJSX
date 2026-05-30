@@ -32,7 +32,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
         code_text.setMaximumHeight(100)
         code_text.setStyleSheet(
             "QTextEdit { background-color: #1E1E1E; color: #D4D4D4; "
-            "border: 1px solid #3C3C3C; border-radius: 4px; padding: 6px; }"
+            "border: 1px solid #3C3C3C; padding: 6px; }"
         )
         layout.addWidget(code_text)
 
@@ -46,7 +46,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
         raw_text.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
         raw_text.setStyleSheet(
             "QTextEdit { background-color: #1E1E1E; color: #808080; "
-            "border: 1px solid #3C3C3C; border-radius: 4px; padding: 6px; }"
+            "border: 1px solid #3C3C3C; padding: 6px; }"
         )
         layout.addWidget(raw_text)
 
@@ -55,7 +55,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
         retry_btn = QPushButton("Retry")
         retry_btn.setStyleSheet(
             "QPushButton { background-color: #007ACC; color: #FFFFFF; "
-            "border: none; border-radius: 4px; padding: 8px 24px; "
+            "border: none; padding: 8px 24px; "
             "font-size: 13px; font-weight: bold; }"
             "QPushButton:hover { background-color: #1A8CD8; }"
         )

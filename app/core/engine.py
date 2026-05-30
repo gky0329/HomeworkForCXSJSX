@@ -1,7 +1,10 @@
 import os
+import logging
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
 
@@ -26,7 +29,7 @@ def _has_api_key() -> bool:
             key = cfg.get("llm", {}).get("api_key", "")
             return bool(key and key.strip())
     except Exception:
-        pass
+        logger.exception("Failed to read config for API key check")
     return False
 
 

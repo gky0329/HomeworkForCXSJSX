@@ -33,18 +33,18 @@ SCENE_H = 1200
 
 CARD = (
     f"QFrame#ojCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
-    f"border-radius: 6px; margin: 3px 0; }}"
+    f"margin: 3px 0; }}"
     f"QFrame#ojCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 SECTION_TITLE = (
-    f"color: {STACK_BORDER}; font-size: 14px; font-weight: bold; "
-    f"padding: 4px 0;"
+    f"color: {STACK_BORDER}; font-size: 16px; font-weight: 700; "
+    f"padding: 6px 0;"
 )
-BODY_TEXT = f"color: {TEXT_PRIMARY}; font-size: 12px;"
-MUTED_TEXT = f"color: {TEXT_SECONDARY}; font-size: 12px;"
+BODY_TEXT = f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 400;"
+MUTED_TEXT = f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 400;"
 CODE_BG = (
     f"background-color: {CANVAS_BG}; border: 1px solid {BORDER}; "
-    f"border-radius: 4px; padding: 6px; margin: 4px 0;"
+    f"padding: 6px; margin: 4px 0;"
 )
 
 
@@ -75,7 +75,6 @@ class OJWorker(QThread):
             raw = asyncio.run(service.chat_json(
                 system_prompt=OJ_SYSTEM_PROMPT,
                 user_message=user_msg,
-                model="deepseek-reasoner",
             ))
             data = json.loads(raw)
             trace = ExecutionTrace.model_validate(data)
@@ -237,6 +236,15 @@ class OJPage(QWidget):
         self._run_btn.setEnabled(False)
         self._run_btn.setText("Analyzing...")
 
+        if self._worker is not None and self._worker.isRunning():
+            try:
+                self._worker.finished.disconnect(self._on_result)
+                self._worker.error.disconnect(self._on_error)
+            except Exception:
+                pass
+            self._worker.quit()
+            self._worker.wait(1000)
+
         self._worker = OJWorker(problem, code, self._config_path)
         self._worker.finished.connect(self._on_result)
         self._worker.error.connect(self._on_error)
@@ -360,7 +368,7 @@ class OJPage(QWidget):
         review_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
+            f"padding: 2px 10px; font-size: 10px; "
             f"margin-top: 4px; }}"
             f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
         )
@@ -375,7 +383,7 @@ class OJPage(QWidget):
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; "
                 f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                f"border-radius: 3px; padding: 2px 10px; font-size: 10px; "
+                f"padding: 2px 10px; font-size: 10px; "
                 f"margin-top: 4px; }}"
             )
             btn.setEnabled(False)
@@ -389,7 +397,7 @@ class OJPage(QWidget):
         card.setObjectName("ojRefCard")
         card.setStyleSheet(
             f"QFrame#ojRefCard {{ background-color: #1A2A1A; border: 1px solid #4EC9B0; "
-            f"border-radius: 6px; margin: 3px 0; }}"
+            f"margin: 3px 0; }}"
             f"QFrame#ojRefCard QLabel {{ border: none; background: transparent; outline: none; }}"
         )
         vbox = QVBoxLayout(card)
@@ -416,7 +424,7 @@ class OJPage(QWidget):
             viz = QPushButton("Visualize this code")
             viz.setStyleSheet(
                 f"QPushButton {{ background-color: #007ACC; color: white; "
-                f"border: none; border-radius: 3px; padding: 3px 10px; "
+                f"border: none; padding: 3px 10px; "
                 f"font-size: 11px; margin-top: 4px; }}"
                 f"QPushButton:hover {{ background-color: #1A8CD8; }}"
             )

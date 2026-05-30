@@ -7,12 +7,11 @@ from app.ui.theme.colors import (
     STACK_BORDER, STACK_BG, STACK_TITLE, STACK_VAR_TEXT,
     HEAP_BORDER, HEAP_BG, EDGE_DANGLING,
 )
+from app.ui.widgets.helpers import text_width
 
 
 def _text_width(text: str, font: QFont) -> float:
-    metrics = QFontMetricsF(font)
-    lines = text.splitlines() or [text]
-    return max(metrics.horizontalAdvance(line) for line in lines)
+    return text_width(text, font)
 
 
 class VarItem(QGraphicsTextItem):

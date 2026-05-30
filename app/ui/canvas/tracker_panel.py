@@ -19,36 +19,36 @@ PANEL_BG = (
 
 CHIP = (
     f"QPushButton {{ background-color: {CANVAS_BG}; color: {TEXT_PRIMARY}; "
-    f"border: 2px solid {BORDER}; border-radius: 8px; "
+    f"border: 2px solid {BORDER}; "
     f"padding: 5px 16px; font-size: 13px; font-weight: 500; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
 )
 CHIP_TRACKED = (
     f"QPushButton {{ background-color: #1A3A5C; color: {STACK_BORDER}; "
-    f"border: 2px solid {STACK_BORDER}; border-radius: 8px; "
+    f"border: 2px solid {STACK_BORDER}; "
     f"padding: 5px 16px; font-size: 13px; font-weight: bold; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; }}"
 )
 CHIP_PTR = (
     f"QPushButton {{ background-color: #3D2916; color: {HEAP_BORDER}; "
-    f"border: 2px solid {HEAP_BORDER}; border-radius: 8px; "
+    f"border: 2px solid {HEAP_BORDER}; "
     f"padding: 5px 16px; font-size: 13px; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; }}"
 )
 TRACK_ALL_BTN = (
     f"QPushButton {{ background-color: transparent; color: {ACCENT}; "
-    f"border: 1px solid {ACCENT}; border-radius: 8px; "
+    f"border: 1px solid {ACCENT}; "
     f"padding: 4px 12px; font-size: 12px; }}"
     f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
 )
 CARD_STYLE = (
     f"QFrame#trackCard {{ background-color: #1E2A38; border: 2px solid {STACK_BORDER}; "
-    f"border-radius: 8px; }}"
+    f"}}"
     f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 CARD_DESTROYED = (
     f"QFrame#trackCardDestroyed {{ background-color: {CANVAS_BG}; "
-    f"border: 1px dashed {EDGE_DANGLING}; border-radius: 8px; }}"
+    f"border: 1px dashed {EDGE_DANGLING}; }}"
     f"QFrame#trackCardDestroyed QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
@@ -342,7 +342,7 @@ class TrackerPanel(QWidget):
             )
             card.setStyleSheet(
                 f"QFrame#trackCard {{ background-color: #2A2A10; "
-                f"border: 2px solid {HIGHLIGHT}; border-radius: 8px; }}"
+                f"border: 2px solid {HIGHLIGHT}; }}"
                 f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )
 

@@ -32,10 +32,10 @@ def _md_to_html(text: str) -> str:
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     html = re.sub(r"```(\w*)\n(.*?)```", _code_block, html, flags=re.DOTALL)
-    html = re.sub(r"`([^`\n]+)`", r"<code style='background:#2D2D2D;color:#CE9178;padding:1px 5px;border-radius:3px;font-family:monospace;'>\1</code>", html)
-    html = re.sub(r"^\*\*\*(.+?)\*\*\*$", r"<h2 style='color:#9CDCFE;font-size:18px;font-weight:bold;margin:12px 0 4px 0;border-bottom:1px solid #3E3E3E;padding-bottom:4px;'>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^## (.+)$", r"<h2 style='color:#9CDCFE;font-size:18px;font-weight:bold;margin:12px 0 4px 0;border-bottom:1px solid #3E3E3E;padding-bottom:4px;'>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^### (.+)$", r"<h3 style='color:#569CD6;font-size:15px;font-weight:bold;margin:10px 0 3px 0;'>\1</h3>", html, flags=re.MULTILINE)
+    html = re.sub(r"`([^`\n]+)`", r"<code style='background:#2D2D2D;color:#CE9178;padding:1px 5px;font-family:monospace;'>\1</code>", html)
+    html = re.sub(r"^\*\*\*(.+?)\*\*\*$", r"<h2 style='color:#9CDCFE;font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid #3E3E3E;padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^## (.+)$", r"<h2 style='color:#9CDCFE;font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid #3E3E3E;padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^### (.+)$", r"<h3 style='color:#569CD6;font-size:16px;font-weight:600;margin:12px 0 4px 0;'>\1</h3>", html, flags=re.MULTILINE)
     html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
     html = re.sub(r"^- (.+)$", r"<li style='margin:2px 0;'>\1</li>", html, flags=re.MULTILINE)
     html = re.sub(r"^(\d+)\. (.+)$", r"<li style='margin:2px 0;'>\2</li>", html, flags=re.MULTILINE)
@@ -55,7 +55,7 @@ def _code_block(match: re.Match) -> str:
         for i, line in enumerate(lines)
     )
     return (
-        f"<div style='background:#1E1E1E;border:1px solid #3E3E3E;border-radius:6px;"
+        f"<div style='background:#1E1E1E;border:1px solid #3E3E3E;"
         f"padding:10px 14px;margin:8px 0;font-family:monospace;font-size:12px;"
         f"color:#D4D4D4;line-height:1.5;'>{numbered}</div>"
     )
@@ -63,12 +63,12 @@ def _code_block(match: re.Match) -> str:
 
 TOGGLE_ACTIVE = (
     f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-    f"border: none; border-radius: 4px; padding: 4px 12px; font-size: 12px; font-weight: bold; }}"
+    f"border: none; padding: 4px 12px; font-size: 12px; font-weight: bold; }}"
 )
 TOGGLE_INACTIVE = (
     f"QPushButton {{ background-color: transparent; "
     f"color: {TEXT_SECONDARY}; border: 1px solid {BORDER}; "
-    f"border-radius: 4px; padding: 4px 12px; font-size: 12px; }}"
+    f"padding: 4px 12px; font-size: 12px; }}"
     f"QPushButton:hover {{ color: {TEXT_PRIMARY}; border-color: {ACCENT}; }}"
 )
 
@@ -183,7 +183,6 @@ class KnowledgePage(QWidget):
             f"QListWidget {{ background-color: transparent; "
             f"color: {TEXT_PRIMARY}; border: none; "
             f"font-size: 14px; }}"
-            f"color: {TEXT_PRIMARY}; font-size: 13px; }}"
             f"QListWidget::item {{ padding: 10px 14px; min-height: 32px; "
             f"border-bottom: 1px solid {BORDER}; }}"
             f"QListWidget::item:selected {{ background-color: #1A3A5C; }}"
@@ -285,7 +284,7 @@ class KnowledgePage(QWidget):
             if errs:
                 label += f"  ({errs})"
             item = QListWidgetItem(label)
-            item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 4, 0, 4)))
+            item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 6, 0, 6)))
             if errs > 0:
                 item.setForeground(QColor(EDGE_DANGLING))
             elif kp.get("count", 0) > 0:
@@ -322,8 +321,8 @@ class KnowledgePage(QWidget):
         title = QLabel(name)
         title.setWordWrap(True)
         title.setStyleSheet(
-            f"color: {STACK_BORDER}; font-size: 24px; font-weight: bold; "
-            f"padding: 0 0 6px 0; border-bottom: 1px solid {BORDER};"
+            f"color: {STACK_BORDER}; font-size: 32px; font-weight: 800; "
+            f"padding: 0 0 10px 0; border-bottom: 1px solid {BORDER};"
         )
         self._detail_layout.addWidget(title)
 
@@ -364,7 +363,7 @@ class KnowledgePage(QWidget):
         btn = QPushButton("Explain with AI")
         btn.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-            f"border: none; border-radius: 4px; padding: 8px 18px; font-size: 13px; }}"
+            f"border: none; padding: 8px 18px; font-size: 13px; }}"
             f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
         )
 
@@ -383,6 +382,14 @@ class KnowledgePage(QWidget):
 
             btn.setEnabled(False)
             btn.setText("Asking AI...")
+            if self._explain_worker is not None and self._explain_worker.isRunning():
+                try:
+                    self._explain_worker.finished.disconnect()
+                    self._explain_worker.error.disconnect()
+                except Exception:
+                    pass
+                self._explain_worker.quit()
+                self._explain_worker.wait(1000)
             self._explain_worker = AIExplainWorker(EXPLAIN_PROMPT, f"请解释 C++ 知识点：{concept_name}")
 
             def on_done(text):
@@ -413,7 +420,7 @@ class KnowledgePage(QWidget):
         btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-            f"border-radius: 4px; padding: 6px 14px; font-size: 12px; }}"
+            f"padding: 6px 14px; font-size: 12px; }}"
             f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
         )
 
@@ -423,7 +430,7 @@ class KnowledgePage(QWidget):
             btn.setText("✓ Added")
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; color: #4EC9B0; "
-                f"border: 1px solid #4EC9B0; border-radius: 4px; padding: 4px 12px; font-size: 11px; }}"
+                f"border: 1px solid #4EC9B0; padding: 4px 12px; font-size: 11px; }}"
             )
             btn.setEnabled(False)
 

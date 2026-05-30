@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QPushButton,
+    QPushButton, QScrollArea,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -12,21 +12,21 @@ from app.ui.theme.colors import (
 )
 
 
-HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 20px; font-weight: bold; padding: 4px 0;"
-SUBTITLE = f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 2px 0;"
-STAT_NUM = f"color: {STACK_BORDER}; font-size: 26px; font-weight: bold;"
-STAT_LABEL = f"color: {TEXT_SECONDARY}; font-size: 11px;"
-CARD_BG = (
-    f"QFrame#statCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
-    f"border-radius: 10px; }}"
-    f"QFrame#statCard:hover {{ border-color: {STACK_BORDER}; }}"
-    f"QFrame#statCard QLabel {{ border: none; background: transparent; outline: none; }}"
-)
+HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 28px; font-weight: 800; padding: 6px 0;"
+SUBTITLE = f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 400; padding: 2px 0;"
+STAT_NUM = f"color: {STACK_BORDER}; font-size: 36px; font-weight: 800;"
+STAT_LABEL = f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 400;"
 LINK_BTN = (
     f"QPushButton {{ background-color: {SURFACE}; color: {ACCENT}; "
-    f"border: 1px solid {BORDER}; border-radius: 10px; "
-    f"padding: 14px 24px; font-size: 15px; font-weight: bold; text-align: left; }}"
+    f"border: 1px solid {BORDER}; "
+    f"padding: 14px 24px; font-size: 15px; font-weight: 700; text-align: left; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; color: {STACK_BORDER}; }}"
+)
+
+CARD_BG = (
+    f"QFrame#statCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; }}"
+    f"QFrame#statCard:hover {{ border-color: {STACK_BORDER}; }}"
+    f"QFrame#statCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
 TAB_NAMES = {
@@ -47,7 +47,12 @@ class HomePage(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        main = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        content = QWidget()
+        main = QVBoxLayout(content)
         main.setContentsMargins(24, 20, 24, 20)
         main.setSpacing(16)
 
@@ -79,7 +84,7 @@ class HomePage(QWidget):
             card.setObjectName("quickCard")
             card.setStyleSheet(
                 f"QFrame#quickCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
-                f"border-radius: 8px; padding: 10px 14px; }}"
+                f"padding: 10px 14px; }}"
                 f"QFrame#quickCard:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
                 f"QFrame#quickCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )
@@ -92,11 +97,11 @@ class HomePage(QWidget):
             card_layout.setSpacing(4)
 
             title_lbl = QLabel(label)
-            title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold;")
+            title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 15px; font-weight: 700;")
             card_layout.addWidget(title_lbl)
 
             desc_lbl = QLabel(desc)
-            desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px;")
+            desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 400;")
             card_layout.addWidget(desc_lbl)
 
             quick_row.addWidget(card)
@@ -146,6 +151,11 @@ class HomePage(QWidget):
         main.addLayout(self._activity_list)
 
         main.addStretch()
+
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
     def _stat_card(self, num: str, label: str, tab_name: str | None) -> QFrame:
         card = QFrame()
@@ -199,8 +209,8 @@ class HomePage(QWidget):
             self._activity_list.addStretch()
             return
 
-        for a in activities[:5]:
-            ts = a.get("timestamp", "")[:16].replace("T", " ")
+        for a in activities[:15]:
+            ts = a.get("timestamp", "")[:19].replace("T", " ")
             act = a.get("action", "?")
             detail = a.get("detail", "")
             row = QLabel(f"  {ts}   {act}  —  {detail}")
@@ -210,8 +220,8 @@ class HomePage(QWidget):
             )
             self._activity_list.addWidget(row)
 
-        if len(activities) > 5:
-            more = QLabel(f"  ... and {len(activities) - 5} more")
+        if len(activities) > 15:
+            more = QLabel(f"  ... and {len(activities) - 15} more")
             more.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; padding: 3px 8px;")
             self._activity_list.addWidget(more)
 

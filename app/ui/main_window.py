@@ -1,5 +1,8 @@
 import time
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from collections.abc import Callable
 
 from PySide6.QtWidgets import (
@@ -10,7 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
 
-from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT
+from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT, TEXT_PRIMARY, ACCENT
 from app.ui.pages.file_import_page import FileImportPage
 from app.ui.pages.oj_page import OJPage
 from app.ui.pages.review_page import ReviewPage
@@ -24,11 +27,11 @@ ZOOM_FACTOR = 1.15
 ZOOM_MIN = 0.1
 ZOOM_MAX = 10.0
 ZOOM_BTN_STYLE = (
-    "QPushButton { background-color: #007ACC; color: #FFFFFF; border: none; "
-    "border-radius: 4px; padding: 2px 4px; font-size: 16px; font-weight: bold; "
+    f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
+    "padding: 2px 4px; font-size: 16px; font-weight: bold; "
     "min-height: 24px; min-width: 28px; } "
-    "QPushButton:hover { background-color: #1A8CD8; } "
-    "QPushButton:pressed { background-color: #005A9E; }"
+    f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
+    f"QPushButton:pressed {{ background-color: {ACCENT_PRESSED}; }}"
 )
 
 SCENE_W = 1600
@@ -36,10 +39,10 @@ SCENE_H = 2000
 
 TAB_STYLE = (
     "QTabWidget::pane { border: none; background: #1E1E1E; }"
-    "QTabBar::tab { background: #2D2D2D; color: #808080; padding: 8px 24px; "
-    "border: none; border-bottom: 2px solid transparent; font-size: 13px; }"
-    "QTabBar::tab:selected { color: #D4D4D4; border-bottom: 2px solid #007ACC; }"
-    "QTabBar::tab:hover { color: #D4D4D4; }"
+    f"QTabBar::tab {{ background: #2D2D2D; color: {TEXT_SECONDARY}; padding: 8px 24px; "
+    f"border: none; border-bottom: 2px solid transparent; font-size: 13px; }}"
+    f"QTabBar::tab:selected {{ color: {TEXT_PRIMARY}; border-bottom: 2px solid {ACCENT}; }}"
+    f"QTabBar::tab:hover {{ color: {TEXT_PRIMARY}; }}"
 )
 
 EXAMPLE_CODES = {
@@ -301,10 +304,10 @@ class MainWindow(QMainWindow):
 
         self.btn_prev_big = QPushButton("< Prev Step")
         self.btn_prev_big.setStyleSheet(
-            "QPushButton { background-color: #007ACC; color: #FFFFFF; border: none; "
-            "border-radius: 4px; padding: 6px 16px; font-size: 13px; font-weight: bold; } "
-            "QPushButton:hover { background-color: #1A8CD8; } "
-            "QPushButton:disabled { background-color: #3E3E3E; color: #808080; }"
+            f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
+            f"padding: 6px 16px; font-size: 13px; font-weight: bold; }} "
+            f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
+            f"QPushButton:disabled {{ background-color: {BORDER}; color: {TEXT_SECONDARY}; }}"
         )
         self.btn_prev_big.setEnabled(False)
         step_bar.addWidget(self.btn_prev_big)
@@ -388,7 +391,7 @@ class MainWindow(QMainWindow):
         self._overlay_label = QLabel("Analyzing code with AI...")
         self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_label.setStyleSheet(
-            "QLabel { color: #FFD700; font-size: 24px; font-weight: bold; background: transparent; }"
+            f"QLabel {{ color: {HIGHLIGHT}; font-size: 24px; font-weight: bold; background: transparent; }}"
         )
         layout.addWidget(self._overlay_label)
 
@@ -402,9 +405,9 @@ class MainWindow(QMainWindow):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedWidth(120)
         cancel_btn.setStyleSheet(
-            "QPushButton { background-color: #3E3E3E; color: #D4D4D4; border: 1px solid #555; "
-            "border-radius: 4px; padding: 6px 16px; font-size: 13px; } "
-            "QPushButton:hover { background-color: #555; }"
+            f"QPushButton {{ background-color: {BORDER}; color: {TEXT_PRIMARY}; border: 1px solid; "
+            f"padding: 6px 16px; font-size: 13px; }} "
+            f"QPushButton:hover {{ background-color: #555; }}"
         )
         cancel_layout = QHBoxLayout()
         cancel_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -634,5 +637,5 @@ class MainWindow(QMainWindow):
                     cfg = yaml.safe_load(f) or {}
                 return int(cfg.get("ui", {}).get("code_font_size", 14))
         except Exception:
-            pass
+            logger.exception("Failed to read code font size from config")
         return 14
