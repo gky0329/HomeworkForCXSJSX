@@ -16,6 +16,7 @@ from app.services.file_service import (
 )
 from app.services.ai_service import AIService
 from app.services import error_store
+from app.services.i18n import tr
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
 from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
@@ -26,10 +27,18 @@ from app.ui.theme.colors import (
 
 logger = logging.getLogger(__name__)
 
-FILE_FILTER = "All Supported Files (" + " ".join(
-    f"*{e}" for e in SUPPORTED_EXTENSIONS
-) + ");;PDF (*.pdf);;Word (*.docx *.doc);;C++ (*.cpp *.h);;" \
-    "Python (*.py);;Markdown (*.md);;Text (*.txt);;All Files (*)"
+def _file_filter() -> str:
+    supported = " ".join(f"*{e}" for e in SUPPORTED_EXTENSIONS)
+    return (
+        f"{tr('All Supported Files')} ({supported});;"
+        "PDF (*.pdf);;"
+        f"{tr('Word')} (*.docx *.doc);;"
+        "C++ (*.cpp *.h);;"
+        "Python (*.py);;"
+        "Markdown (*.md);;"
+        f"{tr('Text')} (*.txt);;"
+        f"{tr('All Files')} (*)"
+    )
 
 PAGE_STYLE = f"""
 QFrame#resultCard {{
@@ -108,17 +117,12 @@ class FileImportPage(QWidget):
 
         toolbar = QHBoxLayout()
 
-        type_label = QLabel("File type:")
-        type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
-        toolbar.addWidget(type_label)
+        self._type_label = QLabel(tr("File type:"))
+        self._type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        toolbar.addWidget(self._type_label)
 
         self._type_combo = QComboBox()
-        self._type_combo.addItem("Auto-detect", "")
-        self._type_combo.addItem("C++ Source", ".cpp")
-        self._type_combo.addItem("C/C++ Header", ".h")
-        self._type_combo.addItem("Python", ".py")
-        self._type_combo.addItem("Markdown", ".md")
-        self._type_combo.addItem("Plain Text", ".txt")
+        self._populate_type_combo()
         self._type_combo.setStyleSheet(
             f"QComboBox {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
             f"border: 1px solid {BORDER}; padding: 4px 8px; }}"
@@ -127,17 +131,17 @@ class FileImportPage(QWidget):
 
         toolbar.addSpacing(8)
 
-        self._upload_btn = QPushButton("Upload File")
+        self._upload_btn = QPushButton(tr("Upload File"))
         self._upload_btn.clicked.connect(self._on_upload)
         toolbar.addWidget(self._upload_btn)
 
-        self._file_label = QLabel("No file selected")
+        self._file_label = QLabel(tr("No file selected"))
         self._file_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
         toolbar.addWidget(self._file_label)
 
         toolbar.addStretch()
 
-        self._process_btn = QPushButton("Extract Knowledge Points")
+        self._process_btn = QPushButton(tr("Extract Knowledge Points"))
         self._process_btn.setEnabled(False)
         self._process_btn.clicked.connect(self._on_process)
         toolbar.addWidget(self._process_btn)
@@ -148,7 +152,7 @@ class FileImportPage(QWidget):
 
         self._preview = QPlainTextEdit()
         self._preview.setReadOnly(True)
-        self._preview.setPlaceholderText("File content appears here after upload...")
+        self._preview.setPlaceholderText(tr("File content appears here after upload..."))
         self._preview.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         splitter.addWidget(self._preview)
 
@@ -156,7 +160,7 @@ class FileImportPage(QWidget):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 0, 0, 0)
 
-        self._status = QLabel("Upload a file to begin")
+        self._status = QLabel(tr("Upload a file to begin"))
         self._status.setStyleSheet(
             f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 4px;"
         )
@@ -178,9 +182,24 @@ class FileImportPage(QWidget):
 
         layout.addWidget(splitter)
 
+    def _populate_type_combo(self):
+        current = self._type_combo.currentData() if hasattr(self, "_type_combo") else ""
+        self._type_combo.clear()
+        for label, value in [
+            ("Auto-detect", ""),
+            ("C++ Source", ".cpp"),
+            ("C/C++ Header", ".h"),
+            ("Python", ".py"),
+            ("Markdown", ".md"),
+            ("Plain Text", ".txt"),
+        ]:
+            self._type_combo.addItem(tr(label), value)
+        index = self._type_combo.findData(current)
+        self._type_combo.setCurrentIndex(index if index >= 0 else 0)
+
     def _on_upload(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select File", "", FILE_FILTER
+            self, tr("Select File"), "", _file_filter()
         )
         if not path:
             return
@@ -191,25 +210,30 @@ class FileImportPage(QWidget):
             self._file_label.setText(
                 f"{file_path.name}  ({file_type_label(ext)})"
             )
-            self._status.setText("Extracting text...")
+            self._status.setText(tr("Extracting text..."))
 
             self._file_text = extract_text(str(file_path))
 
             preview = self._file_text[:20000]
             if len(self._file_text) > 20000:
                 preview += (
-                    f"\n\n... ({len(self._file_text)} chars total, "
-                    "truncated for preview)"
+                    "\n\n" + tr(
+                        "... ({count} chars total, truncated for preview)",
+                        count=len(self._file_text),
+                    )
                 )
             self._preview.setPlainText(preview)
             self._process_btn.setEnabled(True)
             self._status.setText(
-                f"Loaded: {file_path.name} ({len(self._file_text)} chars). "
-                "Click 'Extract Knowledge Points' to process with AI."
+                tr(
+                    "Loaded: {name} ({count} chars). Click 'Extract Knowledge Points' to process with AI.",
+                    name=file_path.name,
+                    count=len(self._file_text),
+                )
             )
         except Exception as e:
-            self._status.setText(f"Error: {e}")
-            self._file_label.setText("Error loading file")
+            self._status.setText(tr("Error: {message}", message=e))
+            self._file_label.setText(tr("Error loading file"))
 
     def _on_process(self):
         if not self._file_text:
@@ -218,7 +242,7 @@ class FileImportPage(QWidget):
         self._process_btn.setEnabled(False)
         self._upload_btn.setEnabled(False)
         self._clear_results()
-        self._status.setText("Processing with AI...")
+        self._status.setText(tr("Processing with AI..."))
 
         if self._worker is not None and self._worker.isRunning():
             try:
@@ -242,12 +266,12 @@ class FileImportPage(QWidget):
         quizzes = data.get("quiz_questions", [])
 
         self._status.setText(
-            f"Done: {len(kps)} knowledge points, {len(quizzes)} questions"
+            tr("Done: {kps} knowledge points, {quizzes} questions", kps=len(kps), quizzes=len(quizzes))
         )
         error_store.log_activity("File Import", f"Extracted {len(kps)} KPs, {len(quizzes)} quizzes")
 
         if kps:
-            section = QLabel(" Knowledge Points")
+            section = QLabel(" " + tr("Knowledge Points"))
             section.setStyleSheet(
                 f"color: {STACK_BORDER}; font-size: 15px; font-weight: bold; "
                 "padding: 8px 0 4px 0;"
@@ -258,7 +282,7 @@ class FileImportPage(QWidget):
                 self._result_layout.addWidget(self._build_kp_card(kp))
 
         if quizzes:
-            section = QLabel(" Quiz Questions")
+            section = QLabel(" " + tr("Quiz Questions"))
             section.setStyleSheet(
                 f"color: {HEAP_BORDER}; font-size: 15px; font-weight: bold; "
                 "padding: 12px 0 4px 0;"
@@ -293,7 +317,7 @@ class FileImportPage(QWidget):
             code_frame = build_code_block(code, text_color=TEXT_PRIMARY,
                                            bg_color=CANVAS_BG, border_color=BORDER)
 
-            viz_btn = QPushButton("Visualize this code")
+            viz_btn = QPushButton(tr("Visualize this code"))
             viz_btn.setObjectName("visualizeBtn")
             viz_btn.clicked.connect(
                 lambda checked=None, c=code: self.visualize_requested.emit(c)
@@ -375,19 +399,22 @@ class FileImportPage(QWidget):
                 btn.setEnabled(False)
 
             if correct:
-                result_label.setText("✓ Correct!")
+                result_label.setText("✓ " + tr("Correct!"))
                 result_label.setStyleSheet(
                     f"color: #4EC9B0; font-size: 13px; font-weight: bold; padding: 4px 0;"
                 )
             else:
                 result_label.setText(
-                    f"✗ Wrong — correct answer: {labels[answer_idx]}) {options[answer_idx]}"
+                    "✗ " + tr(
+                        "Wrong - correct answer: {answer}",
+                        answer=f"{labels[answer_idx]}) {options[answer_idx]}",
+                    )
                 )
                 result_label.setStyleSheet(
                     f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: bold; padding: 4px 0;"
                 )
 
-                wrong_btn = QPushButton("Add to My Errors")
+                wrong_btn = QPushButton(tr("Add to My Errors"))
                 wrong_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
                     f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
@@ -402,7 +429,7 @@ class FileImportPage(QWidget):
                         user_answer=lbl[ci] if ci < len(lbl) else "?",
                         correct_answer=opts[a_idx] if 0 <= a_idx < len(opts) else "?",
                     )
-                    btn.setText("✓ Added")
+                    btn.setText("✓ " + tr("Added"))
                     btn.setStyleSheet(
                         f"QPushButton {{ background-color: #1A3A2A; "
                         f"color: #4EC9B0; border: 1px solid #4EC9B0; "
@@ -432,7 +459,7 @@ class FileImportPage(QWidget):
     def _on_error(self, msg: str):
         self._process_btn.setEnabled(True)
         self._upload_btn.setEnabled(True)
-        self._status.setText(f"Error: {msg[:60]}")
+        self._status.setText(tr("Error: {message}", message=msg[:60]))
 
         raw = ""
         display_msg = msg
@@ -443,7 +470,7 @@ class FileImportPage(QWidget):
 
         show_error_dialog(
             self,
-            "File Import Error",
+            tr("File Import Error"),
             display_msg,
             raw_response=raw,
             on_retry=lambda: self._on_process(),
@@ -451,3 +478,14 @@ class FileImportPage(QWidget):
 
     def _clear_results(self):
         clear_layout(self._result_layout)
+
+    def retranslate_ui(self):
+        self._type_label.setText(tr("File type:"))
+        self._populate_type_combo()
+        self._upload_btn.setText(tr("Upload File"))
+        self._process_btn.setText(tr("Extract Knowledge Points"))
+        self._preview.setPlaceholderText(tr("File content appears here after upload..."))
+        if not self._file_label.text() or self._file_label.text() == tr("No file selected"):
+            self._file_label.setText(tr("No file selected"))
+        if not self._file_text and not self._worker:
+            self._status.setText(tr("Upload a file to begin"))

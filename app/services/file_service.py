@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from app.services.i18n import tr
+
 
 def _stripped(text: str) -> str:
     return "\n".join(
@@ -124,31 +126,34 @@ def extract_text(file_path: str) -> str:
     handler = _handler_for(ext)
     if handler is None:
         raise ValueError(
-            f"Unsupported file type: {ext}. "
-            f"Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+            tr(
+                "Unsupported file type: {ext}. Supported: {supported}",
+                ext=ext,
+                supported=", ".join(SUPPORTED_EXTENSIONS),
+            )
         )
     return _EXTRACTORS[handler](path)
 
 
 def file_type_label(ext: str) -> str:
     labels = {
-        ".pdf": "PDF Document",
-        ".docx": "Word Document",
-        ".doc": "Word Document",
+        ".pdf": tr("PDF Document"),
+        ".docx": tr("Word Document"),
+        ".doc": tr("Word Document"),
         ".md": "Markdown",
         ".mdx": "Markdown",
-        ".cpp": "C++ Source",
-        ".cxx": "C++ Source",
-        ".cc": "C++ Source",
-        ".c": "C Source",
-        ".h": "C/C++ Header",
-        ".hpp": "C++ Header",
-        ".py": "Python Source",
-        ".java": "Java Source",
-        ".js": "JavaScript",
-        ".ts": "TypeScript",
-        ".txt": "Plain Text",
-        ".pptx": "PowerPoint",
-        ".ppt": "PowerPoint",
+        ".cpp": tr("C++ Source"),
+        ".cxx": tr("C++ Source"),
+        ".cc": tr("C++ Source"),
+        ".c": tr("C Source"),
+        ".h": tr("C/C++ Header"),
+        ".hpp": tr("C++ Header"),
+        ".py": tr("Python Source"),
+        ".java": tr("Java Source"),
+        ".js": tr("JavaScript"),
+        ".ts": tr("TypeScript"),
+        ".txt": tr("Plain Text"),
+        ".pptx": tr("PowerPoint"),
+        ".ppt": tr("PowerPoint"),
     }
-    return labels.get(ext, f"{ext} File")
+    return labels.get(ext, tr("{ext} File", ext=ext))

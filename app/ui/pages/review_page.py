@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QTimer
 
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
+from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -105,10 +106,11 @@ class ReviewPage(QWidget):
         layout.setContentsMargins(24, 16, 24, 16)
 
         header = QHBoxLayout()
-        header.addWidget(mlabel("Review", STACK_BORDER, 18, True))
+        self._header_label = mlabel(tr("Review"), STACK_BORDER, 18, True)
+        header.addWidget(self._header_label)
         header.addStretch()
 
-        self._add_btn = QPushButton("+ Add")
+        self._add_btn = QPushButton(tr("+ Add"))
         self._add_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; color: {TEXT_SECONDARY}; "
             f"border: 1px solid {BORDER}; padding: 4px 12px; font-size: 11px; }}"
@@ -147,11 +149,11 @@ class ReviewPage(QWidget):
         if not self._cards:
             self._progress.setText("")
             self._empty_state.addStretch()
-            empty = mlabel("🎉 No cards due — great job!", SUCCESS, 16, True)
+            empty = mlabel(tr("No cards due - great job!"), SUCCESS, 16, True)
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._empty_state.addWidget(empty)
             self._empty_state.addWidget(mlabel(
-                "Come back later or add errors via OJ / File Import",
+                tr("Come back later or add errors via OJ / File Import"),
                 TEXT_SECONDARY, 12
             ))
             self._empty_state.addStretch()
@@ -218,7 +220,7 @@ class ReviewPage(QWidget):
 
         user_ans = card.get("user_answer", "")
         if user_ans:
-            ul = QLabel(f"Your answer: {user_ans}")
+            ul = QLabel(tr("Your answer: {answer}", answer=user_ans))
             ul.setAlignment(Qt.AlignmentFlag.AlignCenter)
             ul.setStyleSheet(
                 f"color: {EDGE_DANGLING}; font-size: 12px; font-style: italic; padding: 4px 0;"
@@ -227,7 +229,7 @@ class ReviewPage(QWidget):
 
         v.addSpacing(12)
 
-        hint_btn = QPushButton("💡 Hint")
+        hint_btn = QPushButton(f"💡 {tr('Hint')}")
         hint_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 1px solid {ACCENT}; "
@@ -247,7 +249,7 @@ class ReviewPage(QWidget):
 
         v.addSpacing(8)
 
-        reveal_btn = QPushButton("Show Answer")
+        reveal_btn = QPushButton(tr("Show Answer"))
         reveal_btn.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
             f"border: none; padding: 12px 32px; "
@@ -266,7 +268,7 @@ class ReviewPage(QWidget):
     def _make_hint_handler(self, btn, label, kp_text, q_text):
         def on_hint():
             btn.setEnabled(False)
-            btn.setText("Thinking...")
+            btn.setText(tr("Thinking..."))
             if self._hint_worker is not None and self._hint_worker.isRunning():
                 try:
                     self._hint_worker.finished.disconnect()
@@ -281,12 +283,12 @@ class ReviewPage(QWidget):
             )
             def on_done(text):
                 btn.setEnabled(True)
-                btn.setText("💡 Hint")
-                label.setText(f"💡 提示: {text}")
+                btn.setText(f"💡 {tr('Hint')}")
+                label.setText(f"💡 {tr('Hint: {text}', text=text)}")
                 label.setVisible(True)
             def on_err(msg):
                 btn.setEnabled(True)
-                btn.setText("💡 Hint (failed)")
+                btn.setText(f"💡 {tr('Hint (failed)')}")
             self._hint_worker.finished.connect(on_done)
             self._hint_worker.error.connect(on_err)
             self._hint_worker.start()
@@ -300,7 +302,7 @@ class ReviewPage(QWidget):
         clear_layout(self._reveal_area)
 
         correct = card.get("correct_answer", "")
-        al = QLabel(f"Correct: {correct}")
+        al = QLabel(tr("Correct: {answer}", answer=correct))
         al.setWordWrap(True)
         al.setAlignment(Qt.AlignmentFlag.AlignCenter)
         al.setStyleSheet(
@@ -315,7 +317,7 @@ class ReviewPage(QWidget):
         self._notes_edit.setStyleSheet(NOTES_STYLE)
         self._notes_edit.setPlainText(notes)
         self._notes_edit.setMaximumHeight(60)
-        self._notes_edit.setPlaceholderText("Notes...")
+        self._notes_edit.setPlaceholderText(tr("Notes..."))
         self._pending_card_id = card["id"]
         self._notes_edit.textChanged.connect(
             lambda: self._save_timer.start()
@@ -341,7 +343,7 @@ class ReviewPage(QWidget):
 
         for label, style_key, quality in rating_labels:
             est = _predict_sm2(n, ef, interval, quality)
-            btn = QPushButton(f"{label}\n({est})")
+            btn = QPushButton(f"{tr(label)}\n({est})")
             btn.setStyleSheet(RATE_STYLES[style_key])
             btn.clicked.connect(
                 lambda checked=None, q=quality: self._rate_and_next(card["id"], q)
@@ -368,21 +370,21 @@ class ReviewPage(QWidget):
 
     def _on_add_error(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Add Card")
+        dialog.setWindowTitle(tr("Add Card"))
         dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("Knowledge Point:"))
+        layout.addWidget(QLabel(tr("Knowledge Point:")))
         kp_edit = QLineEdit()
-        kp_edit.setPlaceholderText("e.g. Pointers, STL...")
+        kp_edit.setPlaceholderText(tr("e.g. Pointers, STL..."))
         layout.addWidget(kp_edit)
-        layout.addWidget(QLabel("Question:"))
+        layout.addWidget(QLabel(tr("Question:")))
         q_edit = QTextEdit()
-        q_edit.setPlaceholderText("What did you get wrong?")
+        q_edit.setPlaceholderText(tr("What did you get wrong?"))
         q_edit.setMaximumHeight(80)
         layout.addWidget(q_edit)
-        layout.addWidget(QLabel("Correct Answer:"))
+        layout.addWidget(QLabel(tr("Correct Answer:")))
         a_edit = QLineEdit()
-        a_edit.setPlaceholderText("The right answer")
+        a_edit.setPlaceholderText(tr("The right answer"))
         layout.addWidget(a_edit)
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -392,11 +394,16 @@ class ReviewPage(QWidget):
         btn_box.rejected.connect(dialog.reject)
         layout.addWidget(btn_box)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            kp = kp_edit.text().strip() or "manual"
-            q = q_edit.toPlainText().strip() or "Manual entry"
+            kp = kp_edit.text().strip() or tr("manual")
+            q = q_edit.toPlainText().strip() or tr("Manual entry")
             a = a_edit.text().strip() or ""
             error_store.add_error(kp, q, "", a, "")
             self._load_cards()
 
     def _refresh(self):
         self._load_cards()
+
+    def retranslate_ui(self):
+        self._header_label.setText(tr("Review"))
+        self._add_btn.setText(tr("+ Add"))
+        self._render_empty_or_card()

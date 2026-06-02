@@ -16,6 +16,7 @@ from PySide6.QtGui import (
 
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
+from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -141,14 +142,15 @@ class KnowledgePage(QWidget):
         layout.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(mlabel("Knowledge Base", STACK_BORDER, 16, True))
+        self._header_label = mlabel(tr("Knowledge Base"), STACK_BORDER, 16, True)
+        header.addWidget(self._header_label)
 
-        self._btn_list = QPushButton("List")
+        self._btn_list = QPushButton(tr("List"))
         self._btn_list.setStyleSheet(TOGGLE_ACTIVE)
         self._btn_list.clicked.connect(lambda: self._set_view(False))
         header.addWidget(self._btn_list)
 
-        self._btn_graph = QPushButton("Graph")
+        self._btn_graph = QPushButton(tr("Graph"))
         self._btn_graph.setStyleSheet(TOGGLE_INACTIVE)
         self._btn_graph.clicked.connect(lambda: self._set_view(True))
         header.addWidget(self._btn_graph)
@@ -156,7 +158,7 @@ class KnowledgePage(QWidget):
         header.addStretch()
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search concepts...")
+        self._search.setPlaceholderText(tr("Search concepts..."))
         self._search.setFixedWidth(220)
         self._search.setStyleSheet(
             f"QLineEdit {{ background-color: transparent; "
@@ -193,7 +195,7 @@ class KnowledgePage(QWidget):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(12, 0, 0, 0)
-        self._detail_label = mlabel("Select a concept", TEXT_SECONDARY, 13)
+        self._detail_label = mlabel(tr("Select a concept"), TEXT_SECONDARY, 13)
         right_layout.addWidget(self._detail_label)
         self._detail = QFrame()
         self._detail.setObjectName("kbDetail")
@@ -229,9 +231,9 @@ class KnowledgePage(QWidget):
 
         bottom = QHBoxLayout()
         bottom.addStretch()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh)
-        bottom.addWidget(refresh_btn)
+        self._refresh_btn = QPushButton(tr("Refresh"))
+        self._refresh_btn.clicked.connect(self._refresh)
+        bottom.addWidget(self._refresh_btn)
         layout.addLayout(bottom)
 
     def _set_view(self, graph: bool):
@@ -266,7 +268,9 @@ class KnowledgePage(QWidget):
             kp["_score"] = scores.get(name, {})
         self._all_kps.sort(key=lambda k: -(k.get("count", 0) * 0.5 + k.get("_errors", 0)))
         stats = error_store.get_all_stats()
-        self._stats_label.setText(f"{stats['knowledge_points']} concepts, {stats['total_errors']} errors")
+        self._stats_label.setText(
+            tr("{concepts} concepts, {errors} errors", concepts=stats['knowledge_points'], errors=stats['total_errors'])
+        )
         if self._graph_view:
             self._build_graph()
         else:
@@ -328,7 +332,7 @@ class KnowledgePage(QWidget):
 
         source = kp.get("source", "")
         if source:
-            src = QLabel(f"via {source}")
+            src = QLabel(tr("via {source}", source=source))
             src.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
             self._detail_layout.addWidget(src)
 
@@ -350,7 +354,7 @@ class KnowledgePage(QWidget):
 
         deps = error_store.get_dependencies(name)
         if deps:
-            dep_label = QLabel("Related: " + ", ".join(deps))
+            dep_label = QLabel(tr("Related: {deps}", deps=", ".join(deps)))
             dep_label.setWordWrap(True)
             dep_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 4px 0;")
             self._detail_layout.addWidget(dep_label)
@@ -358,7 +362,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addSpacing(4)
         self._add_review_button(name)
 
-        del_btn = QPushButton("Delete")
+        del_btn = QPushButton(tr("Delete"))
         del_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {TEXT_MUTED}; border: 1px solid {BORDER}; "
@@ -371,7 +375,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addStretch()
 
     def _add_explain_button(self, concept_name: str):
-        btn = QPushButton("Explain with AI")
+        btn = QPushButton(tr("Explain with AI"))
         btn.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
             f"border: none; padding: 8px 18px; font-size: 13px; }}"
@@ -392,7 +396,7 @@ class KnowledgePage(QWidget):
                 return
 
             btn.setEnabled(False)
-            btn.setText("Asking AI...")
+            btn.setText(tr("Asking AI..."))
             if self._explain_worker is not None and self._explain_worker.isRunning():
                 try:
                     self._explain_worker.finished.disconnect()
@@ -405,7 +409,7 @@ class KnowledgePage(QWidget):
 
             def on_done(text):
                 btn.setEnabled(True)
-                btn.setText("Explain with AI")
+                btn.setText(tr("Explain with AI"))
                 error_store.set_knowledge_description(concept_name, text)
                 explanation = QLabel(_md_to_html(text))
                 explanation.setWordWrap(True)
@@ -417,7 +421,7 @@ class KnowledgePage(QWidget):
 
             def on_err(msg):
                 btn.setEnabled(True)
-                btn.setText("Explain with AI (failed)")
+                btn.setText(tr("Explain with AI (failed)"))
 
             self._explain_worker.finished.connect(on_done)
             self._explain_worker.error.connect(on_err)
@@ -427,7 +431,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addWidget(btn)
 
     def _add_review_button(self, name: str):
-        btn = QPushButton("Add to Review")
+        btn = QPushButton(tr("Add to Review"))
         btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
@@ -436,9 +440,13 @@ class KnowledgePage(QWidget):
         )
 
         def add():
-            error_store.add_error(knowledge_point=name, question=f"Review {name}",
-                                  user_answer="", correct_answer=f"Study concept: {name}")
-            btn.setText("✓ Added")
+            error_store.add_error(
+                knowledge_point=name,
+                question=tr("Review {name}", name=name),
+                user_answer="",
+                correct_answer=tr("Study concept: {name}", name=name),
+            )
+            btn.setText("✓ " + tr("Added"))
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; color: #4EC9B0; "
                 f"border: 1px solid #4EC9B0; padding: 4px 12px; font-size: 11px; }}"
@@ -452,7 +460,7 @@ class KnowledgePage(QWidget):
         error_store.delete_knowledge_point(name)
         self._refresh()
         clear_layout(self._detail_layout)
-        self._detail_label.setText("Select a concept")
+        self._detail_label.setText(tr("Select a concept"))
 
     # ── Graph View ───────────────────────────────────────────────────────
 
@@ -478,7 +486,12 @@ class KnowledgePage(QWidget):
         kps = error_store.get_knowledge_points()
         stats = error_store.get_all_stats()
         self._stats_label.setText(
-            f"{len(freq)} errored concepts / {stats['total_errors']} errors / {stats['knowledge_points']} learned"
+            tr(
+                "{errored} errored concepts / {errors} errors / {learned} learned",
+                errored=len(freq),
+                errors=stats['total_errors'],
+                learned=stats['knowledge_points'],
+            )
         )
 
         all_names: dict[str, int] = {}
@@ -489,7 +502,7 @@ class KnowledgePage(QWidget):
             all_names[name] = all_names.get(name, 0) + kp_item.get("count", 1)
 
         if not all_names:
-            placeholder = QGraphicsTextItem("No data yet — use OJ Analysis or File Import to build knowledge")
+            placeholder = QGraphicsTextItem(tr("No data yet - use OJ Analysis or File Import to build knowledge"))
             placeholder.setDefaultTextColor(QColor(TEXT_PRIMARY))
             placeholder.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 14))
             placeholder.setPos(-250, -20)
@@ -603,3 +616,15 @@ class KnowledgePage(QWidget):
         if total_v < 0.5:
             self._graph_timer.stop()
             self._sim_tick = 0
+
+    def retranslate_ui(self):
+        self._header_label.setText(tr("Knowledge Base"))
+        self._btn_list.setText(tr("List"))
+        self._btn_graph.setText(tr("Graph"))
+        self._search.setPlaceholderText(tr("Search concepts..."))
+        self._refresh_btn.setText(tr("Refresh"))
+        if self._selected_node:
+            self._show_concept_detail(self._selected_node)
+        elif self._concept_list.currentRow() < 0:
+            self._detail_label.setText(tr("Select a concept"))
+        self._refresh()

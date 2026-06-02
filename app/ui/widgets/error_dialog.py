@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
+from app.services.i18n import tr
+
 
 def show_error_dialog(parent, title: str, message: str, code: str = "",
                       raw_response: str = "", on_retry=None):
@@ -22,7 +24,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
     layout.addWidget(msg_label)
 
     if code:
-        code_label = QLabel("Code being executed:")
+        code_label = QLabel(tr("Code being executed:"))
         code_label.setStyleSheet("color: #808080; font-size: 11px; padding-top: 8px;")
         layout.addWidget(code_label)
         code_text = QTextEdit()
@@ -37,7 +39,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
         layout.addWidget(code_text)
 
     if raw_response:
-        raw_label = QLabel("Raw LLM response (first 2000 chars):")
+        raw_label = QLabel(tr("Raw LLM response (first 2000 chars):"))
         raw_label.setStyleSheet("color: #808080; font-size: 11px; padding-top: 8px;")
         layout.addWidget(raw_label)
         raw_text = QTextEdit()
@@ -52,7 +54,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
 
     btn_row = QHBoxLayout()
     if on_retry:
-        retry_btn = QPushButton("Retry")
+        retry_btn = QPushButton(tr("Retry"))
         retry_btn.setStyleSheet(
             "QPushButton { background-color: #007ACC; color: #FFFFFF; "
             "border: none; padding: 8px 24px; "
@@ -62,7 +64,7 @@ def show_error_dialog(parent, title: str, message: str, code: str = "",
         retry_btn.clicked.connect(on_retry)
         btn_row.addWidget(retry_btn)
 
-    close_btn = QPushButton("Close")
+    close_btn = QPushButton(tr("Close"))
     close_btn.clicked.connect(dlg.reject)
     btn_row.addWidget(close_btn)
     layout.addLayout(btn_row)

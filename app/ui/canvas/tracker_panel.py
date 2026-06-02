@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QTimer, QMimeData, QPoint
 from PySide6.QtGui import QFont, QColor, QDrag
 
 from app.core.memory_model import MemoryState, Variable
+from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -101,14 +102,15 @@ class TrackerPanel(QWidget):
         layout.setSpacing(4)
 
         header = QHBoxLayout()
-        title = QLabel(" Tracker")
+        title = QLabel()
+        self._title = title
         title.setStyleSheet(
             f"color: {STACK_BORDER}; font-size: 12px; font-weight: bold; "
             f"background: transparent; border: none;"
         )
         header.addWidget(title)
 
-        self._hint = QLabel("Run code to see variables")
+        self._hint = QLabel(tr("Run code to see variables"))
         self._hint.setStyleSheet(
             f"color: {TEXT_SECONDARY}; font-size: 11px; "
             f"background: transparent; border: none;"
@@ -116,14 +118,14 @@ class TrackerPanel(QWidget):
         header.addWidget(self._hint)
         header.addStretch()
 
-        self._track_all_btn = QPushButton("Pin All")
+        self._track_all_btn = QPushButton(tr("Pin All"))
         self._track_all_btn.setVisible(False)
         self._track_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._track_all_btn.setStyleSheet(TRACK_ALL_BTN)
         self._track_all_btn.clicked.connect(self._on_track_all)
         header.addWidget(self._track_all_btn)
 
-        self._clear_all_btn = QPushButton("Clear All")
+        self._clear_all_btn = QPushButton(tr("Clear All"))
         self._clear_all_btn.setVisible(False)
         self._clear_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear_all_btn.setStyleSheet(TRACK_ALL_BTN)
@@ -162,7 +164,7 @@ class TrackerPanel(QWidget):
         self._chip_buttons.clear()
 
         if state is None:
-            self._hint.setText("Run code to see variables")
+            self._hint.setText(tr("Run code to see variables"))
             self._track_all_btn.setVisible(False)
             self._clear_all_btn.setVisible(False)
             self._chips_layout.addStretch()
@@ -196,8 +198,8 @@ class TrackerPanel(QWidget):
 
         n = len(all_addrs)
         self._hint.setText(
-            f"  |  {n} variable(s) — click + to pin"
-            if n else "Run code to see variables"
+            tr("{count} variable(s) - click + to pin", count=n)
+            if n else tr("Run code to see variables")
         )
         self._track_all_btn.setVisible(n > 0)
         self._clear_all_btn.setVisible(bool(self._tracked_addresses))
@@ -284,7 +286,7 @@ class TrackerPanel(QWidget):
                 f"color: {EDGE_DANGLING}; font-size: 12px; font-weight: bold;"
             )
             vbox.addWidget(nl)
-            dl = QLabel("out of scope")
+            dl = QLabel(tr("out of scope"))
             dl.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 10px;")
             vbox.addWidget(dl)
             return card
@@ -305,8 +307,9 @@ class TrackerPanel(QWidget):
         vbox.addWidget(il)
         il.setObjectName("value_label")
 
-        sl = QLabel(f"scope: {frame_name}  [{var.address}]")
+        sl = QLabel(tr("scope: {frame}  [{address}]", frame=frame_name, address=var.address))
         sl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
+        sl.setObjectName("scope_label")
         vbox.addWidget(sl)
 
         return card
@@ -322,7 +325,7 @@ class TrackerPanel(QWidget):
             card.setStyleSheet(CARD_DESTROYED)
             value_label = card.findChild(QLabel, "value_label")
             if value_label:
-                value_label.setText("out of scope")
+                value_label.setText(tr("out of scope"))
                 value_label.setStyleSheet(
                     f"color: {EDGE_DANGLING}; font-size: 10px;"
                 )
@@ -361,6 +364,9 @@ class TrackerPanel(QWidget):
         else:
             value_label.setText(f"{var.type}  =  {new_val or ''}")
             value_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        scope_label = card.findChild(QLabel, "scope_label")
+        if scope_label is not None:
+            scope_label.setText(tr("scope: {frame}  [{address}]", frame=frame_name, address=var.address))
 
     def _addr_name(self, address: str) -> str:
         if self._current_state:
@@ -368,3 +374,13 @@ class TrackerPanel(QWidget):
             if v:
                 return v.name
         return address
+
+    def retranslate_ui(self):
+        self._title.setText(f" {tr('Tracker')}")
+        self._track_all_btn.setText(tr("Pin All"))
+        self._clear_all_btn.setText(tr("Clear All"))
+        if self._current_state is None:
+            self._hint.setText(tr("Run code to see variables"))
+        else:
+            self._rebuild_chips(self._current_state)
+            self._refresh_cards()

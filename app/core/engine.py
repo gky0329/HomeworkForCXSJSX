@@ -16,6 +16,7 @@ from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
 from app.ui.widgets import error_dialog
 from app.services import error_store
+from app.services.i18n import tr
 
 
 def _has_api_key() -> bool:
@@ -85,7 +86,7 @@ class Engine:
             self._worker.quit()
             self._worker.wait(1000)
         self._window.show_loading(False)
-        self._window.statusBar().showMessage("Ready — Enter C++ code and click Run")
+        self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
     def _on_run(self):
         if not _has_api_key():
@@ -93,20 +94,20 @@ class Engine:
             show_api_key_dialog(self._window)
             if not _has_api_key():
                 self._window.statusBar().showMessage(
-                    "API key not configured - click Settings or set provider API key"
+                    tr("API key not configured - click Settings or set provider API key")
                 )
                 return
 
         code = self._window.get_code()
         if not code:
-            self._window.statusBar().showMessage("No code to run")
+            self._window.statusBar().showMessage(tr("No code to run"))
             return
         self._last_code = code
 
         self.cancel_current_run()
 
         self._window.show_loading(True)
-        self._window.statusBar().showMessage("Sending code to AI...")
+        self._window.statusBar().showMessage(tr("Sending code to AI..."))
 
         self._worker = ExecutionWorker(code, self._config_path)
         self._worker.finished.connect(self._on_trace_ready)
@@ -124,18 +125,20 @@ class Engine:
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
-                f"Step 1/{len(trace.steps)} — Press PageDown for next step"
+                tr("Step 1/{total} - Press PageDown for next step", total=len(trace.steps))
             )
         else:
             self._current_index = -1
-            self._window.statusBar().showMessage("AI returned empty trace")
+            self._window.statusBar().showMessage(tr("AI returned empty trace"))
 
         self._update_controls()
         self._highlight_current_line()
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
-        self._window.statusBar().showMessage(f"Error: {error_msg.split(chr(10))[0]}")
+        self._window.statusBar().showMessage(
+            tr("Error: {message}", message=error_msg.split(chr(10))[0])
+        )
 
         raw = ""
         display_msg = error_msg
@@ -146,7 +149,7 @@ class Engine:
 
         error_dialog.show_error_dialog(
             self._window,
-            "Execution Error",
+            tr("Execution Error"),
             display_msg,
             code=self._last_code,
             raw_response=raw,
@@ -198,8 +201,8 @@ class Engine:
         self._animator.stop_all()
         self._canvas.clear()
         self._window.tracker_panel.clear()
-        self._window.step_label.setText("Ready")
-        self._window.statusBar().showMessage("Ready — Enter C++ code and click Run")
+        self._window.step_label.setText(tr("Ready"))
+        self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
         self._update_controls()
 
     def _toggle_autoplay(self, active: bool):
@@ -293,6 +296,10 @@ class Engine:
         if not has_next:
             self._window.btn_autoplay.setChecked(False)
         self._window.statusBar().showMessage(
-            f"Step {current}/{total} — "
-            f"{'PageDown=next PageUp=prev' if self._trace else 'Enter C++ code and click Run'}"
+            tr(
+                "Step {current}/{total} - {hint}",
+                current=current,
+                total=total,
+                hint=tr("PageDown=next PageUp=prev") if self._trace else tr("Enter C++ code and click Run"),
+            )
         )

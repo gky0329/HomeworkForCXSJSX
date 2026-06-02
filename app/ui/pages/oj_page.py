@@ -17,6 +17,7 @@ from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.services.ai_service import AIService
 from app.services import error_store
+from app.services.i18n import tr
 from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ_AUTOGEN_TEMPLATE
 from app.services.compile_runner import compile_and_run
 from app.ui.widgets.helpers import clear_layout, build_code_block
@@ -125,10 +126,11 @@ class OJPage(QWidget):
         problem_widget = QWidget()
         problem_layout = QVBoxLayout(problem_widget)
         problem_layout.setContentsMargins(0, 0, 0, 0)
-        problem_layout.addWidget(QLabel("Problem Description"))
+        self._problem_label = QLabel(tr("Problem Description"))
+        problem_layout.addWidget(self._problem_label)
         self._problem_edit = QPlainTextEdit()
         self._problem_edit.setPlaceholderText(
-            "Paste OJ problem description here..."
+            tr("Paste OJ problem description here...")
         )
         self._problem_edit.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 12))
         problem_layout.addWidget(self._problem_edit)
@@ -137,7 +139,8 @@ class OJPage(QWidget):
         code_widget = QWidget()
         code_layout = QVBoxLayout(code_widget)
         code_layout.setContentsMargins(0, 0, 0, 0)
-        code_layout.addWidget(QLabel("Reference Code"))
+        self._code_label = QLabel(tr("Reference Code"))
+        code_layout.addWidget(self._code_label)
         self._code_edit = QPlainTextEdit()
         self._code_edit.setPlaceholderText(
             "// Enter C++ solution code\n"
@@ -150,13 +153,13 @@ class OJPage(QWidget):
         top_layout.addWidget(input_splitter)
 
         toolbar = QHBoxLayout()
-        self._run_btn = QPushButton("Run Analysis")
+        self._run_btn = QPushButton(tr("Run Analysis"))
         self._run_btn.clicked.connect(self._on_run)
         toolbar.addWidget(self._run_btn)
 
         toolbar.addSpacing(16)
-        self._btn_prev = QPushButton("Prev")
-        self._btn_next = QPushButton("Next")
+        self._btn_prev = QPushButton(tr("Prev"))
+        self._btn_next = QPushButton(tr("Next"))
         self._btn_prev.setEnabled(False)
         self._btn_next.setEnabled(False)
         self._btn_prev.clicked.connect(self._on_prev)
@@ -165,7 +168,7 @@ class OJPage(QWidget):
         toolbar.addWidget(self._btn_next)
 
         toolbar.addSpacing(16)
-        self._step_info = QLabel("Ready")
+        self._step_info = QLabel(tr("Ready"))
         self._step_info.setStyleSheet(f"color: {TEXT_SECONDARY};")
         toolbar.addWidget(self._step_info)
         toolbar.addStretch()
@@ -204,7 +207,8 @@ class OJPage(QWidget):
         commentary = QWidget()
         commentary_layout = QVBoxLayout(commentary)
         commentary_layout.setContentsMargins(8, 0, 0, 0)
-        commentary_layout.addWidget(QLabel("AI Analysis"))
+        self._analysis_label = QLabel(tr("AI Analysis"))
+        commentary_layout.addWidget(self._analysis_label)
         self._analysis_widget = QWidget()
         self._analysis_layout = QVBoxLayout(self._analysis_widget)
         self._analysis_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -234,7 +238,7 @@ class OJPage(QWidget):
             return
 
         self._run_btn.setEnabled(False)
-        self._run_btn.setText("Analyzing...")
+        self._run_btn.setText(tr("Analyzing..."))
 
         if self._worker is not None and self._worker.isRunning():
             try:
@@ -252,7 +256,7 @@ class OJPage(QWidget):
 
     def _on_result(self, data: dict):
         self._run_btn.setEnabled(True)
-        self._run_btn.setText("Run Analysis")
+        self._run_btn.setText(tr("Run Analysis"))
 
         trace: ExecutionTrace = data["trace"]
         analysis = data.get("analysis", {})
@@ -287,15 +291,15 @@ class OJPage(QWidget):
 
         overview = a.get("overview", "")
         if overview:
-            self._add_section_card("Overview", overview)
+            self._add_section_card(tr("Overview"), overview)
 
         approach = a.get("solution_approach", "")
         if approach:
-            self._add_section_card("Solution Approach", approach)
+            self._add_section_card(tr("Solution Approach"), approach)
 
         kps = a.get("knowledge_points", [])
         if kps:
-            title = QLabel("Knowledge Points")
+            title = QLabel(tr("Knowledge Points"))
             title.setStyleSheet(SECTION_TITLE)
             self._analysis_layout.addWidget(title)
             for kp in kps:
@@ -303,16 +307,16 @@ class OJPage(QWidget):
 
         complexity = a.get("complexity", "")
         if complexity:
-            self._add_section_card("Complexity", complexity)
+            self._add_section_card(tr("Complexity"), complexity)
 
         mistakes = a.get("common_mistakes", [])
         if mistakes:
             items = "\n".join(f"  • {m}" for m in mistakes)
-            self._add_section_card("Common Mistakes", items)
+            self._add_section_card(tr("Common Mistakes"), items)
 
         refs = a.get("reference_answers", [])
         if refs:
-            title = QLabel("Reference Answers")
+            title = QLabel(tr("Reference Answers"))
             title.setStyleSheet(SECTION_TITLE)
             self._analysis_layout.addWidget(title)
             for ref in refs:
@@ -364,7 +368,7 @@ class OJPage(QWidget):
                                   bg_color=CANVAS_BG, border_color=BORDER)
             vbox.addWidget(cf)
 
-        review_btn = QPushButton("Add to Review")
+        review_btn = QPushButton(tr("Add to Review"))
         review_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 1px solid {ACCENT}; "
@@ -379,7 +383,7 @@ class OJPage(QWidget):
                 knowledge_point=n, question="Manual review",
                 user_answer="Needs practice", correct_answer=e,
             )
-            btn.setText("✓ Added")
+            btn.setText("✓ " + tr("Added"))
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; "
                 f"color: #4EC9B0; border: 1px solid #4EC9B0; "
@@ -421,7 +425,7 @@ class OJPage(QWidget):
                                   bg_color=CANVAS_BG, border_color=BORDER)
             vbox.addWidget(cf)
 
-            viz = QPushButton("Visualize this code")
+            viz = QPushButton(tr("Visualize this code"))
             viz.setStyleSheet(
                 f"QPushButton {{ background-color: #007ACC; color: white; "
                 f"border: none; padding: 3px 10px; "
@@ -462,8 +466,8 @@ class OJPage(QWidget):
 
     def _on_error(self, msg: str):
         self._run_btn.setEnabled(True)
-        self._run_btn.setText("Run Analysis")
-        self._step_info.setText(f"Error: {msg[:60]}")
+        self._run_btn.setText(tr("Run Analysis"))
+        self._step_info.setText(tr("Error: {message}", message=msg[:60]))
 
         raw = ""
         display_msg = msg
@@ -474,7 +478,7 @@ class OJPage(QWidget):
 
         show_error_dialog(
             self,
-            "OJ Analysis Error",
+            tr("OJ Analysis Error"),
             display_msg,
             code=self._code_edit.toPlainText().strip(),
             raw_response=raw,
@@ -490,24 +494,25 @@ class OJPage(QWidget):
         self._btn_next.setEnabled(
             self._trace is not None and self._current_index + 1 < total
         )
-        self._step_info.setText(f"Step {current}/{total}")
+        self._step_info.setText(tr("Step {current}/{total}", current=current, total=total))
 
     def _build_test_panel(self, parent_layout):
         test_header = QHBoxLayout()
-        test_header.addWidget(QLabel("Test Cases:"))
+        self._test_cases_label = QLabel(tr("Test Cases:"))
+        test_header.addWidget(self._test_cases_label)
         self._test_input = QPlainTextEdit()
-        self._test_input.setPlaceholderText("Input")
+        self._test_input.setPlaceholderText(tr("Input"))
         self._test_input.setMaximumHeight(50)
         self._test_input.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         self._test_expected = QPlainTextEdit()
-        self._test_expected.setPlaceholderText("Expected output")
+        self._test_expected.setPlaceholderText(tr("Expected output"))
         self._test_expected.setMaximumHeight(50)
         self._test_expected.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
-        add_btn = QPushButton("Add Case")
-        add_btn.clicked.connect(self._on_add_test_case)
+        self._add_case_btn = QPushButton(tr("Add Case"))
+        self._add_case_btn.clicked.connect(self._on_add_test_case)
         test_header.addWidget(self._test_input)
         test_header.addWidget(self._test_expected)
-        test_header.addWidget(add_btn)
+        test_header.addWidget(self._add_case_btn)
         parent_layout.addLayout(test_header)
 
         self._test_cases: list[dict] = []
@@ -515,7 +520,7 @@ class OJPage(QWidget):
         parent_layout.addLayout(self._test_list)
 
         run_row = QHBoxLayout()
-        self._run_tests_btn = QPushButton("Run Tests")
+        self._run_tests_btn = QPushButton(tr("Run Tests"))
         self._run_tests_btn.clicked.connect(self._on_compile_run)
         self._run_tests_btn.setVisible(False)
         run_row.addWidget(self._run_tests_btn)
@@ -540,7 +545,12 @@ class OJPage(QWidget):
         clear_layout(self._test_list)
         for i, tc in enumerate(self._test_cases):
             row = QHBoxLayout()
-            label = QLabel(f"#{i + 1}  in: {tc['input'][:30]}  |  out: {tc['expected'][:30]}")
+            label = QLabel(tr(
+                "Case #{index}: in {input} | out {output}",
+                index=i + 1,
+                input=tc['input'][:30],
+                output=tc['expected'][:30],
+            ))
             label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
             row.addWidget(label)
             del_btn = QPushButton("×")
@@ -565,24 +575,43 @@ class OJPage(QWidget):
         result = compile_and_run(code, self._test_cases)
         compile_ok = result["compile"]
         if not compile_ok.success:
-            err = QLabel(f"Compile error:\n{compile_ok.error}")
+            err = QLabel(tr("Compile error:\n{error}", error=compile_ok.error))
             err.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
             err.setWordWrap(True)
             self._test_results.addWidget(err)
             return
         for t in result["tests"]:
             if t.passed:
-                r = QLabel(f"  ✓ Case #{t.case_index} passed")
+                r = QLabel(tr("Case #{index} passed", index=t.case_index))
                 r.setStyleSheet(f"color: #4EC9B0; font-size: 13px; font-weight: bold;")
             else:
-                r = QLabel(
-                    f"  ✗ Case #{t.case_index} FAILED\n"
-                    f"    Expected: {t.expected}\n"
-                    f"    Got:      {t.actual}"
-                )
+                r = QLabel(tr(
+                    "Case #{index} FAILED\nExpected: {expected}\nGot:      {actual}",
+                    index=t.case_index,
+                    expected=t.expected,
+                    actual=t.actual,
+                ))
                 r.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
                 r.setWordWrap(True)
             self._test_results.addWidget(r)
+
+    def retranslate_ui(self):
+        self._problem_label.setText(tr("Problem Description"))
+        self._problem_edit.setPlaceholderText(tr("Paste OJ problem description here..."))
+        self._code_label.setText(tr("Reference Code"))
+        self._run_btn.setText(tr("Run Analysis"))
+        self._btn_prev.setText(tr("Prev"))
+        self._btn_next.setText(tr("Next"))
+        self._analysis_label.setText(tr("AI Analysis"))
+        self._test_cases_label.setText(tr("Test Cases:"))
+        self._test_input.setPlaceholderText(tr("Input"))
+        self._test_expected.setPlaceholderText(tr("Expected output"))
+        self._add_case_btn.setText(tr("Add Case"))
+        self._run_tests_btn.setText(tr("Run Tests"))
+        if self._trace is not None:
+            self._update_controls()
+        else:
+            self._step_info.setText(tr("Ready"))
 
     @staticmethod
     def _create_canvas_view() -> QGraphicsView:

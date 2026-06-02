@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._setup_statusbar()
         self._setup_overlay()
+        self._retranslate_ui()
 
         app = QApplication.instance()
         if app is not None:
@@ -305,7 +306,7 @@ class MainWindow(QMainWindow):
         step_bar.setContentsMargins(8, 4, 8, 4)
         step_bar.setSpacing(8)
 
-        self.btn_prev_big = QPushButton("< Prev Step")
+        self.btn_prev_big = QPushButton()
         self.btn_prev_big.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
             f"border-radius: 5px; padding: 6px 16px; font-size: 13px; font-weight: bold; }} "
@@ -315,25 +316,26 @@ class MainWindow(QMainWindow):
         self.btn_prev_big.setEnabled(False)
         step_bar.addWidget(self.btn_prev_big)
 
-        self.btn_next_big = QPushButton("Next Step >")
+        self.btn_next_big = QPushButton()
         self.btn_next_big.setStyleSheet(self.btn_prev_big.styleSheet())
         self.btn_next_big.setEnabled(False)
         step_bar.addWidget(self.btn_next_big)
 
-        self.btn_autoplay = QPushButton("Auto Play")
+        self.btn_autoplay = QPushButton(tr("Auto Play"))
         self.btn_autoplay.setCheckable(True)
         self.btn_autoplay.setEnabled(False)
-        self.btn_autoplay.setToolTip("Auto-advance through steps")
+        self.btn_autoplay.setToolTip(tr("Auto-advance through steps"))
         step_bar.addWidget(self.btn_autoplay)
 
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
         self._speed_slider.setRange(200, 2000)
         self._speed_slider.setValue(800)
         self._speed_slider.setFixedWidth(80)
-        self._speed_slider.setToolTip("Auto-play speed (200ms fast — 2000ms slow)")
+        self._speed_slider.setToolTip(tr("Auto-play speed (200ms fast - 2000ms slow)"))
         step_bar.addWidget(self._speed_slider)
 
-        speed_label = QLabel("speed")
+        speed_label = QLabel(tr("speed"))
+        self._speed_label = speed_label
         speed_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
         step_bar.addWidget(speed_label)
 
@@ -430,7 +432,7 @@ class MainWindow(QMainWindow):
 
     def _update_elapsed(self):
         elapsed = int(time.time() - self._load_start_time)
-        self._overlay_time.setText(f"{elapsed}s elapsed...")
+        self._overlay_time.setText(tr("Elapsed: {seconds}s", seconds=elapsed))
 
     def show_loading(self, visible: bool):
         self._overlay.setVisible(visible)
@@ -519,9 +521,10 @@ class MainWindow(QMainWindow):
         self._example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding-left: 4px;")
         toolbar.addWidget(self._example_label)
         self._example_combo = QComboBox()
-        self._example_combo.addItems(list(EXAMPLE_CODES.keys()))
-        self._example_combo.setCurrentText("Pointers")
-        self._example_combo.currentTextChanged.connect(self._on_example_changed)
+        for key in EXAMPLE_CODES:
+            self._example_combo.addItem(tr(key), key)
+        self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
+        self._example_combo.currentIndexChanged.connect(self._on_example_changed)
         toolbar.addWidget(self._example_combo)
         toolbar.addSeparator()
 
@@ -563,7 +566,7 @@ class MainWindow(QMainWindow):
 
         self.auto_fit_check = QCheckBox(tr("Auto Fit"))
         self.auto_fit_check.setChecked(True)
-        self.auto_fit_check.setToolTip("Auto-fit canvas content on each step")
+        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
         toolbar.addWidget(self.auto_fit_check)
 
         spacer = QWidget()
@@ -574,9 +577,10 @@ class MainWindow(QMainWindow):
         self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; padding: 0 8px;")
         toolbar.addWidget(self.step_label)
 
-    def _on_example_changed(self, name: str):
-        if name in EXAMPLE_CODES:
-            self.code_editor.setPlainText(EXAMPLE_CODES[name])
+    def _on_example_changed(self, index: int):
+        key = self._example_combo.itemData(index)
+        if key in EXAMPLE_CODES:
+            self.code_editor.setPlainText(EXAMPLE_CODES[key])
 
     def _on_tab_changed(self, index: int):
         if index == self._home_tab_index:
@@ -598,9 +602,7 @@ class MainWindow(QMainWindow):
         if show_api_key_dialog(self):
             load_language(self._config_path)
             self._retranslate_ui()
-            self.statusBar().showMessage(
-                tr("Settings saved. Restart the app to update every page.")
-            )
+            self.statusBar().showMessage(tr("Settings saved."))
 
     def _setup_statusbar(self):
         self.setStatusBar(QStatusBar())
@@ -649,20 +651,42 @@ class MainWindow(QMainWindow):
                 self._tabs.setTabText(index, tr(key))
 
         self._example_label.setText(tr("Example:"))
+        for index, key in enumerate(EXAMPLE_CODES):
+            self._example_combo.setItemText(index, tr(key))
         self.btn_run.setText(tr("Run"))
         self.btn_next.setText(tr("Next Step"))
         self.btn_prev.setText(tr("Prev Step"))
         self.btn_reset.setText(tr("Reset"))
+        self.btn_prev_big.setText(f"< {tr('Prev Step')}")
+        self.btn_next_big.setText(f"{tr('Next Step')} >")
+        self.btn_autoplay.setText(tr("Auto Play"))
+        self.btn_autoplay.setToolTip(tr("Auto-advance through steps"))
+        self._speed_slider.setToolTip(tr("Auto-play speed (200ms fast - 2000ms slow)"))
+        self._speed_label.setText(tr("speed"))
         self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
         self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
         self.btn_zoom_fit.setToolTip(tr("Fit to View"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
         self.step_label.setText(tr("Ready"))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
         self._overlay_label.setText(tr("Analyzing code with AI..."))
         self._overlay_cancel_btn.setText(tr("Cancel"))
         self._settings_menu.setTitle(tr("Settings"))
         self._api_settings_action.setText(tr("AI Settings..."))
+        if hasattr(self, "home_page"):
+            self.home_page.retranslate_ui()
+        if hasattr(self, "oj_page"):
+            self.oj_page.retranslate_ui()
+        if hasattr(self, "file_page"):
+            self.file_page.retranslate_ui()
+        if hasattr(self, "review_page"):
+            self.review_page.retranslate_ui()
+        if hasattr(self, "knowledge_page"):
+            self.knowledge_page.retranslate_ui()
+        if hasattr(self, "tracker_panel"):
+            self.tracker_panel.retranslate_ui()
+        self.set_step_info(0, 0)
 
     def _read_config_font_size(self) -> int:
         try:

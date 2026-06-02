@@ -1,3 +1,5 @@
+import re
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QPushButton, QScrollArea,
@@ -5,6 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 
 from app.services import error_store
+from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -56,17 +59,20 @@ class HomePage(QWidget):
         main.setContentsMargins(24, 20, 24, 20)
         main.setSpacing(16)
 
-        title = QLabel("C++ Memory Visualizer")
+        title = QLabel(tr("C++ Memory Visualizer"))
+        self._title = title
         title.setStyleSheet(HEADLINE)
         main.addWidget(title)
 
-        sub = QLabel("Visualize memory, learn pointers, master C++")
+        sub = QLabel(tr("Visualize memory, learn pointers, master C++"))
+        self._subtitle = sub
         sub.setStyleSheet(SUBTITLE)
         main.addWidget(sub)
 
         main.addSpacing(8)
 
-        quick_label = QLabel("Quick Start")
+        quick_label = QLabel(tr("Quick Start"))
+        self._quick_label = quick_label
         quick_label.setStyleSheet(
             f"color: {STACK_BORDER}; font-size: 13px; font-weight: bold; padding: 4px 0;"
         )
@@ -75,6 +81,7 @@ class HomePage(QWidget):
         quick_row = QHBoxLayout()
         quick_row.setSpacing(10)
 
+        self._quick_cards: list[tuple[QLabel, QLabel, str, str]] = []
         for label, tab, desc in [
             ("Write Code", "Code Editor", "Run C++ code and watch\nmemory state step by step"),
             ("Import & Learn", "File Import", "Upload PDF/DOCX/CPP files\nand extract knowledge points"),
@@ -96,13 +103,14 @@ class HomePage(QWidget):
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(4)
 
-            title_lbl = QLabel(label)
+            title_lbl = QLabel(tr(label))
             title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 15px; font-weight: 700;")
             card_layout.addWidget(title_lbl)
 
-            desc_lbl = QLabel(desc)
+            desc_lbl = QLabel(tr(desc))
             desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 400;")
             card_layout.addWidget(desc_lbl)
+            self._quick_cards.append((title_lbl, desc_lbl, label, desc))
 
             quick_row.addWidget(card)
 
@@ -113,15 +121,17 @@ class HomePage(QWidget):
         actions = QHBoxLayout()
         actions.setSpacing(12)
 
+        self._action_buttons: list[tuple[QPushButton, str]] = []
         for label, tab in [("Code Editor", "Code Editor"),
                            ("OJ Analysis", "OJ Analysis"),
                            ("File Import", "File Import")]:
-            btn = QPushButton(label)
+            btn = QPushButton(tr(label))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(LINK_BTN)
             idx = TAB_NAMES.get(tab, 0)
             btn.clicked.connect(lambda checked=None, i=idx: self.tab_switch_requested.emit(i))
             actions.addWidget(btn)
+            self._action_buttons.append((btn, label))
 
         main.addLayout(actions)
 
@@ -141,7 +151,8 @@ class HomePage(QWidget):
 
         main.addSpacing(4)
 
-        activity_label = QLabel("Recent Activity")
+        activity_label = QLabel(tr("Recent Activity"))
+        self._activity_title = activity_label
         activity_label.setStyleSheet(
             f"color: {STACK_BORDER}; font-size: 13px; font-weight: bold; padding: 4px 0;"
         )
@@ -187,6 +198,8 @@ class HomePage(QWidget):
         layout.addWidget(l)
 
         self._stat_labels[label] = n
+        self._stat_title_labels = getattr(self, "_stat_title_labels", {})
+        self._stat_title_labels[label] = l
         return card
 
     def refresh(self):
@@ -203,7 +216,7 @@ class HomePage(QWidget):
         clear_layout(self._activity_list)
 
         if not activities:
-            placeholder = QLabel("No activity yet — start by running some code or importing a file")
+            placeholder = QLabel(tr("No activity yet - start by running some code or importing a file"))
             placeholder.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; padding: 8px 0;")
             self._activity_list.addWidget(placeholder)
             self._activity_list.addStretch()
@@ -211,9 +224,9 @@ class HomePage(QWidget):
 
         for a in activities[:15]:
             ts = a.get("timestamp", "")[:19].replace("T", " ")
-            act = a.get("action", "?")
-            detail = a.get("detail", "")
-            row = QLabel(f"  {ts}   {act}  —  {detail}")
+            act = tr(a.get("action", "?"))
+            detail = self._translate_activity_detail(a.get("detail", ""))
+            row = QLabel(f"  {ts}   {act}  -  {detail}")
             row.setStyleSheet(
                 f"color: {TEXT_PRIMARY}; font-size: 11px; "
                 f"padding: 3px 8px;"
@@ -221,8 +234,37 @@ class HomePage(QWidget):
             self._activity_list.addWidget(row)
 
         if len(activities) > 15:
-            more = QLabel(f"  ... and {len(activities) - 15} more")
+            more = QLabel(tr("... and {count} more", count=len(activities) - 15))
             more.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; padding: 3px 8px;")
             self._activity_list.addWidget(more)
 
         self._activity_list.addStretch()
+
+    def retranslate_ui(self):
+        self._title.setText(tr("C++ Memory Visualizer"))
+        self._subtitle.setText(tr("Visualize memory, learn pointers, master C++"))
+        self._quick_label.setText(tr("Quick Start"))
+        self._activity_title.setText(tr("Recent Activity"))
+        for title_lbl, desc_lbl, title_key, desc_key in self._quick_cards:
+            title_lbl.setText(tr(title_key))
+            desc_lbl.setText(tr(desc_key))
+        for btn, key in self._action_buttons:
+            btn.setText(tr(key))
+        for key, label in getattr(self, "_stat_title_labels", {}).items():
+            label.setText(tr(key))
+        self.refresh()
+
+    @staticmethod
+    def _translate_activity_detail(detail: str) -> str:
+        if not detail:
+            return detail
+        matched = re.fullmatch(r"Analyzed (\d+) steps", detail)
+        if matched:
+            return tr("Analyzed {count} steps", count=matched.group(1))
+        matched = re.fullmatch(r"Executed (\d+) steps", detail)
+        if matched:
+            return tr("Executed {count} steps", count=matched.group(1))
+        matched = re.fullmatch(r"Extracted (\d+) KPs, (\d+) quizzes", detail)
+        if matched:
+            return tr("Extracted {kps} KPs, {quizzes} quizzes", kps=matched.group(1), quizzes=matched.group(2))
+        return detail
