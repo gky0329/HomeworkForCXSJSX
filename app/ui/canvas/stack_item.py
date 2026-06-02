@@ -84,6 +84,7 @@ class StackItem(QGraphicsRectItem):
         self._layout_items: list[QGraphicsTextItem] = []
         self._on_item_moved = on_item_moved
         self._array_cells: list[QGraphicsRectItem] = []
+        self._array_cells_by_var: dict[str, list[QGraphicsRectItem]] = {}
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -113,7 +114,7 @@ class StackItem(QGraphicsRectItem):
             elif var.is_function_object:
                 y_offset = self._draw_function_object(var, y_offset)
             elif var.is_array and var.elements:
-                y_offset = self._draw_array_cells(var, y_offset)
+                self._draw_array_cells(var)
             elif var.members:
                 y_offset = self._draw_struct_members(var, y_offset)
 
@@ -137,6 +138,7 @@ class StackItem(QGraphicsRectItem):
         self.var_items = {}
         self._layout_items = []
         self._array_cells = []
+        self._array_cells_by_var = {}
         self._clear_children()
 
         self._title_item = QGraphicsTextItem(self)
@@ -216,6 +218,8 @@ class StackItem(QGraphicsRectItem):
             item.setPos(item.pos().x(), y)
             y += max(h, self.VAR_HEIGHT) + 4
 
+        self._layout_array_cells()
+
         total_h = y + 4
         self.prepareGeometryChange()
         self.setRect(0, 0, width, total_h)
@@ -290,34 +294,21 @@ class StackItem(QGraphicsRectItem):
         return y_offset + 16 * (1 + len(var.captures))
 
     def _array_height(self, var: Variable, y_offset: float) -> float:
-        cell_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
-        metrics = QFontMetricsF(cell_font)
-        lines = max(1, max(len(elem.value.splitlines() or [elem.value]) for elem in var.elements))
-        return y_offset + max(20.0, metrics.lineSpacing() * lines + 6)
+        return y_offset
 
     def _struct_height(self, var: Variable, y_offset: float) -> float:
         return y_offset + 18 * len(var.members)
 
-    def _draw_array_cells(self, var: Variable, start_y: float) -> float:
-        cell_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
-        metrics = QFontMetricsF(cell_font)
-        gap = 2
-        x = self.PADDING + 16
-        y = start_y
-        self._array_cells.clear()
-        cell_w = self._array_cell_width(var, cell_font)
-        cell_h = max(20.0, metrics.lineSpacing() + 6)
+    def _draw_array_cells(self, var: Variable):
+        cells: list[QGraphicsRectItem] = []
         for elem in var.elements:
-            cell = QGraphicsRectItem(x, y, cell_w, cell_h, self)
+            cell = QGraphicsRectItem(self)
             cell.setPen(QPen(QColor(HEAP_BORDER), 1))
             cell.setBrush(QBrush(QColor(HEAP_BG)))
-            label = QGraphicsTextItem(f"[{elem.index}] {elem.value}", cell)
-            label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
-            label.setFont(cell_font)
-            label.setPos(2, 1)
+            cell.setZValue(-0.5)
             self._array_cells.append(cell)
-            x += cell_w + gap
-        return y + cell_h + 4
+            cells.append(cell)
+        self._array_cells_by_var[var.address] = cells
 
     def _array_cell_width(self, var: Variable, font: QFont) -> float:
         max_width = 0.0
@@ -325,6 +316,61 @@ class StackItem(QGraphicsRectItem):
             text = f"[{elem.index}] {elem.value}"
             max_width = max(max_width, _text_width(text, font))
         return max(36.0, max_width + 10.0)
+
+    def _layout_array_cells(self):
+        for var in self.frame.variables:
+            if not (var.is_array and var.elements):
+                continue
+
+            item = self.var_items.get(var.address)
+            cells = self._array_cells_by_var.get(var.address, [])
+            if item is None or not cells:
+                continue
+
+            self._position_array_cells(item, var, cells)
+
+    def _position_array_cells(self, item: VarItem, var: Variable, cells: list[QGraphicsRectItem]):
+        doc = item.document()
+        if doc is None:
+            return
+
+        block = doc.firstBlock()
+        layout = block.layout() if block.isValid() else None
+        if layout is None or layout.lineCount() <= 0:
+            return
+
+        line = layout.lineAt(0)
+        metrics = QFontMetricsF(item.font())
+        text = item.toPlainText()
+        margin = doc.documentMargin()
+        line_y = item.pos().y() + margin + line.y()
+        rect_y = line_y + max(0.0, (line.height() - metrics.height()) / 2.0) - 1.0
+        rect_h = metrics.height() + 2.0
+        value_region_start = text.find("= [")
+        search_from = value_region_start + 3 if value_region_start >= 0 else 0
+        horizontal_padding = 2.0
+
+        for elem, cell in zip(var.elements, cells):
+            value_text = elem.value
+            start = text.find(value_text, search_from)
+            if start < 0:
+                start = search_from
+            end = start + len(value_text)
+            search_from = end
+
+            start_x = self._cursor_x(line, start)
+            end_x = self._cursor_x(line, end)
+            value_w = max(end_x - start_x, metrics.horizontalAdvance(value_text))
+            rect_x = item.pos().x() + margin + start_x - horizontal_padding
+            rect_w = value_w + horizontal_padding * 2.0
+            cell.setRect(rect_x, rect_y, rect_w, rect_h)
+
+    @staticmethod
+    def _cursor_x(line, position: int) -> float:
+        value = line.cursorToX(position)
+        if isinstance(value, tuple):
+            return float(value[0])
+        return float(value)
 
     def _draw_struct_members(self, var: Variable, start_y: float) -> float:
         y = start_y
@@ -433,11 +479,8 @@ class StackItem(QGraphicsRectItem):
                 for c in var.captures:
                     max_width = max(max_width, _text_width(f"    [capture] {c.name}: {c.type} = {c.value}", small_font))
             elif var.is_array and var.elements:
-                cell_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
-                cell_metrics = QFontMetricsF(cell_font)
-                cell_w = self._array_cell_width(var, cell_metrics)
-                w = (len(var.elements) * (cell_w + 2)) + self.PADDING * 2 + 16
-                max_width = max(max_width, w)
+                items = ", ".join(e.value for e in var.elements)
+                max_width = max(max_width, _text_width(f"  {var.name}: {var.type} = [{items}]", body_font))
             elif var.members:
                 for m in var.members:
                     max_width = max(max_width, _text_width(f"    .{m.name}: {m.type} = {m.value}", body_font))
