@@ -1,219 +1,250 @@
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QComboBox, QSpinBox,
-)
-from PySide6.QtCore import Qt
 import logging
 import os
+from pathlib import Path
+
 import yaml
+from PySide6.QtWidgets import (
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+    QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
+)
+
+from app.services.ai_service import DEFAULT_PROVIDERS
+from app.services.i18n import LANGUAGE_LABELS, get_language, load_language, tr
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_LABELS = {
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI",
+    "anthropic": "Claude",
+    "gemini": "Gemini",
+}
 
 
 class ApiKeyDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(460)
+        self._config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+        self._config = self._load_config()
+        load_language(self._config_path)
+
+        llm_cfg = self._config.get("llm", {})
+        self._provider = str(llm_cfg.get("provider", "deepseek")).lower()
+        if self._provider not in DEFAULT_PROVIDERS:
+            self._provider = "deepseek"
+
+        self.setWindowTitle(tr("AI Settings"))
+        self.setMinimumWidth(520)
         self.setModal(True)
         self._setup_ui()
-        self._load_existing()
+        self._load_provider_fields(self._provider)
+
+    def _load_config(self) -> dict:
+        if not self._config_path.exists():
+            return {}
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            logger.exception("Failed to load config")
+            return {}
+
+    def _provider_config(self, provider: str) -> dict:
+        llm_cfg = self._config.get("llm", {})
+        cfg = dict(DEFAULT_PROVIDERS[provider])
+        providers = llm_cfg.get("providers", {})
+        if isinstance(providers, dict):
+            cfg.update(providers.get(provider, {}) or {})
+
+        if provider == "deepseek":
+            for key in ("api_base", "api_key", "model"):
+                if llm_cfg.get(key):
+                    cfg[key] = llm_cfg[key]
+        return cfg
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("Settings")
+        title = QLabel(tr("AI Settings"))
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #569CD6;")
         layout.addWidget(title)
 
-        desc = QLabel(
-            "Configure your DeepSeek API key and connection settings.\n"
-            "Get an API key at: https://platform.deepseek.com/api_keys"
-        )
-        desc.setWordWrap(True)
-        desc.setStyleSheet("color: #808080; font-size: 12px;")
-        layout.addWidget(desc)
-
+        arrow_icon = (
+            Path(__file__).parent.parent / "theme" / "icons" / "chevron-down.svg"
+        ).as_posix()
         input_style = (
-            "QLineEdit { padding: 8px; font-size: 13px; border: none; border-bottom: 1px solid #3E3E3E; "
-            "background-color: transparent; color: #D4D4D4; }"
-            "QLineEdit:focus { border-bottom: 1px solid #007ACC; }"
+            "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; border-radius: 5px; "
+            "background-color: #1E1E1E; color: #D4D4D4; }"
         )
         combo_style = (
-            "QComboBox { padding: 6px 8px; font-size: 13px; border: none; border-bottom: 1px solid #3E3E3E; "
-            "background-color: transparent; color: #D4D4D4; } "
-            "QComboBox:focus { border-bottom: 1px solid #007ACC; } "
-            "QComboBox::drop-down { border: none; } "
-            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
-        )
-        desc.setWordWrap(True)
-        desc.setStyleSheet("color: #808080; font-size: 12px;")
-        layout.addWidget(desc)
-
-        input_style = (
-            "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; "
-            "background-color: #1E1E1E; color: #D4D4D4; }"
+            "QComboBox { padding: 6px 30px 6px 8px; font-size: 13px; border: 1px solid #3E3E3E; border-radius: 5px; "
+            "background-color: #1E1E1E; color: #D4D4D4; } "
+            "QComboBox:hover { border-color: #007ACC; } "
+            "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; "
+            "width: 24px; border-left: 1px solid #3E3E3E; background-color: #252526; "
+            "border-top-right-radius: 5px; border-bottom-right-radius: 5px; } "
+            f"QComboBox::down-arrow {{ image: url({arrow_icon}); width: 10px; height: 6px; }} "
+            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; "
+            "border: 1px solid #3E3E3E; border-radius: 5px; selection-background-color: #007ACC; }"
         )
         label_style = "color: #D4D4D4; font-size: 12px; font-weight: bold; margin-top: 6px;"
         hint_style = "color: #808080; font-size: 11px;"
 
-        api_label = QLabel("API Key")
-        api_label.setStyleSheet(label_style)
-        layout.addWidget(api_label)
+        self._provider_combo = QComboBox()
+        for provider in DEFAULT_PROVIDERS:
+            self._provider_combo.addItem(PROVIDER_LABELS.get(provider, provider), provider)
+        provider_index = self._provider_combo.findData(self._provider)
+        if provider_index >= 0:
+            self._provider_combo.setCurrentIndex(provider_index)
+        self._provider_combo.setStyleSheet(combo_style)
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        self._add_labeled_widget(layout, tr("Provider"), self._provider_combo, label_style)
+
+        self._model_input = QLineEdit()
+        self._model_input.setPlaceholderText("model")
+        self._model_input.setStyleSheet(input_style)
+        self._add_labeled_widget(layout, tr("Model"), self._model_input, label_style)
+
+        self._base_input = QLineEdit()
+        self._base_input.setPlaceholderText("https://...")
+        self._base_input.setStyleSheet(input_style)
+        self._add_labeled_widget(layout, tr("API Base"), self._base_input, label_style)
 
         self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+        self._key_input.setPlaceholderText(tr("API Key"))
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._key_input.setStyleSheet(input_style)
-        layout.addWidget(self._key_input)
+        self._add_labeled_widget(layout, tr("API Key"), self._key_input, label_style)
 
         show_layout = QHBoxLayout()
-        self._show_btn = QPushButton("Show")
+        self._show_btn = QPushButton(tr("Show"))
         self._show_btn.setCheckable(True)
         self._show_btn.toggled.connect(self._toggle_visibility)
         show_layout.addWidget(self._show_btn)
         show_layout.addStretch()
         layout.addLayout(show_layout)
 
-        proxy_label = QLabel("Proxy (optional)")
-        proxy_label.setStyleSheet(label_style)
-        layout.addWidget(proxy_label)
+        self._env_hint = QLabel("")
+        self._env_hint.setWordWrap(True)
+        self._env_hint.setStyleSheet(hint_style)
+        layout.addWidget(self._env_hint)
 
         self._proxy_input = QLineEdit()
-        self._proxy_input.setPlaceholderText("e.g. http://127.0.0.1:7890")
+        self._proxy_input.setPlaceholderText("http://127.0.0.1:7890")
         self._proxy_input.setStyleSheet(input_style)
-        layout.addWidget(self._proxy_input)
+        self._add_labeled_widget(layout, tr("Proxy (optional)"), self._proxy_input, label_style)
 
-        proxy_hint = QLabel("Leave empty if no proxy. Required for mainland China users to access DeepSeek API.")
+        proxy_hint = QLabel(tr("Leave empty if no proxy."))
         proxy_hint.setWordWrap(True)
         proxy_hint.setStyleSheet(hint_style)
         layout.addWidget(proxy_hint)
 
-        model_label = QLabel("Model")
-        model_label.setStyleSheet(label_style)
-        layout.addWidget(model_label)
-
-        self._model_combo = QComboBox()
-        self._model_combo.addItems(["deepseek-chat", "deepseek-reasoner"])
-        self._model_combo.setStyleSheet(
-            "QComboBox { padding: 6px 8px; font-size: 13px; border: 1px solid #3E3E3E; "
-            "background-color: #1E1E1E; color: #D4D4D4; } "
-            "QComboBox::drop-down { border: none; } "
-            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; selection-background-color: #007ACC; }"
+        self._language_combo = QComboBox()
+        for value, label in LANGUAGE_LABELS.items():
+            self._language_combo.addItem(label, value)
+        lang_index = self._language_combo.findData(
+            self._config.get("ui", {}).get("language", get_language())
         )
-        layout.addWidget(self._model_combo)
+        if lang_index >= 0:
+            self._language_combo.setCurrentIndex(lang_index)
+        self._language_combo.setStyleSheet(combo_style)
+        self._add_labeled_widget(layout, tr("Language"), self._language_combo, label_style)
 
-        model_hint = QLabel("deepseek-chat: fast, good for simple code.  deepseek-reasoner: accurate, better for complex C++.")
-        model_hint.setWordWrap(True)
-        model_hint.setStyleSheet(hint_style)
-        layout.addWidget(model_hint)
-
-        row = QHBoxLayout()
-        row.setSpacing(16)
-
-        font_col = QVBoxLayout()
-        font_label = QLabel("Code Font Size")
-        font_label.setStyleSheet(label_style)
-        font_col.addWidget(font_label)
         self._font_spin = QSpinBox()
         self._font_spin.setRange(8, 32)
-        self._font_spin.setValue(14)
+        self._font_spin.setValue(int(self._config.get("ui", {}).get("code_font_size", 14)))
         self._font_spin.setStyleSheet(input_style.replace("QLineEdit", "QSpinBox"))
-        font_col.addWidget(self._font_spin)
-        row.addLayout(font_col)
-        row.addStretch()
-        layout.addLayout(row)
+        self._add_labeled_widget(layout, tr("Code Font Size"), self._font_spin, label_style)
 
         btn_layout = QHBoxLayout()
-        skip_btn = QPushButton("Cancel")
-        skip_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(skip_btn)
-
+        cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
         btn_layout.addStretch()
 
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton(tr("Save"))
         save_btn.setDefault(True)
         save_btn.clicked.connect(self._save_and_accept)
         btn_layout.addWidget(save_btn)
-
         layout.addLayout(btn_layout)
+
+    def _add_labeled_widget(self, layout: QVBoxLayout, text: str, widget, label_style: str):
+        label = QLabel(text)
+        label.setStyleSheet(label_style)
+        layout.addWidget(label)
+        layout.addWidget(widget)
+
+    def _on_provider_changed(self):
+        provider = self._provider_combo.currentData()
+        if provider:
+            self._load_provider_fields(str(provider))
+
+    def _load_provider_fields(self, provider: str):
+        cfg = self._provider_config(provider)
+        self._model_input.setText(str(cfg.get("model", "")))
+        self._base_input.setText(str(cfg.get("api_base", "")))
+
+        env_name = str(cfg.get("api_key_env", ""))
+        env_key = os.environ.get(env_name, "") if env_name else ""
+        saved_key = str(cfg.get("api_key", ""))
+        self._key_input.setText(env_key or saved_key)
+        self._env_hint.setText(
+            tr("API key can also be set with {env}.", env=env_name or "API_KEY")
+        )
+
+        self._proxy_input.setText(str(cfg.get("proxy", "") or self._config.get("llm", {}).get("proxy", "")))
 
     def _toggle_visibility(self, checked):
         if checked:
             self._key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self._show_btn.setText("Hide")
+            self._show_btn.setText(tr("Hide"))
         else:
             self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self._show_btn.setText("Show")
-
-    def _load_existing(self):
-        try:
-            from pathlib import Path
-            config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    cfg = yaml.safe_load(f) or {}
-                llm_cfg = cfg.get("llm", {})
-                ui_cfg = cfg.get("ui", {})
-
-                env_key = os.environ.get("DEEPSEEK_API_KEY", "")
-                if env_key:
-                    self._key_input.setText(env_key)
-                else:
-                    api_key = llm_cfg.get("api_key", "")
-                    if api_key:
-                        self._key_input.setText(api_key)
-
-                proxy = llm_cfg.get("proxy", "")
-                if proxy:
-                    self._proxy_input.setText(proxy)
-
-                model = llm_cfg.get("model", "deepseek-chat")
-                idx = self._model_combo.findText(model)
-                if idx >= 0:
-                    self._model_combo.setCurrentIndex(idx)
-
-                font_size = ui_cfg.get("code_font_size", 14)
-                self._font_spin.setValue(int(font_size))
-        except Exception:
-            logger.exception("Failed to load existing settings")
-            pass
+            self._show_btn.setText(tr("Show"))
 
     def _save_and_accept(self):
+        provider = str(self._provider_combo.currentData() or "deepseek")
         key = self._key_input.text().strip()
+        model = self._model_input.text().strip()
+        api_base = self._base_input.text().strip()
         proxy = self._proxy_input.text().strip()
-        model = self._model_combo.currentText()
+        language = str(self._language_combo.currentData() or "en")
         font_size = self._font_spin.value()
 
         try:
-            from pathlib import Path
-            config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+            cfg = self._config or {}
+            llm_cfg = cfg.setdefault("llm", {})
+            llm_cfg["provider"] = provider
+            llm_cfg.setdefault("max_tokens", 4096)
+            llm_cfg.setdefault("temperature", 0.0)
 
-            cfg = {}
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    cfg = yaml.safe_load(f) or {}
-
-            if "llm" not in cfg:
-                cfg["llm"] = {}
-            if key:
-                cfg["llm"]["api_key"] = key
+            providers = llm_cfg.setdefault("providers", {})
+            provider_cfg = dict(DEFAULT_PROVIDERS[provider])
+            provider_cfg.update(providers.get(provider, {}) or {})
+            if api_base:
+                provider_cfg["api_base"] = api_base
+            if model:
+                provider_cfg["model"] = model
+            provider_cfg["api_key"] = key
             if proxy:
-                cfg["llm"]["proxy"] = proxy
-            elif "proxy" in cfg["llm"]:
-                del cfg["llm"]["proxy"]
-            cfg["llm"]["model"] = model
+                provider_cfg["proxy"] = proxy
+                llm_cfg["proxy"] = proxy
+            else:
+                provider_cfg.pop("proxy", None)
+                llm_cfg.pop("proxy", None)
+            providers[provider] = provider_cfg
 
-            if "ui" not in cfg:
-                cfg["ui"] = {}
-            cfg["ui"]["code_font_size"] = font_size
+            ui_cfg = cfg.setdefault("ui", {})
+            ui_cfg["code_font_size"] = font_size
+            ui_cfg["language"] = language
 
-            with open(config_path, "w") as f:
+            with open(self._config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
 
-            if key:
-                os.environ["DEEPSEEK_API_KEY"] = key
+            env_name = str(provider_cfg.get("api_key_env", ""))
+            if env_name and key:
+                os.environ[env_name] = key
 
             if self.parent():
                 try:
@@ -222,13 +253,22 @@ class ApiKeyDialog(QDialog):
                     current_font.setPointSize(font_size)
                     code_editor.setFont(current_font)
                 except Exception:
-                    pass
+                    logger.exception("Failed to update editor font")
 
+            load_language(self._config_path)
             self.accept()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to save settings: {e}")
+            QMessageBox.warning(
+                self,
+                tr("Error"),
+                tr("Failed to save settings: {error}", error=e),
+            )
 
 
 def show_api_key_dialog(parent=None) -> bool:
     dialog = ApiKeyDialog(parent)
     return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def show_settings_dialog(parent=None) -> bool:
+    return show_api_key_dialog(parent)

@@ -61,7 +61,6 @@ class AIExplainWorker(QThread):
             text = asyncio.run(service.chat_text(
                 system_prompt=self._system,
                 user_message=self._message,
-                model="deepseek-chat",
             ))
             self.finished.emit(text)
         except Exception as e:

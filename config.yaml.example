@@ -2,15 +2,38 @@ app:
   name: C++ Memory Visualizer
   version: 0.1.0
 llm:
-  api_base: https://api.deepseek.com
-  api_key: your-api-key-here  # or set DEEPSEEK_API_KEY env var
+  provider: deepseek  # deepseek | openai | anthropic | gemini
   max_tokens: 4096
-  model: deepseek-chat
-  provider: deepseek
   temperature: 0.0
-  # proxy: http://127.0.0.1:7890  # optional, for users behind a proxy
+  # proxy: http://127.0.0.1:7890  # optional shared proxy
+
+  providers:
+    deepseek:
+      api_base: https://api.deepseek.com
+      api_key: ""  # or set DEEPSEEK_API_KEY env var
+      api_key_env: DEEPSEEK_API_KEY
+      model: deepseek-chat
+
+    openai:
+      api_base: https://api.openai.com
+      api_key: ""  # or set OPENAI_API_KEY env var
+      api_key_env: OPENAI_API_KEY
+      model: gpt-4.1-mini
+
+    anthropic:
+      api_base: https://api.anthropic.com
+      api_key: ""  # or set ANTHROPIC_API_KEY env var
+      api_key_env: ANTHROPIC_API_KEY
+      model: claude-sonnet-4-5
+
+    gemini:
+      api_base: https://generativelanguage.googleapis.com
+      api_key: ""  # or set GEMINI_API_KEY env var
+      api_key_env: GEMINI_API_KEY
+      model: gemini-2.5-flash
 ui:
   code_font_size: 14
   font_family: JetBrains Mono, Menlo, SF Mono, Courier New, monospace
   font_size: 13
+  language: en  # en | zh
   theme: dark

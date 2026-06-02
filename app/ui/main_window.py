@@ -21,6 +21,7 @@ from app.ui.pages.home_page import HomePage
 from app.ui.pages.knowledge_page import KnowledgePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
+from app.services.i18n import load_language, tr
 
 
 ZOOM_FACTOR = 1.15
@@ -28,6 +29,7 @@ ZOOM_MIN = 0.1
 ZOOM_MAX = 10.0
 ZOOM_BTN_STYLE = (
     f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
+    "border-radius: 5px; "
     "padding: 2px 4px; font-size: 16px; font-weight: bold; "
     "min-height: 24px; min-width: 28px; } "
     f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
@@ -224,12 +226,13 @@ class MainWindow(QMainWindow):
     def __init__(self, config_path: Path | None = None):
         super().__init__()
         self._config_path = config_path
+        load_language(config_path)
         self._global_shortcuts: ShortcutRegistry | None = None
         self._code_shortcuts: ShortcutRegistry | None = None
         self._code_key_actions: dict[int, Callable[[], None]] = {}
         self._load_start_time: float = 0.0
         self._elapsed_timer: QTimer | None = None
-        self.setWindowTitle("C++ Memory Visualizer")
+        self.setWindowTitle(tr("C++ Memory Visualizer"))
         self.setMinimumSize(1200, 700)
         self._setup_ui()
         self._setup_toolbar()
@@ -253,12 +256,12 @@ class MainWindow(QMainWindow):
         self._review_tab = self._build_review_tab()
         self._kb_tab = self._build_kb_tab()
 
-        self._tabs.addTab(self._home_tab, "Home")
-        self._tabs.addTab(self._code_tab, "Code Editor")
-        self._tabs.addTab(self._oj_tab, "OJ Analysis")
-        self._tabs.addTab(self._file_tab, "File Import")
-        self._tabs.addTab(self._review_tab, "Review")
-        self._tabs.addTab(self._kb_tab, "Knowledge Base")
+        self._tabs.addTab(self._home_tab, tr("Home"))
+        self._tabs.addTab(self._code_tab, tr("Code Editor"))
+        self._tabs.addTab(self._oj_tab, tr("OJ Analysis"))
+        self._tabs.addTab(self._file_tab, tr("File Import"))
+        self._tabs.addTab(self._review_tab, tr("Review"))
+        self._tabs.addTab(self._kb_tab, tr("Knowledge Base"))
         self._review_tab_index = self._tabs.indexOf(self._review_tab)
         self._home_tab_index = self._tabs.indexOf(self._home_tab)
         self._tabs.currentChanged.connect(self._on_tab_changed)
@@ -282,7 +285,7 @@ class MainWindow(QMainWindow):
         self.code_editor.setPlainText(EXAMPLE_CODES["Pointers"])
         font_size = self._read_config_font_size()
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
-        self.code_editor.setPlaceholderText("// Enter C++ code here...")
+        self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
 
         self.canvas_view = CanvasView()
         self.canvas_view.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -305,7 +308,7 @@ class MainWindow(QMainWindow):
         self.btn_prev_big = QPushButton("< Prev Step")
         self.btn_prev_big.setStyleSheet(
             f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
-            f"padding: 6px 16px; font-size: 13px; font-weight: bold; }} "
+            f"border-radius: 5px; padding: 6px 16px; font-size: 13px; font-weight: bold; }} "
             f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
             f"QPushButton:disabled {{ background-color: {BORDER}; color: {TEXT_SECONDARY}; }}"
         )
@@ -376,7 +379,7 @@ class MainWindow(QMainWindow):
     def _on_visualize_from_file(self, code: str):
         self.code_editor.setPlainText(code)
         self._tabs.setCurrentWidget(self._code_tab)
-        self.statusBar().showMessage("Code loaded — click Run to visualize")
+        self.statusBar().showMessage(tr("Code loaded - click Run to visualize"))
 
     def _setup_overlay(self):
         container = QWidget(self.centralWidget())
@@ -388,7 +391,7 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(12)
 
-        self._overlay_label = QLabel("Analyzing code with AI...")
+        self._overlay_label = QLabel(tr("Analyzing code with AI..."))
         self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_label.setStyleSheet(
             f"QLabel {{ color: {HIGHLIGHT}; font-size: 24px; font-weight: bold; background: transparent; }}"
@@ -402,11 +405,12 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._overlay_time)
 
-        cancel_btn = QPushButton("Cancel")
+        self._overlay_cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn = self._overlay_cancel_btn
         cancel_btn.setFixedWidth(120)
         cancel_btn.setStyleSheet(
             f"QPushButton {{ background-color: {BORDER}; color: {TEXT_PRIMARY}; border: 1px solid; "
-            f"padding: 6px 16px; font-size: 13px; }} "
+            f"border-radius: 5px; padding: 6px 16px; font-size: 13px; }} "
             f"QPushButton:hover {{ background-color: #555; }}"
         )
         cancel_layout = QHBoxLayout()
@@ -434,7 +438,7 @@ class MainWindow(QMainWindow):
             self._overlay.setGeometry(self.centralWidget().rect())
             self._overlay.raise_()
             self._load_start_time = time.time()
-            self._overlay_label.setText("Analyzing code with AI...")
+            self._overlay_label.setText(tr("Analyzing code with AI..."))
             self._overlay_time.setText("")
             self._elapsed_timer.start(1000)
         else:
@@ -511,9 +515,9 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        example_label = QLabel("Example:")
-        example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding-left: 4px;")
-        toolbar.addWidget(example_label)
+        self._example_label = QLabel(tr("Example:"))
+        self._example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding-left: 4px;")
+        toolbar.addWidget(self._example_label)
         self._example_combo = QComboBox()
         self._example_combo.addItems(list(EXAMPLE_CODES.keys()))
         self._example_combo.setCurrentText("Pointers")
@@ -521,10 +525,10 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._example_combo)
         toolbar.addSeparator()
 
-        self.btn_run = QPushButton("Run")
-        self.btn_next = QPushButton("Next Step")
-        self.btn_prev = QPushButton("Prev Step")
-        self.btn_reset = QPushButton("Reset")
+        self.btn_run = QPushButton(tr("Run"))
+        self.btn_next = QPushButton(tr("Next Step"))
+        self.btn_prev = QPushButton(tr("Prev Step"))
+        self.btn_reset = QPushButton(tr("Reset"))
         self.btn_run.setObjectName("run")
         self.btn_next.setEnabled(False)
         self.btn_prev.setEnabled(False)
@@ -547,9 +551,9 @@ class MainWindow(QMainWindow):
         self.btn_zoom_out.setStyleSheet(ZOOM_BTN_STYLE)
         self.btn_zoom_in.setStyleSheet(ZOOM_BTN_STYLE)
         self.btn_zoom_fit.setStyleSheet(ZOOM_BTN_STYLE)
-        self.btn_zoom_out.setToolTip("Zoom Out (Ctrl+-)")
-        self.btn_zoom_in.setToolTip("Zoom In (Ctrl+=)")
-        self.btn_zoom_fit.setToolTip("Fit to View")
+        self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
+        self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
+        self.btn_zoom_fit.setToolTip(tr("Fit to View"))
         self.btn_zoom_in.clicked.connect(self.canvas_view.zoom_in)
         self.btn_zoom_out.clicked.connect(self.canvas_view.zoom_out)
         self.btn_zoom_fit.clicked.connect(self.canvas_view.zoom_fit)
@@ -557,12 +561,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.btn_zoom_in)
         toolbar.addWidget(self.btn_zoom_fit)
 
-        toolbar.addSeparator()
-        self.btn_settings = QPushButton("Settings")
-        self.btn_settings.clicked.connect(self._on_api_settings)
-        toolbar.addWidget(self.btn_settings)
-
-        self.auto_fit_check = QCheckBox("Auto Fit")
+        self.auto_fit_check = QCheckBox(tr("Auto Fit"))
         self.auto_fit_check.setChecked(True)
         self.auto_fit_check.setToolTip("Auto-fit canvas content on each step")
         toolbar.addWidget(self.auto_fit_check)
@@ -571,7 +570,7 @@ class MainWindow(QMainWindow):
         spacer.setFixedWidth(16)
         toolbar.addWidget(spacer)
 
-        self.step_label = QLabel("Ready")
+        self.step_label = QLabel(tr("Ready"))
         self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; padding: 0 8px;")
         toolbar.addWidget(self.step_label)
 
@@ -588,25 +587,30 @@ class MainWindow(QMainWindow):
             self._overlay.setGeometry(self.centralWidget().rect())
 
     def _setup_menubar(self):
-        settings_menu = QMenu("Settings", self)
-        api_action = QAction("API Key...", self)
-        api_action.triggered.connect(self._on_api_settings)
-        settings_menu.addAction(api_action)
-        self.menuBar().addMenu(settings_menu)
+        self._settings_menu = QMenu(tr("Settings"), self)
+        self._api_settings_action = QAction(tr("AI Settings..."), self)
+        self._api_settings_action.triggered.connect(self._on_api_settings)
+        self._settings_menu.addAction(self._api_settings_action)
+        self.menuBar().addMenu(self._settings_menu)
 
     def _on_api_settings(self):
         from app.ui.widgets.api_key_dialog import show_api_key_dialog
-        show_api_key_dialog(self)
+        if show_api_key_dialog(self):
+            load_language(self._config_path)
+            self._retranslate_ui()
+            self.statusBar().showMessage(
+                tr("Settings saved. Restart the app to update every page.")
+            )
 
     def _setup_statusbar(self):
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("Ready — Enter C++ code and click Run")
+        self.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
     def set_step_info(self, current: int, total: int):
         if total > 0:
-            self.step_label.setText(f"Step {current}/{total}")
+            self.step_label.setText(tr("Step {current}/{total}", current=current, total=total))
         else:
-            self.step_label.setText("Ready")
+            self.step_label.setText(tr("Ready"))
 
     def get_code(self) -> str:
         return self.code_editor.toPlainText().strip()
@@ -627,6 +631,38 @@ class MainWindow(QMainWindow):
 
     def _current_code_tab_active(self) -> bool:
         return self._tabs.currentWidget() is self._code_tab
+
+    def _retranslate_ui(self):
+        self.setWindowTitle(tr("C++ Memory Visualizer"))
+
+        tab_names = [
+            (self._home_tab, "Home"),
+            (self._code_tab, "Code Editor"),
+            (self._oj_tab, "OJ Analysis"),
+            (self._file_tab, "File Import"),
+            (self._review_tab, "Review"),
+            (self._kb_tab, "Knowledge Base"),
+        ]
+        for widget, key in tab_names:
+            index = self._tabs.indexOf(widget)
+            if index >= 0:
+                self._tabs.setTabText(index, tr(key))
+
+        self._example_label.setText(tr("Example:"))
+        self.btn_run.setText(tr("Run"))
+        self.btn_next.setText(tr("Next Step"))
+        self.btn_prev.setText(tr("Prev Step"))
+        self.btn_reset.setText(tr("Reset"))
+        self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
+        self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
+        self.btn_zoom_fit.setToolTip(tr("Fit to View"))
+        self.auto_fit_check.setText(tr("Auto Fit"))
+        self.step_label.setText(tr("Ready"))
+        self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
+        self._overlay_label.setText(tr("Analyzing code with AI..."))
+        self._overlay_cancel_btn.setText(tr("Cancel"))
+        self._settings_menu.setTitle(tr("Settings"))
+        self._api_settings_action.setText(tr("AI Settings..."))
 
     def _read_config_font_size(self) -> int:
         try:

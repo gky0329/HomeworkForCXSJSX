@@ -9,6 +9,9 @@ from app.ui.theme.colors import (
     STACK_BORDER, HEAP_BORDER,
 )
 
+CHEVRON_DOWN_ICON = "app/ui/theme/icons/chevron-down.svg"
+CHECK_ICON = "app/ui/theme/icons/check.svg"
+
 GLOBAL_STYLESHEET = f"""
 /* ═══════════════════════════════════════════════════════
    VS Code Dark+ — C++ Memory Visualizer
@@ -57,7 +60,7 @@ QPushButton {{
     background-color: {ACCENT};
     color: #FFFFFF;
     border: none;
-    
+    border-radius: 5px;
     padding: 7px 18px;
     font-size: 13px;
     font-weight: 600;
@@ -128,6 +131,7 @@ QToolBar QPushButton {{
     min-height: 28px;
     padding: 5px 14px;
     font-size: 12px;
+    border-radius: 5px;
 }}
 
 /* ── Status Bar ──────────────────────────────────────── */
@@ -152,13 +156,13 @@ QMenuBar {{
 }}
 QMenuBar::item:selected {{
     background-color: {ACCENT};
-    
+    border-radius: 4px;
 }}
 QMenu {{
     background-color: {SURFACE};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
-    
+    border-radius: 5px;
     padding: 6px 0;
 }}
 QMenu::item {{
@@ -195,7 +199,7 @@ QScrollBar:vertical {{
 }}
 QScrollBar::handle:vertical {{
     background-color: {BORDER};
-    
+    border-radius: 4px;
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
@@ -209,7 +213,7 @@ QScrollBar:horizontal {{
 }}
 QScrollBar::handle:horizontal {{
     background-color: {BORDER};
-    
+    border-radius: 4px;
     min-width: 30px;
 }}
 QScrollBar::handle:horizontal:hover {{
@@ -227,27 +231,37 @@ QScrollArea {{
 QComboBox {{
     background-color: {EDITOR_BG};
     color: {TEXT_PRIMARY};
-    border: none;
-    border-bottom: 1px solid {BORDER};
-    padding: 5px 10px;
+    border: 1px solid {BORDER};
+    border-radius: 5px;
+    padding: 5px 30px 5px 10px;
     min-height: 26px;
     font-size: 12px;
 }}
 QComboBox:hover {{
-    border-bottom: 1px solid {ACCENT};
+    border: 1px solid {ACCENT};
 }}
 QComboBox:focus {{
-    border-bottom: 1px solid {ACCENT};
+    border: 1px solid {ACCENT};
 }}
 QComboBox::drop-down {{
-    border: none;
-    width: 22px;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid {BORDER};
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+    background-color: {SURFACE};
+}}
+QComboBox::down-arrow {{
+    image: url({CHEVRON_DOWN_ICON});
+    width: 10px;
+    height: 6px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {SURFACE};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
-    
+    border-radius: 5px;
     selection-background-color: {ACCENT};
     padding: 4px;
     outline: none;
@@ -257,14 +271,14 @@ QComboBox QAbstractItemView {{
 QSlider::groove:horizontal {{
     background: {BORDER};
     height: 4px;
-    
+    border-radius: 2px;
 }}
 QSlider::handle:horizontal {{
     background: {ACCENT};
     width: 14px;
     height: 14px;
     margin: -5px 0;
-    
+    border-radius: 7px;
 }}
 QSlider::handle:horizontal:hover {{
     background: {ACCENT_HOVER};
@@ -284,11 +298,13 @@ QCheckBox::indicator {{
     width: 16px;
     height: 16px;
     border: 1.5px solid {BORDER};
+    border-radius: 3px;
     background-color: transparent;
 }}
 QCheckBox::indicator:checked {{
     background-color: {ACCENT};
     border-color: {ACCENT};
+    image: url({CHECK_ICON});
 }}
 QCheckBox::indicator:hover {{
     border-color: {ACCENT};
@@ -369,6 +385,6 @@ QToolTip {{
 /* ── Progress-like highlight ─────────────────────────── */
 QWidget[highlight="step"] {{
     background-color: {HIGHLIGHT_BG};
-    
+    border-radius: 5px;
 }}
 """

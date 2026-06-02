@@ -1,9 +1,34 @@
+import asyncio
 import json
 import os
-import asyncio
+from pathlib import Path
+
 import httpx
 import yaml
-from pathlib import Path
+
+
+DEFAULT_PROVIDERS = {
+    "deepseek": {
+        "api_base": "https://api.deepseek.com",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "model": "deepseek-chat",
+    },
+    "openai": {
+        "api_base": "https://api.openai.com",
+        "api_key_env": "OPENAI_API_KEY",
+        "model": "gpt-4.1-mini",
+    },
+    "anthropic": {
+        "api_base": "https://api.anthropic.com",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-sonnet-4-5",
+    },
+    "gemini": {
+        "api_base": "https://generativelanguage.googleapis.com",
+        "api_key_env": "GEMINI_API_KEY",
+        "model": "gemini-2.5-flash",
+    },
+}
 
 
 class AIService:
@@ -17,12 +42,38 @@ class AIService:
                 self._config = yaml.safe_load(f) or {}
 
         llm_cfg = self._config.get("llm", {})
-        self.api_key = os.environ.get("DEEPSEEK_API_KEY") or llm_cfg.get("api_key", "")
-        self.api_base = llm_cfg.get("api_base", "https://api.deepseek.com")
-        self.model = llm_cfg.get("model", "deepseek-chat")
-        self.max_tokens = llm_cfg.get("max_tokens", 4096)
-        self.temperature = llm_cfg.get("temperature", 0.0)
-        self._proxy = llm_cfg.get("proxy") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
+        self.provider = str(llm_cfg.get("provider", "deepseek")).lower()
+        if self.provider not in DEFAULT_PROVIDERS:
+            raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
+
+        provider_cfg = dict(DEFAULT_PROVIDERS[self.provider])
+        stored_providers = llm_cfg.get("providers", {})
+        if isinstance(stored_providers, dict):
+            provider_cfg.update(stored_providers.get(self.provider, {}) or {})
+
+        # Keep old DeepSeek-only config.yaml files working.
+        if self.provider == "deepseek":
+            for key in ("api_base", "api_key", "model"):
+                if llm_cfg.get(key):
+                    provider_cfg[key] = llm_cfg[key]
+
+        self.api_base = str(provider_cfg.get("api_base", ""))
+        self.model = str(provider_cfg.get("model", ""))
+        self.max_tokens = int(llm_cfg.get("max_tokens", 4096))
+        self.temperature = float(llm_cfg.get("temperature", 0.0))
+
+        self.api_key_env = str(provider_cfg.get("api_key_env", ""))
+        self.api_key = (
+            os.environ.get(self.api_key_env, "")
+            or str(provider_cfg.get("api_key", ""))
+        )
+        self._proxy = (
+            provider_cfg.get("proxy")
+            or llm_cfg.get("proxy")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or None
+        )
 
     async def chat_json(
         self,
@@ -31,12 +82,83 @@ class AIService:
         max_retries: int = 2,
         model: str | None = None,
     ) -> str:
-        if not self.api_key:
-            raise RuntimeError(
-                "DeepSeek API key not configured. "
-                "Set DEEPSEEK_API_KEY environment variable or "
-                "fill llm.api_key in config.yaml"
+        if self.provider in ("deepseek", "openai"):
+            return await self._chat_openai_compatible(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=True,
             )
+        if self.provider == "anthropic":
+            return await self._chat_anthropic(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=True,
+            )
+        if self.provider == "gemini":
+            return await self._chat_gemini(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=True,
+            )
+        raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
+
+    async def chat_text(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_retries: int = 1,
+        model: str | None = None,
+    ) -> str:
+        if self.provider in ("deepseek", "openai"):
+            return await self._chat_openai_compatible(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=False,
+            )
+        if self.provider == "anthropic":
+            return await self._chat_anthropic(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=False,
+            )
+        if self.provider == "gemini":
+            return await self._chat_gemini(
+                system_prompt,
+                user_message,
+                max_retries,
+                model,
+                json_mode=False,
+            )
+        raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
+
+    def _require_key(self):
+        if self.api_key:
+            return
+        hint = self.api_key_env or f"{self.provider.upper()}_API_KEY"
+        raise RuntimeError(
+            f"{self.provider} API key not configured. "
+            f"Set {hint} or fill llm.providers.{self.provider}.api_key in config.yaml"
+        )
+
+    async def _chat_openai_compatible(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_retries: int,
+        model: str | None,
+        json_mode: bool,
+    ) -> str:
+        self._require_key()
 
         url = f"{self.api_base.rstrip('/')}/v1/chat/completions"
         headers = {
@@ -50,102 +172,146 @@ class AIService:
                 {"role": "user", "content": user_message},
             ],
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
+            "max_tokens": self.max_tokens if json_mode else 2048,
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=60.0, proxy=self._proxy, trust_env=False) as client:
-                    response = await client.post(url, json=payload, headers=headers)
-                    response.raise_for_status()
-                    data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    return content
+        data = await self._post_json(url, headers, payload, max_retries)
+        text = data["choices"][0]["message"]["content"]
+        return self._normalize_json(text) if json_mode else text
 
-            except httpx.ConnectError as e:
-                last_error = RuntimeError(
-                    f"Cannot reach API — check network. "
-                    f"If you need a proxy, set llm.proxy in config.yaml or HTTPS_PROXY env var. "
-                    f"Error: {e}"
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-            except httpx.TimeoutException as e:
-                last_error = RuntimeError(f"Request timed out: {e}")
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(1)
-                    continue
-            except (json.JSONDecodeError, KeyError) as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(1)
-                    continue
-
-        raise RuntimeError(
-            f"AI API call failed after {max_retries + 1} attempts: {last_error}"
-        )
-
-    async def chat_text(
+    async def _chat_anthropic(
         self,
         system_prompt: str,
         user_message: str,
-        max_retries: int = 1,
-        model: str | None = None,
+        max_retries: int,
+        model: str | None,
+        json_mode: bool,
     ) -> str:
-        if not self.api_key:
-            raise RuntimeError("API key not configured.")
+        self._require_key()
 
-        url = f"{self.api_base.rstrip('/')}/v1/chat/completions"
+        url = f"{self.api_base.rstrip('/')}/v1/messages"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
+        system = system_prompt
+        if json_mode:
+            system += "\n\nReturn only valid JSON. Do not include markdown fences."
+
         payload = {
             "model": model or self.model,
+            "max_tokens": self.max_tokens if json_mode else 2048,
+            "temperature": self.temperature,
+            "system": system,
             "messages": [
-                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            "temperature": 0.3,
-            "max_tokens": 2048,
         }
 
+        data = await self._post_json(url, headers, payload, max_retries)
+        text = "".join(
+            block.get("text", "")
+            for block in data.get("content", [])
+            if block.get("type") == "text"
+        )
+        return self._normalize_json(text) if json_mode else text
+
+    async def _chat_gemini(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_retries: int,
+        model: str | None,
+        json_mode: bool,
+    ) -> str:
+        self._require_key()
+
+        selected_model = model or self.model
+        url = (
+            f"{self.api_base.rstrip('/')}/v1beta/models/"
+            f"{selected_model}:generateContent?key={self.api_key}"
+        )
+        headers = {"Content-Type": "application/json"}
+        generation_config = {
+            "temperature": self.temperature,
+            "maxOutputTokens": self.max_tokens if json_mode else 2048,
+        }
+        if json_mode:
+            generation_config["responseMimeType"] = "application/json"
+
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_message}],
+                }
+            ],
+            "generationConfig": generation_config,
+        }
+
+        data = await self._post_json(url, headers, payload, max_retries)
+        parts = data["candidates"][0]["content"].get("parts", [])
+        text = "".join(part.get("text", "") for part in parts)
+        return self._normalize_json(text) if json_mode else text
+
+    async def _post_json(
+        self,
+        url: str,
+        headers: dict,
+        payload: dict,
+        max_retries: int,
+    ) -> dict:
         last_error = None
         for attempt in range(max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=60.0, proxy=self._proxy, trust_env=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=60.0,
+                    proxy=self._proxy,
+                    trust_env=False,
+                ) as client:
                     response = await client.post(url, json=payload, headers=headers)
+                status_code = getattr(response, "status_code", None)
+                if status_code is not None and status_code >= 400:
+                    raise RuntimeError(
+                        f"HTTP {response.status_code}: {response.text[:800]}"
+                    )
+                if status_code is None and hasattr(response, "raise_for_status"):
                     response.raise_for_status()
-                    data = response.json()
-                    return data["choices"][0]["message"]["content"]
-            except httpx.ConnectError as e:
-                last_error = RuntimeError(
-                    f"Cannot reach API — check network. "
-                    f"If you need a proxy, set llm.proxy in config.yaml or HTTPS_PROXY env var. "
-                    f"Error: {e}"
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-            except httpx.TimeoutException as e:
-                last_error = RuntimeError(f"Request timed out: {e}")
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-            except httpx.HTTPStatusError as e:
+                return response.json()
+            except (
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                httpx.HTTPStatusError,
+                RuntimeError,
+                json.JSONDecodeError,
+                KeyError,
+                IndexError,
+            ) as e:
                 last_error = e
                 if attempt < max_retries:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2 ** attempt)
                     continue
 
         raise RuntimeError(
             f"AI API call failed after {max_retries + 1} attempts: {last_error}"
         )
+
+    @staticmethod
+    def _normalize_json(text: str) -> str:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        json.loads(cleaned)
+        return cleaned

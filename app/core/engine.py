@@ -19,15 +19,29 @@ from app.services import error_store
 
 
 def _has_api_key() -> bool:
-    if os.environ.get("DEEPSEEK_API_KEY"):
-        return True
     try:
         config_path = Path(__file__).parent.parent.parent / "config.yaml"
+        cfg = {}
         if config_path.exists():
-            with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
-            key = cfg.get("llm", {}).get("api_key", "")
-            return bool(key and key.strip())
+        llm_cfg = cfg.get("llm", {})
+        provider = str(llm_cfg.get("provider", "deepseek")).lower()
+        provider_cfg = llm_cfg.get("providers", {}).get(provider, {})
+
+        env_name = provider_cfg.get("api_key_env", "")
+        if env_name and os.environ.get(env_name):
+            return True
+
+        key = provider_cfg.get("api_key", "")
+        if key and str(key).strip():
+            return True
+
+        if provider == "deepseek" and os.environ.get("DEEPSEEK_API_KEY"):
+            return True
+        if provider == "deepseek":
+            legacy_key = llm_cfg.get("api_key", "")
+            return bool(legacy_key and str(legacy_key).strip())
     except Exception:
         logger.exception("Failed to read config for API key check")
     return False
@@ -79,7 +93,7 @@ class Engine:
             show_api_key_dialog(self._window)
             if not _has_api_key():
                 self._window.statusBar().showMessage(
-                    "API key not configured — click Settings or set DEEPSEEK_API_KEY"
+                    "API key not configured - click Settings or set provider API key"
                 )
                 return
 

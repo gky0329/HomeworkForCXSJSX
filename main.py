@@ -20,10 +20,24 @@ def load_config() -> dict:
 
 
 def has_api_key(config: dict) -> bool:
-    if os.environ.get("DEEPSEEK_API_KEY"):
+    llm_cfg = config.get("llm", {})
+    provider = str(llm_cfg.get("provider", "deepseek")).lower()
+    provider_cfg = llm_cfg.get("providers", {}).get(provider, {})
+
+    env_name = provider_cfg.get("api_key_env", "")
+    if env_name and os.environ.get(env_name):
         return True
-    api_key = config.get("llm", {}).get("api_key", "")
-    return bool(api_key and api_key.strip())
+
+    api_key = provider_cfg.get("api_key", "")
+    if api_key and str(api_key).strip():
+        return True
+
+    if provider == "deepseek" and os.environ.get("DEEPSEEK_API_KEY"):
+        return True
+    if provider == "deepseek":
+        legacy_key = llm_cfg.get("api_key", "")
+        return bool(legacy_key and str(legacy_key).strip())
+    return False
 
 
 def main():
