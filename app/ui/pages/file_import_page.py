@@ -22,7 +22,7 @@ from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    ACCENT, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
+    ACCENT, ACCENT_HOVER, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
 )
 
 logger = logging.getLogger(__name__)

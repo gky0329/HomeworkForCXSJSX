@@ -1,5 +1,45 @@
 [
   {
+    "action": "File Import",
+    "detail": "Extracted 3 KPs, 4 quizzes",
+    "timestamp": "2026-06-03T13:17:11.153665+00:00"
+  },
+  {
+    "action": "File Import",
+    "detail": "Extracted 3 KPs, 3 quizzes",
+    "timestamp": "2026-06-03T13:16:49.857576+00:00"
+  },
+  {
+    "action": "File Import",
+    "detail": "Extracted 3 KPs, 5 quizzes",
+    "timestamp": "2026-06-03T13:14:08.810463+00:00"
+  },
+  {
+    "action": "Code Run",
+    "detail": "Executed 3 steps",
+    "timestamp": "2026-06-03T13:13:02.866313+00:00"
+  },
+  {
+    "action": "File Import",
+    "detail": "Extracted 5 KPs, 5 quizzes",
+    "timestamp": "2026-06-03T10:22:40.659311+00:00"
+  },
+  {
+    "action": "Code Run",
+    "detail": "Executed 2 steps",
+    "timestamp": "2026-06-03T10:19:58.307139+00:00"
+  },
+  {
+    "action": "Code Run",
+    "detail": "Executed 4 steps",
+    "timestamp": "2026-06-03T10:18:57.976015+00:00"
+  },
+  {
+    "action": "Code Run",
+    "detail": "Executed 3 steps",
+    "timestamp": "2026-06-03T10:18:27.837315+00:00"
+  },
+  {
     "action": "Code Run",
     "detail": "Executed 3 steps",
     "timestamp": "2026-06-03T10:10:24.911380+00:00"
@@ -208,45 +248,5 @@
     "action": "Code Run",
     "detail": "Executed 5 steps",
     "timestamp": "2026-05-29T16:01:48.758843+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 5 steps",
-    "timestamp": "2026-05-29T15:45:15.773212+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 5 steps",
-    "timestamp": "2026-05-29T15:36:32.739823+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 5 steps",
-    "timestamp": "2026-05-29T15:26:49.180915+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 5 steps",
-    "timestamp": "2026-05-29T15:06:50.237310+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 3 steps",
-    "timestamp": "2026-05-29T15:06:30.987652+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 7 steps",
-    "timestamp": "2026-05-29T14:26:26.125190+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 7 steps",
-    "timestamp": "2026-05-29T14:20:42.302881+00:00"
-  },
-  {
-    "action": "Code Run",
-    "detail": "Executed 5 steps",
-    "timestamp": "2026-05-29T14:19:18.568847+00:00"
   }
 ]

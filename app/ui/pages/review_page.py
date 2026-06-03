@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QTextEdit, QDialog, QLineEdit,
-    QDialogButtonBox, QComboBox, QSizePolicy,
+    QDialogButtonBox, QComboBox, QSizePolicy, QScrollArea,
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QTextDocument
 
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
@@ -85,6 +86,19 @@ NOTES_STYLE = (
 )
 
 
+class ReviewScrollArea(QScrollArea):
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if delta:
+                bar = self.horizontalScrollBar()
+                step = max(24, bar.singleStep())
+                bar.setValue(bar.value() - int(delta / 120) * step)
+                event.accept()
+                return
+        super().wheelEvent(event)
+
+
 class ReviewPage(QWidget):
     _session_limit = 20
 
@@ -102,6 +116,15 @@ class ReviewPage(QWidget):
         self._hint_worker: AIExplainWorker | None = None
         self._cls_worker: AIExplainWorker | None = None
         self._current_deck: str = ""
+        self._card_frame: QFrame | None = None
+        self._card_scroll: ReviewScrollArea | None = None
+        self._card_content: QWidget | None = None
+        self._question_label: QLabel | None = None
+        self._user_answer_label: QLabel | None = None
+        self._hint_label: QLabel | None = None
+        self._answer_widget: QWidget | None = None
+        self._answer_rich_text = False
+        self._answer_text = ""
         self._setup_ui()
         self._auto_classify_uncategorized()
         self._populate_deck_combo()
@@ -251,6 +274,15 @@ class ReviewPage(QWidget):
         self._render_card(self._cards[self._current_idx])
 
     def _clear_card_area(self):
+        self._card_frame = None
+        self._card_scroll = None
+        self._card_content = None
+        self._question_label = None
+        self._user_answer_label = None
+        self._hint_label = None
+        self._answer_widget = None
+        self._answer_rich_text = False
+        self._answer_text = ""
         while self._card_area.count():
             item = self._card_area.takeAt(0)
             if item.layout():
@@ -280,13 +312,34 @@ class ReviewPage(QWidget):
         main.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         c = QFrame()
+        self._card_frame = c
         c.setObjectName("reviewCard")
         c.setStyleSheet(CARD_STYLE)
+        c.setMinimumWidth(680)
         c.setMaximumWidth(680)
-        c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        v = QVBoxLayout(c)
-        v.setContentsMargins(28, 24, 28, 24)
+        c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+
+        card_layout = QVBoxLayout(c)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = ReviewScrollArea()
+        self._card_scroll = scroll
+        scroll.setWidgetResizable(False)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: transparent; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
+        )
+
+        scroll_content = QWidget()
+        self._card_content = scroll_content
+        v = QVBoxLayout(scroll_content)
+        v.setContentsMargins(28, 28, 18, 28)
         v.setSpacing(16)
+        scroll.setWidget(scroll_content)
+        card_layout.addWidget(scroll)
 
         kp = card.get("knowledge_point", "")
         if kp:
@@ -302,21 +355,25 @@ class ReviewPage(QWidget):
 
         qtext = card.get("question", "")
         ql = QLabel(qtext)
+        self._question_label = ql
         ql.setWordWrap(True)
         ql.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ql.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        ql.setMargin(10)
         ql.setStyleSheet(
             f"color: {TEXT_PRIMARY}; font-size: 22px; font-weight: 700; "
-            f"padding: 8px 0;"
+            f"padding: 0;"
         )
         v.addWidget(ql)
 
         user_ans = card.get("user_answer", "")
         if user_ans:
             ul = QLabel(tr("Your answer: {answer}", answer=user_ans))
+            self._user_answer_label = ul
             ul.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            ul.setMargin(6)
             ul.setStyleSheet(
-                f"color: {EDGE_DANGLING}; font-size: 12px; font-style: italic; padding: 4px 0;"
+                f"color: {EDGE_DANGLING}; font-size: 12px; font-style: italic; padding: 0;"
             )
             v.addWidget(ul)
 
@@ -332,10 +389,12 @@ class ReviewPage(QWidget):
         q_text = card.get("question", "")
         kp_text = card.get("knowledge_point", "")
         hint_label = QLabel("")
+        self._hint_label = hint_label
         hint_label.setWordWrap(True)
         hint_label.setVisible(False)
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_label.setStyleSheet(f"color: {ACCENT}; font-size: 12px; padding: 4px 0;")
+        hint_label.setMargin(6)
+        hint_label.setStyleSheet(f"color: {ACCENT}; font-size: 12px; padding: 0;")
         hint_btn.clicked.connect(self._make_hint_handler(hint_btn, hint_label, kp_text, q_text))
         v.addWidget(hint_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(hint_label)
@@ -355,8 +414,85 @@ class ReviewPage(QWidget):
         self._reveal_area = QVBoxLayout()
         v.addLayout(self._reveal_area, 1)
 
-        main.addWidget(c, alignment=Qt.AlignmentFlag.AlignCenter)
-        self._card_area.addLayout(main)
+        main.addWidget(c, 1, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self._card_area.addLayout(main, 1)
+        self._schedule_card_geometry_refresh()
+
+    def _update_card_geometry(self):
+        if self._card_frame is None or self._card_scroll is None or self._card_content is None:
+            return
+
+        available_width = max(420, self.width() - 64)
+        preferred_content_width = self._preferred_content_width()
+        frame_width = min(max(680, preferred_content_width + 56), available_width)
+        frame_width = max(420, frame_width)
+
+        margins = self.layout().contentsMargins() if self.layout() else None
+        top_margin = margins.top() if margins else 0
+        bottom_margin = margins.bottom() if margins else 0
+        progress_bottom = self._progress.geometry().bottom() if self._progress is not None else 0
+        reserved_height = progress_bottom + top_margin + bottom_margin + 40
+        available_height = max(260, self.height() - reserved_height)
+
+        scrollbar_width = self._card_scroll.verticalScrollBar().sizeHint().width()
+        viewport_width = max(320, frame_width - 2)
+        content_width = max(viewport_width - scrollbar_width - 24, preferred_content_width)
+
+        self._card_frame.setMinimumWidth(frame_width)
+        self._card_frame.setMaximumWidth(frame_width)
+        self._card_frame.setMaximumHeight(available_height)
+        self._card_scroll.setMinimumWidth(frame_width - 2)
+        self._card_scroll.setMaximumHeight(max(220, available_height - 2))
+        self._card_content.setMinimumWidth(content_width)
+        self._card_content.resize(content_width, self._card_content.sizeHint().height())
+        self._refresh_text_layouts(content_width)
+
+    def _refresh_text_layouts(self, content_width: int):
+        text_widgets = [
+            self._question_label,
+            self._user_answer_label,
+            self._hint_label,
+            self._answer_widget if isinstance(self._answer_widget, QLabel) else None,
+        ]
+        usable_width = max(160, content_width - 24)
+        for widget in text_widgets:
+            if widget is None:
+                continue
+            margin = widget.margin() * 2
+            target_width = max(120, usable_width - margin)
+            widget.setMinimumWidth(target_width)
+            widget.setMaximumWidth(target_width)
+            widget.updateGeometry()
+            widget.adjustSize()
+            height = widget.heightForWidth(target_width)
+            if height > 0:
+                widget.setMinimumHeight(height + margin + 4)
+        self._card_content.adjustSize()
+        self._card_content.resize(content_width, self._card_content.sizeHint().height())
+
+    def _schedule_card_geometry_refresh(self):
+        QTimer.singleShot(0, self._update_card_geometry)
+        QTimer.singleShot(50, self._update_card_geometry)
+
+    def _preferred_content_width(self) -> int:
+        preferred = 620
+        if self._answer_revealed and self._answer_text:
+            preferred = max(preferred, self._estimate_answer_width())
+        return min(preferred, 1800)
+
+    def _estimate_answer_width(self) -> int:
+        if not self._answer_text:
+            return 620
+        if self._answer_rich_text:
+            doc = QTextDocument()
+            if self._answer_widget is not None:
+                doc.setDefaultFont(self._answer_widget.font())
+            doc.setHtml(self._answer_text)
+            return int(doc.idealWidth()) + 48
+
+        lines = self._answer_text.splitlines() or [self._answer_text]
+        metrics = self.fontMetrics()
+        return max(metrics.horizontalAdvance(line) for line in lines) + 72
 
     def _make_hint_handler(self, btn, label, kp_text, q_text):
         def on_hint():
@@ -405,14 +541,20 @@ class ReviewPage(QWidget):
             html = _md_to_html(correct)
             al = QLabel(html)
             al.setTextFormat(Qt.TextFormat.RichText)
+            self._answer_rich_text = True
+            self._answer_text = html
         else:
             al = QLabel(tr("Correct: {answer}", answer=correct))
+            self._answer_rich_text = False
+            self._answer_text = tr("Correct: {answer}", answer=correct)
         al.setWordWrap(True)
+        al.setMargin(16)
         al.setStyleSheet(
             f"color: {SUCCESS}; font-size: 17px; font-weight: 700; "
             f"background-color: {SUCCESS_BG}; "
-            f"padding: 16px; border-bottom: 2px solid {SUCCESS};"
+            f"padding: 0; border-bottom: 2px solid {SUCCESS};"
         )
+        self._answer_widget = al
         self._reveal_area.addWidget(al)
 
         notes = card.get("notes", "")
@@ -454,6 +596,9 @@ class ReviewPage(QWidget):
             btn_row.addWidget(btn)
 
         self._reveal_area.addLayout(btn_row)
+        if self._card_content is not None:
+            self._card_content.adjustSize()
+        self._schedule_card_geometry_refresh()
 
     def _flush_notes(self):
         if self._notes_edit and self._pending_card_id:
@@ -513,3 +658,7 @@ class ReviewPage(QWidget):
         self._header_label.setText(tr("Review"))
         self._add_btn.setText(tr("+ Add"))
         self._render_empty_or_card()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_card_geometry_refresh()

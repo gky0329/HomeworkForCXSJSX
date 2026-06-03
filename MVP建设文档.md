@@ -3,6 +3,9 @@
 > **Status: MVP COMPLETE + Post-MVP features added (2026-05-30)**
 > Post-MVP additions: OJ Analysis, File Import, Review (SM-2), Knowledge Base + Graph, Settings, AI explanations (markdown), Auto-play, Lazy API prompt
 
+> **Recent fixes (2026-06-03)**
+> Review page cards now use an internal `QScrollArea`, so long questions, hints, answers, and rating buttons stay accessible via mouse wheel and the right-side scrollbar when the window height is limited; after revealing the answer, the card widens automatically, and if content is still wider than the viewport it supports horizontal scrolling via the bottom scrollbar and `Alt+滚轮`. The final fix also switched multiline labels to real widget margins plus `heightForWidth(...)` recalculation, and delays the post-reveal relayout to the next event loop / `50ms` follow-up pass so question and answer blocks do not clip or overlap. `file_import_page.py` also restores the missing `ACCENT_HOVER` import used by the generated quiz button.
+
 > 本文档是工程级路线图，精确到文件、验收标准和验证命令。
 > 架构和数据契约详见 `need.md` 和 `架构设计文档v2.md`。
 

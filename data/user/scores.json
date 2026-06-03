@@ -19,5 +19,12 @@
     "correct": 0,
     "wrong": 1,
     "last_reviewed": "2026-05-16T08:02:20.088735+00:00"
+  },
+  {
+    "name": "quiz",
+    "reviews": 7,
+    "correct": 4,
+    "wrong": 3,
+    "last_reviewed": "2026-06-03T13:17:57.909551+00:00"
   }
 ]
