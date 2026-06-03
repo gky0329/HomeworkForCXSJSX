@@ -431,8 +431,8 @@ class MainWindow(QMainWindow):
             self._engine.cancel_current_run()
 
     def _update_elapsed(self):
-        elapsed = int(time.time() - self._load_start_time)
-        self._overlay_time.setText(tr("Elapsed: {seconds}s", seconds=elapsed))
+        elapsed = time.time() - self._load_start_time
+        self._overlay_time.setText(tr("Elapsed: {seconds}s", seconds=f"{elapsed:.1f}"))
 
     def show_loading(self, visible: bool):
         self._overlay.setVisible(visible)
@@ -442,7 +442,7 @@ class MainWindow(QMainWindow):
             self._load_start_time = time.time()
             self._overlay_label.setText(tr("Analyzing code with AI..."))
             self._overlay_time.setText("")
-            self._elapsed_timer.start(1000)
+            self._elapsed_timer.start(100)
         else:
             self._elapsed_timer.stop()
             self._overlay_time.setText("")

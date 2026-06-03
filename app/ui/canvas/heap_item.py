@@ -25,6 +25,9 @@ class HeapItem(QGraphicsRectItem):
         self.address = block.address
         self._on_item_moved = on_item_moved
         self._value_label = None
+        self._array_cells: list[QGraphicsRectItem] = []
+        self._array_value_labels: list[QGraphicsTextItem] = []
+        self._array_index_labels: list[QGraphicsTextItem] = []
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -45,6 +48,9 @@ class HeapItem(QGraphicsRectItem):
             self._build_plain(block)
 
     def _clear_children(self):
+        self._array_cells.clear()
+        self._array_value_labels.clear()
+        self._array_index_labels.clear()
         for child in list(self.childItems()):
             child.setParentItem(None)
             if child.scene() is not None:
@@ -97,19 +103,18 @@ class HeapItem(QGraphicsRectItem):
         self._refresh_geometry()
 
     def _build_array(self, block: HeapBlock):
-        cell_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8)
-        metrics = QFontMetricsF(cell_font)
+        value_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10, QFont.Weight.Bold)
+        index_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8)
+        layout = self._array_layout_metrics(block, value_font, index_font)
         gap = 3
-        cols = max(1, min(len(block.elements), 4))
-        n = len(block.elements)
-        extra_label_h = 0.0
-        if block.container_size is not None and block.container_capacity is not None:
-            extra_label_h = metrics.lineSpacing() + 2
-        rows = (n + cols - 1) // cols
-        cell_w = self._array_cell_width(block, cell_font)
-        cell_h = self._array_cell_height(block, cell_font)
-        w = max(80, cols * (cell_w + gap) + 10)
-        h = cell_h * rows + 24 + extra_label_h
+        cols = int(layout["cols"])
+        rows = int(layout["rows"])
+        cell_w = layout["cell_w"]
+        cell_h = layout["cell_h"]
+        row_h = layout["row_h"]
+        top_y = layout["top_y"]
+        w = max(80.0, layout["grid_w"], layout["title_w"])
+        h = top_y + rows * row_h
         self.prepareGeometryChange()
         self.setRect(0, 0, w, h)
 
@@ -126,23 +131,42 @@ class HeapItem(QGraphicsRectItem):
                 self
             )
             sz_label.setDefaultTextColor(QColor("#DCDCAA"))
-            sz_label.setFont(cell_font)
+            sz_label.setFont(index_font)
             sz_label.setPos(4, y)
-            y += metrics.lineSpacing() + 2
+            y += QFontMetricsF(index_font).lineSpacing() + 2
 
         for elem in block.elements:
             row = elem.index // cols
             col = elem.index % cols
             x = 6 + col * (cell_w + gap)
-            cy = y + row * cell_h
-            cell = QGraphicsRectItem(x, cy, cell_w, cell_h, self)
+            cy = y + row * row_h
+            cell = QGraphicsRectItem(0, 0, cell_w, cell_h, self)
+            cell.setPos(x, cy)
             cell.setPen(QPen(QColor(HEAP_BORDER), 1))
             cell.setBrush(QBrush(QColor("#4A3626")))
-            label = QGraphicsTextItem(f"[{elem.index}]\n{elem.value}", cell)
-            label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
-            label.setFont(cell_font)
-            label.setPos(2, 1)
-            self._value_label = label
+            self._array_cells.append(cell)
+
+            value_label = QGraphicsTextItem("", cell)
+            value_label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
+            value_label.setFont(value_font)
+            value_label.setPlainText(str(elem.value))
+            self._array_value_labels.append(value_label)
+
+            index_label = QGraphicsTextItem("", cell)
+            index_label.setDefaultTextColor(QColor("#DCDCAA"))
+            index_label.setFont(index_font)
+            index_label.setPlainText(f"[{elem.index}]")
+            self._array_index_labels.append(index_label)
+
+            value_rect = value_label.boundingRect()
+            index_rect = index_label.boundingRect()
+            value_x = max(2.0, (cell_w - value_rect.width()) / 2.0)
+            value_y = max(1.0, (cell_h - value_rect.height()) / 2.0 - 1.0)
+            index_x = max(2.0, (cell_w - index_rect.width()) / 2.0)
+            index_y = cell_h - index_rect.height() * 0.45
+            value_label.setPos(value_x, value_y)
+            index_label.setPos(index_x, index_y)
+            self._value_label = value_label
 
         self._refresh_geometry()
 
@@ -157,6 +181,41 @@ class HeapItem(QGraphicsRectItem):
         metrics = QFontMetricsF(font)
         line_count = 2 if block.elements else 1
         return max(28.0, metrics.lineSpacing() * line_count + 8.0)
+
+    def _array_layout_metrics(self, block: HeapBlock, value_font: QFont, index_font: QFont) -> dict[str, int | float]:
+        value_metrics = QFontMetricsF(value_font)
+        index_metrics = QFontMetricsF(index_font)
+        cols = max(1, min(len(block.elements), 4))
+        rows = (len(block.elements) + cols - 1) // cols
+        gap = 3.0
+
+        max_value_w = 0.0
+        max_index_w = 0.0
+        for elem in block.elements:
+            max_value_w = max(max_value_w, _text_width(str(elem.value), value_font))
+            max_index_w = max(max_index_w, _text_width(f"[{elem.index}]", index_font))
+
+        cell_w = max(28.0, max(max_value_w, max_index_w) + 10.0)
+        cell_h = max(22.0, value_metrics.height() + 4.0)
+        row_h = cell_h + index_metrics.height() + 2.0
+        grid_w = cols * cell_w + max(0, cols - 1) * gap + 12.0
+        title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
+        title_w = _text_width(f"[{block.address}] {block.type}", title_font) + 12.0
+
+        top_y = 20.0
+        if block.container_size is not None and block.container_capacity is not None:
+            top_y += index_metrics.lineSpacing() + 2.0
+
+        return {
+            "cols": cols,
+            "rows": rows,
+            "cell_w": cell_w,
+            "cell_h": cell_h,
+            "row_h": row_h,
+            "top_y": top_y,
+            "grid_w": grid_w,
+            "title_w": title_w,
+        }
 
     def _build_struct(self, block: HeapBlock):
         member_h = 20
@@ -319,15 +378,15 @@ class HeapItem(QGraphicsRectItem):
         self.setRect(0, 0, max(self.WIDTH, width), max(self.HEIGHT, height))
 
     def _refresh_array_geometry(self, block: HeapBlock):
-        font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8)
-        metrics = QFontMetricsF(font)
-        cell_w = self._array_cell_width(block, font)
-        cell_h = self._array_cell_height(block, font)
-        cols = max(1, min(len(block.elements), 4))
-        rows = (len(block.elements) + cols - 1) // cols
-        extra_label_h = metrics.lineSpacing() + 2 if block.container_size is not None and block.container_capacity is not None else 0.0
-        w = max(80, cols * (cell_w + 3) + 10)
-        h = cell_h * rows + 24 + extra_label_h
+        value_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10, QFont.Weight.Bold)
+        index_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 8)
+        layout = self._array_layout_metrics(block, value_font, index_font)
+        cols = int(layout["cols"])
+        rows = int(layout["rows"])
+        row_h = layout["row_h"]
+        top_y = layout["top_y"]
+        w = max(80.0, layout["grid_w"], layout["title_w"])
+        h = top_y + rows * row_h
         self.prepareGeometryChange()
         self.setRect(0, 0, w, h)
 
@@ -388,7 +447,13 @@ class HeapItem(QGraphicsRectItem):
 
     def update_value(self, new_value: str):
         self.block.value = new_value
-        if hasattr(self, '_value_label') and self._value_label is not None:
+        if (
+            not self.block.is_array
+            and not self.block.members
+            and not self.block.is_object
+            and hasattr(self, '_value_label')
+            and self._value_label is not None
+        ):
             self._value_label.setPlainText(new_value)
         self._refresh_geometry()
         if self._on_item_moved:

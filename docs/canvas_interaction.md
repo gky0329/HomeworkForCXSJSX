@@ -72,6 +72,7 @@
 
 ## 修复日志
 
+- 2026-06-03: Loading overlay 耗时改为 100ms 刷新一次，显示更平滑；修复数组示例中栈数组高亮矩形与堆数组 cell/value/index 的定位、尺寸与单步更新问题
 - 2026-05-30: Edge 路由优化（近距离左出左入，Z-order=1）；Auto-play + line highlight；Auto Fit checkbox tooltip
 - 2026-05-25: 渲染流程复用 + 首次自动 Fit + 堆图元 index 缓存 + Code Editor Auto Fit 选项
 - 2026-05-25: 修复堆图元地址未更新 + 透明度未恢复
