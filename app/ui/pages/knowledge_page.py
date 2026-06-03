@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame, QLineEdit, QSplitter,
     QListWidget, QListWidgetItem, QGraphicsView,
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
-    QGraphicsLineItem,
+    QGraphicsLineItem, QStackedWidget,
 )
 from PySide6.QtCore import Qt, QMargins, QTimer
 from PySide6.QtGui import (
@@ -18,9 +18,11 @@ from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
+import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     STACK_BORDER, HEAP_BORDER, ACCENT, ACCENT_HOVER, EDGE_DANGLING, SUCCESS,
+    EDITOR_BG,
 )
 
 
@@ -127,6 +129,9 @@ class KnowledgePage(QWidget):
         self._graph_timer = QTimer()
         self._graph_timer.timeout.connect(self._simulate)
         self._selected_node: str | None = None
+        self._explain_worker: AIExplainWorker | None = None
+        self._quiz_worker: AIExplainWorker | None = None
+        self._auto_explain_worker: AIExplainWorker | None = None
         self._setup_ui()
         self._refresh()
 
@@ -212,7 +217,6 @@ class KnowledgePage(QWidget):
         detail_scroll.setWidget(self._detail)
         right_layout.addWidget(detail_scroll)
         list_layout.addWidget(right)
-        layout.addWidget(self._list_stack)
 
         self._graph_stack = QWidget()
         graph_layout = QVBoxLayout(self._graph_stack)
@@ -226,8 +230,12 @@ class KnowledgePage(QWidget):
         self._graph_scene.setSceneRect(-500, -500, 1000, 1000)
         self._graph_view_widget.setScene(self._graph_scene)
         graph_layout.addWidget(self._graph_view_widget)
-        self._graph_stack.hide()
-        layout.addWidget(self._graph_stack)
+
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._list_stack)
+        self._stack.addWidget(self._graph_stack)
+        self._stack.setCurrentWidget(self._list_stack)
+        layout.addWidget(self._stack)
 
         bottom = QHBoxLayout()
         bottom.addStretch()
@@ -240,16 +248,14 @@ class KnowledgePage(QWidget):
         was_graph = self._graph_view
         self._graph_view = graph
         if graph:
-            self._list_stack.hide()
             self._search.hide()
-            self._graph_stack.show()
+            self._stack.setCurrentWidget(self._graph_stack)
             self._btn_list.setStyleSheet(TOGGLE_INACTIVE)
             self._btn_graph.setStyleSheet(TOGGLE_ACTIVE)
             self._build_graph()
         else:
-            self._list_stack.show()
             self._search.show()
-            self._graph_stack.hide()
+            self._stack.setCurrentWidget(self._list_stack)
             self._btn_list.setStyleSheet(TOGGLE_ACTIVE)
             self._btn_graph.setStyleSheet(TOGGLE_INACTIVE)
             self._graph_timer.stop()
@@ -275,6 +281,7 @@ class KnowledgePage(QWidget):
             self._build_graph()
         else:
             self._populate_list()
+        self._auto_explain_new()
 
     def _populate_list(self, filter_text: str = ""):
         self._concept_list.clear()
@@ -362,6 +369,16 @@ class KnowledgePage(QWidget):
         self._detail_layout.addSpacing(4)
         self._add_review_button(name)
 
+        quiz_btn = QPushButton(tr("Quiz Me"))
+        quiz_btn.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; "
+            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
+            f"padding: 4px 14px; font-size: 11px; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+        )
+        quiz_btn.clicked.connect(lambda: self._generate_quiz_for_concept(name, quiz_btn))
+        self._detail_layout.addWidget(quiz_btn)
+
         del_btn = QPushButton(tr("Delete"))
         del_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
@@ -408,6 +425,8 @@ class KnowledgePage(QWidget):
             self._explain_worker = AIExplainWorker(EXPLAIN_PROMPT, f"请解释 C++ 知识点：{concept_name}")
 
             def on_done(text):
+                if not shiboken6.isValid(btn):
+                    return
                 btn.setEnabled(True)
                 btn.setText(tr("Explain with AI"))
                 error_store.set_knowledge_description(concept_name, text)
@@ -420,6 +439,8 @@ class KnowledgePage(QWidget):
                 btn.hide()
 
             def on_err(msg):
+                if not shiboken6.isValid(btn):
+                    return
                 btn.setEnabled(True)
                 btn.setText(tr("Explain with AI (failed)"))
 
@@ -440,11 +461,21 @@ class KnowledgePage(QWidget):
         )
 
         def add():
+            deck = error_store.suggest_deck(name)
+            kps = error_store.get_knowledge_points()
+            desc = next((k.get("description", "") for k in kps if k["name"] == name), "")
+            if desc:
+                question = tr("Review: {name}", name=name)
+                correct = f"## {name}\n\n{desc}"
+            else:
+                question = tr("Review {name}", name=name)
+                correct = tr("Study concept: {name}", name=name)
             error_store.add_error(
                 knowledge_point=name,
-                question=tr("Review {name}", name=name),
+                question=question,
                 user_answer="",
-                correct_answer=tr("Study concept: {name}", name=name),
+                correct_answer=correct,
+                deck=deck,
             )
             btn.setText("✓ " + tr("Added"))
             btn.setStyleSheet(
@@ -456,29 +487,185 @@ class KnowledgePage(QWidget):
         btn.clicked.connect(lambda: add())
         self._detail_layout.addWidget(btn)
 
+    def _build_interactive_quiz(self, num: int, q: dict, kp_name: str) -> QFrame:
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame {{ background-color: {EDITOR_BG}; border: 1px solid {BORDER}; "
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+
+        question = QLabel(f"Q{num}: {q.get('question', '')}")
+        question.setWordWrap(True)
+        question.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: bold;")
+        layout.addWidget(question)
+
+        options = q.get("options", [])
+        answer_idx = q.get("answer", -1)
+        labels = ["A", "B", "C", "D"]
+
+        result_label = QLabel("")
+        result_label.setVisible(False)
+        layout.addWidget(result_label)
+
+        answered = [False]
+
+        def on_choice(choice_idx: int):
+            if answered[0]:
+                return
+            answered[0] = True
+            correct = (choice_idx == answer_idx)
+            for b in btns:
+                b.setEnabled(False)
+            if correct:
+                ans_text = f"{labels[answer_idx]}) {options[answer_idx]}" if 0 <= answer_idx < len(options) else ""
+                result_label.setText("✓ " + tr("Correct!") + f"  {ans_text}")
+                result_label.setStyleSheet(
+                    f"color: #4EC9B0; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                )
+            else:
+                result_label.setText(
+                    "✗ " + tr("Wrong - correct answer: {answer}",
+                    answer=f"{labels[answer_idx]}) {options[answer_idx]}" if 0 <= answer_idx < len(options) else "?")
+                )
+                result_label.setStyleSheet(
+                    f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                )
+                add_btn = QPushButton(tr("Add to Review"))
+                add_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: transparent; "
+                    f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+                    f"padding: 3px 10px; font-size: 10px; margin-top: 2px; }}"
+                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+                )
+                def save_error(q_text=q.get("question",""), o=options, a_i=answer_idx, c_i=choice_idx):
+                    opts_text = "\n".join(f"  {labels[i]}) {o[i]}" for i in range(len(o)))
+                    error_store.add_error(
+                        knowledge_point=kp_name,
+                        question=f"{q_text}\n\n{opts_text}",
+                        user_answer=f"{labels[c_i]}) {o[c_i]}" if c_i < len(o) else "?",
+                        correct_answer=f"{labels[a_i]}) {o[a_i]}" if 0 <= a_i < len(o) else "?",
+                        deck=error_store.suggest_deck(kp_name),
+                    )
+                    add_btn.setText("✓ " + tr("Added"))
+                    add_btn.setEnabled(False)
+                add_btn.clicked.connect(lambda: save_error())
+                layout.addWidget(add_btn)
+            result_label.setVisible(True)
+
+        btns = []
+        for ci, opt in enumerate(options):
+            btn = QPushButton(f"{labels[ci]}) {opt}")
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: transparent; color: {TEXT_PRIMARY}; "
+                f"border: 1px solid {BORDER}; padding: 6px 10px; font-size: 12px; text-align: left; }}"
+                f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT_PRIMARY}; }}"
+                f"QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}"
+            )
+            btn.clicked.connect(lambda checked, idx=ci: on_choice(idx))
+            layout.addWidget(btn)
+            btns.append(btn)
+
+        return card
+
     def _delete_concept(self, name: str):
         error_store.delete_knowledge_point(name)
         self._refresh()
         clear_layout(self._detail_layout)
         self._detail_label.setText(tr("Select a concept"))
 
+    def _auto_explain_new(self):
+        """Auto-fetch AI explanation for the first concept without one."""
+        if self._graph_view:
+            return
+        if hasattr(self, '_auto_explain_worker') and self._auto_explain_worker and self._auto_explain_worker.isRunning():
+            return
+        for kp in self._all_kps:
+            if not kp.get("description"):
+                name = kp["name"]
+                self._auto_explain_worker = AIExplainWorker(EXPLAIN_PROMPT, f"请解释 C++ 知识点：{name}")
+                def make_handler(concept_name=name):
+                    def on_done(text):
+                        error_store.set_knowledge_description(concept_name, text)
+                        if self._selected_node == concept_name:
+                            self._show_concept_detail(concept_name)
+                    return on_done
+                self._auto_explain_worker.finished.connect(make_handler())
+                self._auto_explain_worker.start()
+                break
+
+    def _generate_quiz_for_concept(self, name: str, btn: QPushButton):
+        kps = error_store.get_knowledge_points()
+        desc = next((k.get("description", "") for k in kps if k["name"] == name), "")
+        if not desc:
+            self._detail_layout.addWidget(mlabel(tr("Please explain the concept with AI first."), TEXT_SECONDARY, 11))
+            return
+
+        btn.setEnabled(False)
+        btn.setText(tr("Generating quiz..."))
+        prompt = """你是 C++ 出题助手。根据以下知识点解释，出 2-3 道单选题。
+输出 JSON：["question","options":["A","B","C","D"],"answer":0,"explanation":"..."]
+直接输出 JSON 数组。"""
+        msg = f"知识点：{name}\n\n解释：{desc[:1500]}"
+
+        from app.services.ai_explain_worker import AIExplainWorker
+        self._quiz_worker = AIExplainWorker(prompt, msg)
+
+        def on_done(text):
+            import json
+            if not shiboken6.isValid(btn):
+                return
+            btn.setEnabled(True)
+            btn.setText(tr("Quiz Me"))
+            try:
+                text = text.strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                quizzes = json.loads(text)
+                if isinstance(quizzes, dict):
+                    quizzes = quizzes.get("quiz_questions", [quizzes])
+                if not isinstance(quizzes, list):
+                    quizzes = [quizzes]
+            except json.JSONDecodeError:
+                quizzes = []
+
+            self._detail_layout.addSpacing(6)
+            self._detail_layout.addWidget(mlabel(tr("Quiz"), ACCENT, 13, True))
+            for i, q in enumerate(quizzes):
+                self._detail_layout.addWidget(self._build_interactive_quiz(i + 1, q, name))
+            self._detail_layout.addStretch()
+
+        def on_err(msg):
+            if not shiboken6.isValid(btn):
+                return
+            btn.setEnabled(True)
+            btn.setText(tr("Quiz Me"))
+
+        self._quiz_worker.finished.connect(on_done)
+        self._quiz_worker.error.connect(on_err)
+        self._quiz_worker.start()
+
     # ── Graph View ───────────────────────────────────────────────────────
 
     def _on_graph_node_clicked(self, name: str):
         self._show_concept_detail(name)
-        self._list_stack.show()
         self._search.hide()
-        self._graph_stack.setMaximumSize(16777215, 250)
+        self._stack.setCurrentWidget(self._list_stack)
         self._graph_timer.stop()
 
     def _build_graph(self):
         self._graph_timer.stop()
         self._sim_tick = 0
         for e, _, _ in self._graph_edges:
-            e.deleteLater()
+            if e.scene() is not None:
+                e.scene().removeItem(e)
         self._graph_edges.clear()
         for n in self._graph_nodes:
-            n.deleteLater()
+            if n.scene() is not None:
+                n.scene().removeItem(n)
         self._graph_nodes.clear()
         self._graph_scene.clear()
 

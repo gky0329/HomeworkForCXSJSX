@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QTextEdit, QDialog, QLineEdit,
-    QDialogButtonBox,
+    QDialogButtonBox, QComboBox, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -11,6 +11,7 @@ from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
+import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, SUCCESS_BG,
@@ -98,7 +99,12 @@ class ReviewPage(QWidget):
         self._save_timer.setInterval(600)
         self._save_timer.timeout.connect(self._flush_notes)
         self._pending_card_id: str = ""
+        self._hint_worker: AIExplainWorker | None = None
+        self._cls_worker: AIExplainWorker | None = None
+        self._current_deck: str = ""
         self._setup_ui()
+        self._auto_classify_uncategorized()
+        self._populate_deck_combo()
         self._load_cards()
 
     def _setup_ui(self):
@@ -108,6 +114,23 @@ class ReviewPage(QWidget):
         header = QHBoxLayout()
         self._header_label = mlabel(tr("Review"), STACK_BORDER, 18, True)
         header.addWidget(self._header_label)
+        header.addSpacing(12)
+
+        self._deck_combo = QComboBox()
+        self._deck_combo.setMinimumWidth(200)
+        self._deck_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._deck_combo.setStyleSheet(
+            f"QComboBox {{ background-color: transparent; color: {TEXT_PRIMARY}; "
+            f"border: none; border-bottom: 1px solid {BORDER}; padding: 4px 8px; font-size: 12px; }}"
+            f"QComboBox:focus {{ border-bottom: 1px solid {ACCENT}; }}"
+            f"QComboBox::drop-down {{ border: none; }}"
+            f"QComboBox QAbstractItemView {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
+            f"selection-background-color: {ACCENT}; "
+            f"padding: 6px 10px; min-height: 28px; outline: none; }}"
+        )
+        self._deck_combo.currentTextChanged.connect(self._on_deck_changed)
+        header.addWidget(self._deck_combo)
+
         header.addStretch()
 
         self._add_btn = QPushButton(tr("+ Add"))
@@ -135,12 +158,78 @@ class ReviewPage(QWidget):
         self._render_empty_or_card()
 
     def _load_cards(self):
-        self._cards = error_store.get_due_cards()
+        if self._current_deck:
+            self._cards = error_store.get_due_cards_by_deck(self._current_deck)
+        else:
+            self._cards = error_store.get_due_cards()
         if len(self._cards) > self._session_limit:
             self._cards = self._cards[:self._session_limit]
         self._current_idx = 0
         self._answer_revealed = False
         self._render_empty_or_card()
+
+    def _on_deck_changed(self, text: str):
+        if text == "All Decks":
+            text = ""
+        else:
+            # Strip count suffix e.g. "指针与内存 (3)" → "指针与内存"
+            idx = text.rfind(" (")
+            if idx > 0:
+                text = text[:idx]
+        self._current_deck = text
+        self._populate_deck_combo()
+        self._load_cards()
+
+    def _populate_deck_combo(self):
+        self._deck_combo.blockSignals(True)
+        self._deck_combo.clear()
+        self._deck_combo.addItem("All Decks")
+        due_all = len(error_store.get_due_cards())
+        if not self._current_deck:
+            self._deck_combo.setItemText(0, f"All Decks ({due_all})")
+        for deck in error_store.get_decks():
+            count = len(error_store.get_due_cards_by_deck(deck))
+            self._deck_combo.addItem(f"{deck} ({count})")
+        if self._current_deck:
+            for i in range(self._deck_combo.count()):
+                if self._current_deck in self._deck_combo.itemText(i):
+                    self._deck_combo.setCurrentIndex(i)
+                    break
+        self._deck_combo.blockSignals(False)
+
+    def _auto_classify_uncategorized(self):
+        """Use AI to classify cards without a deck."""
+        uncategorized = error_store.get_uncategorized_cards()
+        if not uncategorized:
+            self._populate_deck_combo()
+            return
+        batch = uncategorized[:5]
+        kps = list(set(e.get("knowledge_point", "") for e in batch if e.get("knowledge_point")))
+        if not kps:
+            return
+
+        prompt = """你是 C++ 知识分类助手。将以下知识点归入最合适的类别。
+可用类别：指针与内存、面向对象、STL容器、基础语法、其他
+对于每个知识点，只输出 "知识点名 -> 类别"，每行一个。不要任何解释。"""
+        msg = "\n".join(kps)
+
+        def on_done(text):
+            mapping = {}
+            for line in text.strip().splitlines():
+                if "->" in line:
+                    parts = line.split("->")
+                    if len(parts) == 2:
+                        mapping[parts[0].strip()] = parts[1].strip()
+            for entry in batch:
+                kp = entry.get("knowledge_point", "")
+                deck = mapping.get(kp, "")
+                if deck and deck in ("指针与内存", "面向对象", "STL容器", "基础语法", "其他"):
+                    error_store.update_deck(entry["id"], deck)
+            self._populate_deck_combo()
+
+        self._cls_worker = AIExplainWorker(prompt, msg)
+        self._cls_worker.finished.connect(on_done)
+        self._cls_worker.start()
 
     def _render_empty_or_card(self):
         self._clear_card_area()
@@ -177,6 +266,7 @@ class ReviewPage(QWidget):
                 ReviewPage._recursive_delete_layout(child.layout())
             elif child.widget():
                 child.widget().deleteLater()
+        layout.deleteLater()
 
     def _render_card(self, card: dict):
         n_cards = len(self._cards)
@@ -187,12 +277,13 @@ class ReviewPage(QWidget):
         self._answer_revealed = False
 
         main = QVBoxLayout()
-        main.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         c = QFrame()
         c.setObjectName("reviewCard")
         c.setStyleSheet(CARD_STYLE)
         c.setMaximumWidth(680)
+        c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         v = QVBoxLayout(c)
         v.setContentsMargins(28, 24, 28, 24)
         v.setSpacing(16)
@@ -200,21 +291,23 @@ class ReviewPage(QWidget):
         kp = card.get("knowledge_point", "")
         if kp:
             kpl = QLabel(kp)
+            kpl.setWordWrap(True)
+            kpl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
             kpl.setStyleSheet(
                 f"color: {HEAP_BORDER}; font-size: 12px; font-weight: bold; "
                 f"background-color: #3D2916; "
-                f"padding: 4px 12px;"
+                f"padding: 6px 14px;"
             )
-            kpl.setWordWrap(True)
             v.addWidget(kpl, alignment=Qt.AlignmentFlag.AlignCenter)
 
         qtext = card.get("question", "")
         ql = QLabel(qtext)
         ql.setWordWrap(True)
         ql.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ql.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         ql.setStyleSheet(
             f"color: {TEXT_PRIMARY}; font-size: 22px; font-weight: 700; "
-            f"padding: 8px 0; line-height: 1.4;"
+            f"padding: 8px 0;"
         )
         v.addWidget(ql)
 
@@ -260,7 +353,7 @@ class ReviewPage(QWidget):
         v.addWidget(reveal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._reveal_area = QVBoxLayout()
-        v.addLayout(self._reveal_area)
+        v.addLayout(self._reveal_area, 1)
 
         main.addWidget(c, alignment=Qt.AlignmentFlag.AlignCenter)
         self._card_area.addLayout(main)
@@ -282,11 +375,15 @@ class ReviewPage(QWidget):
                 f"知识点：{kp_text}\n题目：{q_text}\n请给提示",
             )
             def on_done(text):
+                if not shiboken6.isValid(btn) or not shiboken6.isValid(label):
+                    return
                 btn.setEnabled(True)
                 btn.setText(f"💡 {tr('Hint')}")
-                label.setText(f"💡 {tr('Hint: {text}', text=text)}")
+                label.setText(f"💡 {tr('Hint: {hint}', hint=text)}")
                 label.setVisible(True)
             def on_err(msg):
+                if not shiboken6.isValid(btn):
+                    return
                 btn.setEnabled(True)
                 btn.setText(f"💡 {tr('Hint (failed)')}")
             self._hint_worker.finished.connect(on_done)
@@ -302,9 +399,15 @@ class ReviewPage(QWidget):
         clear_layout(self._reveal_area)
 
         correct = card.get("correct_answer", "")
-        al = QLabel(tr("Correct: {answer}", answer=correct))
+
+        if correct.startswith("## ") or "```" in correct or "<br>" in correct:
+            from app.ui.pages.knowledge_page import _md_to_html
+            html = _md_to_html(correct)
+            al = QLabel(html)
+            al.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            al = QLabel(tr("Correct: {answer}", answer=correct))
         al.setWordWrap(True)
-        al.setAlignment(Qt.AlignmentFlag.AlignCenter)
         al.setStyleSheet(
             f"color: {SUCCESS}; font-size: 17px; font-weight: 700; "
             f"background-color: {SUCCESS_BG}; "
@@ -366,6 +469,7 @@ class ReviewPage(QWidget):
             self._current_idx = 0
         self._notes_edit = None
         self._pending_card_id = ""
+        self._populate_deck_combo()
         self._render_empty_or_card()
 
     def _on_add_error(self):
@@ -397,10 +501,12 @@ class ReviewPage(QWidget):
             kp = kp_edit.text().strip() or tr("manual")
             q = q_edit.toPlainText().strip() or tr("Manual entry")
             a = a_edit.text().strip() or ""
-            error_store.add_error(kp, q, "", a, "")
-            self._load_cards()
+            error_store.add_error(kp, q, "", a, "", deck=error_store.suggest_deck(kp))
+            self._populate_deck_combo()
+        self._load_cards()
 
     def _refresh(self):
+        self._populate_deck_combo()
         self._load_cards()
 
     def retranslate_ui(self):
