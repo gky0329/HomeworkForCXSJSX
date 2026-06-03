@@ -474,11 +474,7 @@ class KnowledgePage(QWidget):
     def _build_graph(self):
         self._graph_timer.stop()
         self._sim_tick = 0
-        for e, _, _ in self._graph_edges:
-            e.deleteLater()
         self._graph_edges.clear()
-        for n in self._graph_nodes:
-            n.deleteLater()
         self._graph_nodes.clear()
         self._graph_scene.clear()
 

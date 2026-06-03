@@ -28,6 +28,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_cells: list[QGraphicsRectItem] = []
         self._array_value_labels: list[QGraphicsTextItem] = []
         self._array_index_labels: list[QGraphicsTextItem] = []
+        self._text_items: list[QGraphicsTextItem] = []
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -51,10 +52,15 @@ class HeapItem(QGraphicsRectItem):
         self._array_cells.clear()
         self._array_value_labels.clear()
         self._array_index_labels.clear()
+        self._text_items.clear()
         for child in list(self.childItems()):
             child.setParentItem(None)
             if child.scene() is not None:
                 child.scene().removeItem(child)
+
+    def _keep_text(self, item: QGraphicsTextItem) -> QGraphicsTextItem:
+        self._text_items.append(item)
+        return item
 
     def update_block(self, block: HeapBlock):
         self.block = block
@@ -82,19 +88,19 @@ class HeapItem(QGraphicsRectItem):
         self.prepareGeometryChange()
         self.setRect(0, 0, max(self.WIDTH, width), max(self.HEIGHT, height))
 
-        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label = self._keep_text(QGraphicsTextItem(self))
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
         self._addr_label.setFont(addr_font)
         self._addr_label.setPlainText(f"[{block.address}]")
         self._addr_label.setPos(4, 2)
 
-        self._type_label = QGraphicsTextItem(self)
+        self._type_label = self._keep_text(QGraphicsTextItem(self))
         self._type_label.setDefaultTextColor(QColor(HEAP_TEXT))
         self._type_label.setFont(type_font)
         self._type_label.setPlainText(block.type)
         self._type_label.setPos(4, 18)
 
-        self._value_label = QGraphicsTextItem(self)
+        self._value_label = self._keep_text(QGraphicsTextItem(self))
         self._value_label.setDefaultTextColor(QColor(HEAP_TEXT))
         self._value_label.setFont(value_font)
         self._value_label.setPlainText(block.value)
@@ -118,7 +124,7 @@ class HeapItem(QGraphicsRectItem):
         self.prepareGeometryChange()
         self.setRect(0, 0, w, h)
 
-        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label = self._keep_text(QGraphicsTextItem(self))
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
         self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
         self._addr_label.setPlainText(f"[{block.address}] {block.type}")
@@ -126,10 +132,10 @@ class HeapItem(QGraphicsRectItem):
 
         y = 20
         if block.container_size is not None and block.container_capacity is not None:
-            sz_label = QGraphicsTextItem(
+            sz_label = self._keep_text(QGraphicsTextItem(
                 f"  size={block.container_size} cap={block.container_capacity}",
                 self
-            )
+            ))
             sz_label.setDefaultTextColor(QColor("#DCDCAA"))
             sz_label.setFont(index_font)
             sz_label.setPos(4, y)
@@ -146,13 +152,13 @@ class HeapItem(QGraphicsRectItem):
             cell.setBrush(QBrush(QColor("#4A3626")))
             self._array_cells.append(cell)
 
-            value_label = QGraphicsTextItem("", cell)
+            value_label = self._keep_text(QGraphicsTextItem("", cell))
             value_label.setDefaultTextColor(QColor(STACK_VAR_TEXT))
             value_label.setFont(value_font)
             value_label.setPlainText(str(elem.value))
             self._array_value_labels.append(value_label)
 
-            index_label = QGraphicsTextItem("", cell)
+            index_label = self._keep_text(QGraphicsTextItem("", cell))
             index_label.setDefaultTextColor(QColor("#DCDCAA"))
             index_label.setFont(index_font)
             index_label.setPlainText(f"[{elem.index}]")
@@ -218,29 +224,33 @@ class HeapItem(QGraphicsRectItem):
         }
 
     def _build_struct(self, block: HeapBlock):
-        member_h = 20
         font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
+        member_h = QFontMetricsF(font).lineSpacing() + 6
+        title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
+        members = list(block.members)
         w = max(
-            _text_width(f"[{block.address}] {block.type}", QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)),
-            max((_text_width(f"  .{m.name}: {m.type} = {m.value}", font) for m in block.members), default=0.0),
+            _text_width(f"[{block.address}] {block.type}", title_font),
+            max((_text_width(f"  .{m.name}: {m.type} = {m.value}", font) for m in members), default=0.0),
         ) + 12
-        h = 24 + len(block.members) * member_h + 6
+        h = 24 + len(members) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(160, w), h)
 
-        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label = self._keep_text(QGraphicsTextItem(self))
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
-        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setFont(title_font)
         self._addr_label.setPlainText(f"[{block.address}] {block.type}")
         self._addr_label.setPos(4, 2)
 
-        for i, m in enumerate(block.members):
-            label = QGraphicsTextItem(
+        title_bottom = 2 + self._addr_label.boundingRect().height() + 4
+
+        for i, m in enumerate(members):
+            label = self._keep_text(QGraphicsTextItem(
                 f"  .{m.name}: {m.type} = {m.value}", self
-            )
+            ))
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
-            label.setPos(6, 20 + i * member_h)
+            label.setPos(6, title_bottom + i * member_h)
             self._value_label = label
 
         self._refresh_geometry()
@@ -248,6 +258,10 @@ class HeapItem(QGraphicsRectItem):
     def _build_object(self, block: HeapBlock):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
+        title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
+        members = [m for m in block.members if m.name != "_vptr"]
+        body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
+        member_h = QFontMetricsF(member_font).lineSpacing() + 6
         extra_lines = 0
         if block.is_destroyed:
             extra_lines += 1
@@ -257,10 +271,9 @@ class HeapItem(QGraphicsRectItem):
             extra_lines += 1
         if block.virtual_methods:
             extra_lines += 1
-        n_members = len([m for m in block.members if m.name != "_vptr"])
-        member_h = 18
+        n_members = len(members)
         width_candidates = [
-            _text_width(f"[{block.address}] {block.class_name or block.type}", QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)),
+            _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
         if block.is_destroyed:
             width_candidates.append(_text_width("  💀 destroyed", body_font))
@@ -270,52 +283,48 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width(f"  ⬆ extends {', '.join(block.base_classes)}", body_font))
         if block.virtual_methods:
             width_candidates.append(_text_width(f"  [vtable] {' '.join(block.virtual_methods)}", body_font))
-        for m in block.members:
-            if m.name == "_vptr":
-                continue
+        for m in members:
             width_candidates.append(_text_width(f"  .{m.name}: {m.type} = {m.value}", member_font))
         w = max(width_candidates) + 12
-        h = 26 + extra_lines * 16 + max(1, n_members) * member_h + 6
+        h = 26 + extra_lines * body_line_h + max(1, n_members) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, w), h)
 
-        self._addr_label = QGraphicsTextItem(self)
+        self._addr_label = self._keep_text(QGraphicsTextItem(self))
         self._addr_label.setDefaultTextColor(QColor(HEAP_BORDER))
-        self._addr_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold))
+        self._addr_label.setFont(title_font)
         self._addr_label.setPlainText(f"[{block.address}] {block.class_name or block.type}")
         self._addr_label.setPos(4, 2)
 
-        y = 20
+        y = 2 + self._addr_label.boundingRect().height() + 4
         if block.is_destroyed:
-            badge = QGraphicsTextItem("  💀 destroyed", self)
+            badge = self._keep_text(QGraphicsTextItem("  💀 destroyed", self))
             badge.setDefaultTextColor(QColor(EDGE_DANGLING))
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(6, y)
-            y += 16
+            y += body_line_h
         elif block.is_constructed:
-            badge = QGraphicsTextItem("  ⚡ constructed", self)
+            badge = self._keep_text(QGraphicsTextItem("  ⚡ constructed", self))
             badge.setDefaultTextColor(QColor("#4EC9B0"))
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(6, y)
-            y += 16
+            y += body_line_h
         if block.base_classes:
-            bl = QGraphicsTextItem(f"  ⬆ extends {', '.join(block.base_classes)}", self)
+            bl = self._keep_text(QGraphicsTextItem(f"  ⬆ extends {', '.join(block.base_classes)}", self))
             bl.setDefaultTextColor(QColor("#CE9178"))
             bl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             bl.setPos(6, y)
-            y += 16
+            y += body_line_h
 
         if block.virtual_methods:
-            vl = QGraphicsTextItem(f"  [vtable] {' '.join(block.virtual_methods)}", self)
+            vl = self._keep_text(QGraphicsTextItem(f"  [vtable] {' '.join(block.virtual_methods)}", self))
             vl.setDefaultTextColor(QColor("#DCDCAA"))
             vl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             vl.setPos(6, y)
-            y += 16
+            y += body_line_h
 
-        for m in block.members:
-            if m.name == "_vptr":
-                continue
-            label = QGraphicsTextItem(f"  .{m.name}: {m.type} = {m.value}", self)
+        for m in members:
+            label = self._keep_text(QGraphicsTextItem(f"  .{m.name}: {m.type} = {m.value}", self))
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, y)
@@ -392,19 +401,26 @@ class HeapItem(QGraphicsRectItem):
 
     def _refresh_struct_geometry(self, block: HeapBlock):
         font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
+        title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
+        members = list(block.members)
+        member_h = QFontMetricsF(font).lineSpacing() + 6
         width = max(
-            _text_width(f"[{block.address}] {block.type}", QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)),
-            max((_text_width(f"  .{m.name}: {m.type} = {m.value}", font) for m in block.members), default=0.0),
+            _text_width(f"[{block.address}] {block.type}", title_font),
+            max((_text_width(f"  .{m.name}: {m.type} = {m.value}", font) for m in members), default=0.0),
         ) + 12
-        height = 24 + len(block.members) * 20 + 6
+        height = 24 + len(members) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(160, width), height)
 
     def _refresh_object_geometry(self, block: HeapBlock):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
+        title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
+        members = [m for m in block.members if m.name != "_vptr"]
+        body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
+        member_h = QFontMetricsF(member_font).lineSpacing() + 6
         width_candidates = [
-            _text_width(f"[{block.address}] {block.class_name or block.type}", QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)),
+            _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
         if block.is_destroyed:
             width_candidates.append(_text_width("  💀 destroyed", body_font))
@@ -414,12 +430,10 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width(f"  ⬆ extends {', '.join(block.base_classes)}", body_font))
         if block.virtual_methods:
             width_candidates.append(_text_width(f"  [vtable] {' '.join(block.virtual_methods)}", body_font))
-        for m in block.members:
-            if m.name == "_vptr":
-                continue
+        for m in members:
             width_candidates.append(_text_width(f"  .{m.name}: {m.type} = {m.value}", member_font))
         width = max(width_candidates) + 12
-        n_members = len([m for m in block.members if m.name != "_vptr"])
+        n_members = len(members)
         extra_lines = 0
         if block.is_destroyed or block.is_constructed:
             extra_lines += 1
@@ -427,7 +441,7 @@ class HeapItem(QGraphicsRectItem):
             extra_lines += 1
         if block.virtual_methods:
             extra_lines += 1
-        height = 26 + extra_lines * 16 + max(1, n_members) * 18 + 6
+        height = 26 + extra_lines * body_line_h + max(1, n_members) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, width), height)
 
@@ -461,6 +475,7 @@ class HeapItem(QGraphicsRectItem):
                 self._on_item_moved(self, 'resize')
             except TypeError:
                 self._on_item_moved(self)
+
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:

@@ -30,14 +30,14 @@
   {
     "name": "标准输入输出流",
     "source": "oj_analysis",
-    "count": 4,
+    "count": 5,
     "timestamp": "2026-05-18T15:40:57.815722+00:00",
     "description": "## 概念\n标准输入输出流是 C++ 中用于控制台输入和输出的预定义对象，包括 `cin`（输入）、`cout`（输出）、`cerr`（错误输出）和 `clog`（日志输出），它们定义在 `<iostream>` 头文件中。\n\n## 内存模型\n这些流对象是全局静态实例，在程序启动时初始化，生命周期贯穿整个程序运行。它们封装了缓冲区，数据通过操作系统文件描述符与标准输入/输出设备交互，缓冲区通常分配在堆上。\n\n## 示例\n```cpp\n#include <iostream>\n#include <string>\n\nint main() {\n    std::string name;\n    int age;\n\n    std::cout << \"请输入姓名和年龄: \";\n    std::cin >> name >> age;\n\n    std::cout << \"姓名: \" << name << \", 年龄: \" << age << std::endl;\n    std::cerr << \"这是一个错误消息\" << std::endl;\n\n    return 0;\n}\n```\n\n## 常见错误\n- 未包含 `<iostream>` 头文件直接使用 `cin`/`cout`，导致编译错误。\n- 使用 `cin` 读取字符串时遇到空格会停止，导致输入不完整，应使用 `std::getline()` 读取整行。"
   },
   {
     "name": "变量声明与初始化",
     "source": "oj_analysis",
-    "count": 2,
+    "count": 3,
     "timestamp": "2026-05-18T15:40:57.818187+00:00",
     "description": "## 概念\n变量声明是告知编译器变量的名称和类型，而初始化是为变量赋予初始值。声明不分配存储空间（除非是定义），初始化则在定义时完成。\n\n## 内存模型\n局部变量在栈上分配，生命周期限于所在作用域；全局或静态变量在静态存储区分配，生命周期贯穿程序运行。动态分配（如`new`）的对象在堆上，需手动管理。\n\n## 示例\n```cpp\n#include <iostream>\nint main() {\n    int a;          // 声明（未初始化，值未定义）\n    int b = 10;     // 声明并初始化（拷贝初始化）\n    int c{20};      // 列表初始化（C++11起，防止窄化转换）\n    auto d = 30;    // 类型推导初始化\n    std::cout << b << \" \" << c << \" \" << d;\n    return 0;\n}\n```\n\n## 常见错误\n- 使用未初始化的变量：局部变量默认不初始化，读取其值导致未定义行为。\n- 混淆声明与定义：`extern int x;` 是声明，`int x;` 是定义（分配空间）。"
   },
@@ -51,7 +51,7 @@
   {
     "name": "基本输入输出",
     "source": "oj_analysis",
-    "count": 1,
+    "count": 2,
     "timestamp": "2026-05-20T03:13:43.322632+00:00",
     "description": "## 概念\nC++ 基本输入输出通过标准库中的 `iostream` 头文件实现，使用 `cin` 对象从键盘读取数据，使用 `cout` 对象向屏幕输出数据。\n\n## 内存模型\n`cin` 和 `cout` 是全局对象，存储在静态存储区，程序启动时初始化，程序结束时销毁。输入输出操作涉及缓冲区，数据先暂存于内存缓冲区，再通过系统调用与外部设备交互。\n\n## 示例\n```cpp\n#include <iostream>\nusing namespace std;\n\nint main() {\n    int age;\n    cout << \"请输入年龄: \";\n    cin >> age;\n    cout << \"你的年龄是: \" << age << endl;\n    return 0;\n}\n```\n\n## 常见错误\n- 忘记包含 `#include <iostream>` 头文件，导致 `cin` 和 `cout` 未定义。\n- 使用 `cin` 读取字符串时遇到空格会停止，导致输入不完整，应改用 `getline()` 函数。"
   },
@@ -79,7 +79,7 @@
   {
     "name": "指针",
     "source": "code_editor",
-    "count": 33,
+    "count": 46,
     "timestamp": "2026-05-25T03:56:52.520768+00:00",
     "description": "## 概念\n指针是存储另一个变量内存地址的变量，通过它可以间接访问和操作该地址处的数据。\n\n## 内存模型\n指针本身存储在栈上（若为局部变量），其值为堆或栈上某个对象的地址。指针的生命周期由其作用域决定，但指向的对象可能提前销毁，导致悬空指针。\n\n## 示例\n```cpp\n#include <iostream>\nint main() {\n    int a = 42;\n    int* p = &a;  // p 存储 a 的地址\n    std::cout << *p;  // 输出 42\n    *p = 100;         // 通过指针修改 a\n    std::cout << a;   // 输出 100\n}\n```\n\n## 常见错误\n- 解引用未初始化的指针：访问野指针导致未定义行为或程序崩溃。\n- 忘记释放动态分配的内存：使用 `new` 后未 `delete`，造成内存泄漏。"
   },

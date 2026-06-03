@@ -72,7 +72,7 @@
 
 ## 修复日志
 
-- 2026-06-03: Loading overlay 耗时改为 100ms 刷新一次，显示更平滑；修复数组示例中栈数组高亮矩形与堆数组 cell/value/index 的定位、尺寸与单步更新问题
+- 2026-06-03: Loading overlay 耗时改为 100ms 刷新一次，显示更平滑；修复数组示例中栈数组高亮矩形与堆数组 cell/value/index 的定位、尺寸与单步更新问题；修复知识图谱刷新时对 QGraphicsItem 错误调用 `deleteLater()` 的崩溃；修复 HeapItem 未保存所有 QGraphicsTextItem 引用导致 object/struct 首个成员（如 `.x`）消失的问题
 - 2026-05-30: Edge 路由优化（近距离左出左入，Z-order=1）；Auto-play + line highlight；Auto Fit checkbox tooltip
 - 2026-05-25: 渲染流程复用 + 首次自动 Fit + 堆图元 index 缓存 + Code Editor Auto Fit 选项
 - 2026-05-25: 修复堆图元地址未更新 + 透明度未恢复

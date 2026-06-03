@@ -378,7 +378,7 @@ class OJPage(QWidget):
         )
         kp_name = kp.get("name", "")
         kp_expl = kp.get("explanation", "")
-        def save_and_feedback(btn=review_btn, n=kp_name, e=kp_expl):
+        def save_and_feedback(checked=False, btn=review_btn, n=kp_name, e=kp_expl):
             error_store.add_error(
                 knowledge_point=n, question="Manual review",
                 user_answer="Needs practice", correct_answer=e,
