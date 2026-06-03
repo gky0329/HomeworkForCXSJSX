@@ -157,7 +157,7 @@ TRANSLATIONS = {
         "Come back later or add errors via OJ / File Import": "稍后再来，或通过 OJ / 文件导入添加错题",
         "Your answer: {answer}": "你的答案：{answer}",
         "Hint": "提示",
-        "Hint: {text}": "提示：{text}",
+        "Hint: {hint}": "提示：{hint}",
         "Thinking...": "思考中...",
         "Hint (failed)": "提示（失败）",
         "Show Answer": "显示答案",

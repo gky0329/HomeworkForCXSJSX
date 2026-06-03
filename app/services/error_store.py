@@ -46,8 +46,25 @@ def _save(path: Path, data: list):
     os.replace(tmp_path, path)
 
 
+_DECK_KEYWORDS = {
+    "指针与内存": ["指针", "堆", "内存", "new", "delete", "smart", "引用", "地址", "malloc", "free"],
+    "面向对象": ["构造", "析构", "class", "继承", "多态", "虚函数", "vtable", "lambda", "函数对象", "模板"],
+    "STL容器": ["vector", "map", "set", "list", "queue", "stack", "deque", "string", "pair", "iterator", "容器", "数组"],
+    "基础语法": ["变量", "类型", "int", "输入", "输出", "运算符", "循环", "条件", "函数", "定义", "声明", "初始化", "iostream", "cin", "cout", "基本", "算术"],
+}
+
+def suggest_deck(name: str) -> str:
+    low = name.lower()
+    for deck, keywords in _DECK_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in low:
+                return deck
+    return "其他"
+
+
 def add_error(knowledge_point: str, question: str,
-              user_answer: str, correct_answer: str, context: str = ""):
+              user_answer: str, correct_answer: str, context: str = "",
+              deck: str = ""):
     with _lock:
         errors = _load(ERRORS_PATH)
         now = datetime.now(timezone.utc)
@@ -58,6 +75,7 @@ def add_error(knowledge_point: str, question: str,
             "user_answer": user_answer,
             "correct_answer": correct_answer,
             "context": context,
+            "deck": deck,
             "timestamp": now.isoformat(),
             "reviewed": False,
             "review_count": 0,
@@ -95,6 +113,38 @@ def get_due_cards() -> list:
         errors = _load(ERRORS_PATH)
         return [e for e in errors
                 if e.get("next_review", "") <= now]
+
+
+def get_due_cards_by_deck(deck: str) -> list:
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        return [e for e in errors
+                if e.get("next_review", "") <= now
+                and e.get("deck", "") == deck]
+
+
+def get_decks() -> list[str]:
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        decks = sorted(set(e.get("deck", "") for e in errors if e.get("deck")))
+        return decks
+
+
+def update_deck(error_id: str, deck: str):
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        for e in errors:
+            if e.get("id") == error_id:
+                e["deck"] = deck
+                _save(ERRORS_PATH, errors)
+                return
+
+
+def get_uncategorized_cards() -> list:
+    with _lock:
+        errors = _load(ERRORS_PATH)
+        return [e for e in errors if not e.get("deck")]
 
 
 def schedule_review(error_id: str, quality: int):

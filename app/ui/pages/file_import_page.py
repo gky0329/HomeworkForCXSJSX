@@ -109,6 +109,7 @@ class FileImportPage(QWidget):
         self._config_path = config_path
         self._file_text = ""
         self._worker: ProcessWorker | None = None
+        self._kps_data: list[dict] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -264,6 +265,7 @@ class FileImportPage(QWidget):
 
         kps = data.get("knowledge_points", [])
         quizzes = data.get("quiz_questions", [])
+        self._kps_data = kps
 
         self._status.setText(
             tr("Done: {kps} knowledge points, {quizzes} questions", kps=len(kps), quizzes=len(quizzes))
@@ -291,6 +293,17 @@ class FileImportPage(QWidget):
 
             for i, q in enumerate(quizzes):
                 self._result_layout.addWidget(self._build_quiz_card(i + 1, q))
+
+        if kps:
+            gen_quiz_btn = QPushButton(tr("Generate Quiz Questions"))
+            gen_quiz_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
+                f"padding: 8px 16px; font-size: 12px; margin: 8px 0; }}"
+                f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
+            )
+            gen_quiz_btn.clicked.connect(self._on_generate_quiz)
+            self._gen_quiz_btn = gen_quiz_btn
+            self._result_layout.addWidget(gen_quiz_btn)
 
         self._result_layout.addStretch()
 
@@ -407,7 +420,7 @@ class FileImportPage(QWidget):
                 result_label.setText(
                     "✗ " + tr(
                         "Wrong - correct answer: {answer}",
-                        answer=f"{labels[answer_idx]}) {options[answer_idx]}",
+                        answer=f"{labels[answer_idx]}) {options[answer_idx]}" if 0 <= answer_idx < len(options) else "?",
                     )
                 )
                 result_label.setStyleSheet(
@@ -422,21 +435,29 @@ class FileImportPage(QWidget):
                     f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
                 )
                 q_text = q.get("question", "")
-                def save_and_feedback(btn=wrong_btn, q_text=q_text, a_idx=answer_idx, opts=options, lbl=labels, ci=choice_idx):
+                kp_name = q.get("knowledge_point", "quiz")
+                opts = options
+                lbl = labels
+                a_idx = answer_idx
+                ci = choice_idx
+                def save_and_feedback():
+                    opts_text = "\n".join(f"  {lbl[i]}) {opts[i]}" for i in range(len(opts)))
+                    question_full = f"{q_text}\n\n{opts_text}"
                     error_store.add_error(
-                        knowledge_point="quiz",
-                        question=q_text,
-                        user_answer=lbl[ci] if ci < len(lbl) else "?",
-                        correct_answer=opts[a_idx] if 0 <= a_idx < len(opts) else "?",
+                        knowledge_point=kp_name,
+                        question=question_full,
+                        user_answer=f"{lbl[ci]}) {opts[ci]}" if ci < len(opts) else "?",
+                        correct_answer=f"{lbl[a_idx]}) {opts[a_idx]}" if 0 <= a_idx < len(opts) else "?",
+                        deck=error_store.suggest_deck(kp_name),
                     )
-                    btn.setText("✓ " + tr("Added"))
-                    btn.setStyleSheet(
+                    wrong_btn.setText("✓ " + tr("Added"))
+                    wrong_btn.setStyleSheet(
                         f"QPushButton {{ background-color: #1A3A2A; "
                         f"color: #4EC9B0; border: 1px solid #4EC9B0; "
                         f"padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
                     )
-                    btn.setEnabled(False)
-                wrong_btn.clicked.connect(save_and_feedback)
+                    wrong_btn.setEnabled(False)
+                wrong_btn.clicked.connect(lambda: save_and_feedback())
                 layout.addWidget(wrong_btn)
 
             result_label.setVisible(True)
@@ -478,6 +499,64 @@ class FileImportPage(QWidget):
 
     def _clear_results(self):
         clear_layout(self._result_layout)
+
+    def _on_generate_quiz(self):
+        if not self._kps_data:
+            self._status.setText(tr("No knowledge points to generate quizzes from"))
+            return
+        self._process_btn.setEnabled(False)
+        self._gen_quiz_btn.setEnabled(False)
+        self._status.setText(tr("Generating quiz questions..."))
+        kps_text = "\n".join(
+            f"{kp.get('name', '')}: {kp.get('explanation', '')[:200]}"
+            for kp in self._kps_data
+        )
+
+        quiz_prompt = """你是 C++ 出题助手。根据以下知识点，生成 3-5 道单选题。
+输出 JSON：{ "quiz_questions": [{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"...","knowledge_point":"知识点名"}] }
+直接输出 JSON，不要任何解释。"""
+        msg = f"知识点列表：\n{kps_text}"
+
+        from app.services.ai_explain_worker import AIExplainWorker
+        if hasattr(self, '_quiz_worker') and self._quiz_worker is not None and self._quiz_worker.isRunning():
+            try:
+                self._quiz_worker.finished.disconnect(self._on_quiz_result)
+                self._quiz_worker.error.disconnect(self._on_quiz_error)
+            except Exception:
+                pass
+            self._quiz_worker.quit()
+            self._quiz_worker.wait(1000)
+        self._quiz_worker = AIExplainWorker(quiz_prompt, msg)
+        self._quiz_worker.finished.connect(self._on_quiz_result)
+        self._quiz_worker.error.connect(self._on_quiz_error)
+        self._quiz_worker.start()
+
+    def _on_quiz_result(self, text: str):
+        import json
+        self._process_btn.setEnabled(True)
+        if hasattr(self, '_gen_quiz_btn'):
+            self._gen_quiz_btn.setEnabled(True)
+        try:
+            data = json.loads(text.strip())
+        except json.JSONDecodeError:
+            self._status.setText(tr("Quiz generation returned invalid JSON"))
+            return
+        quizzes = data.get("quiz_questions", [])
+        self._status.setText(tr("Generated {n} quiz questions", n=len(quizzes)))
+        if quizzes:
+            section = QLabel(" " + tr("Generated Quizzes"))
+            section.setStyleSheet(
+                f"color: {HEAP_BORDER}; font-size: 15px; font-weight: bold; padding: 12px 0 4px 0;"
+            )
+            self._result_layout.addWidget(section)
+            for i, q in enumerate(quizzes):
+                self._result_layout.addWidget(self._build_quiz_card(i + 1, q))
+
+    def _on_quiz_error(self, msg: str):
+        self._process_btn.setEnabled(True)
+        if hasattr(self, '_gen_quiz_btn'):
+            self._gen_quiz_btn.setEnabled(True)
+        self._status.setText(tr("Quiz generation failed"))
 
     def retranslate_ui(self):
         self._type_label.setText(tr("File type:"))

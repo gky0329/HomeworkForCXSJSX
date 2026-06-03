@@ -7,11 +7,11 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QSplitter, QPlainTextEdit, QGraphicsView,
-    QGraphicsScene, QToolBar, QStatusBar, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QMenu, QTabWidget, QCheckBox, QComboBox, QSlider,
+    QGraphicsScene, QStatusBar, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QTabWidget, QCheckBox, QComboBox, QSlider,
 )
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer
-from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QAction, QMouseEvent
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent
 
 from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT, TEXT_PRIMARY, ACCENT
 from app.ui.pages.file_import_page import FileImportPage
@@ -40,11 +40,13 @@ SCENE_W = 1600
 SCENE_H = 2000
 
 TAB_STYLE = (
-    "QTabWidget::pane { border: none; background: #1E1E1E; }"
-    f"QTabBar::tab {{ background: #2D2D2D; color: {TEXT_SECONDARY}; padding: 8px 24px; "
-    f"border: none; border-bottom: 2px solid transparent; font-size: 13px; }}"
-    f"QTabBar::tab:selected {{ color: {TEXT_PRIMARY}; border-bottom: 2px solid {ACCENT}; }}"
-    f"QTabBar::tab:hover {{ color: {TEXT_PRIMARY}; }}"
+    f"QTabWidget::pane {{ border: none; background: {CANVAS_BG}; }}"
+    f"QTabBar::tab {{ background: transparent; color: {TEXT_SECONDARY}; "
+    f"padding: 10px 20px; margin: 4px 2px 0 2px; border: none; "
+    f"border-bottom: 3px solid transparent; font-size: 13px; font-weight: 600; }}"
+    f"QTabBar::tab:selected {{ color: {TEXT_PRIMARY}; border-bottom: 3px solid {ACCENT}; "
+    f"background: transparent; }}"
+    f"QTabBar::tab:hover:!selected {{ color: {TEXT_PRIMARY}; border-bottom: 3px solid {BORDER}; }}"
 )
 
 EXAMPLE_CODES = {
@@ -235,8 +237,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(tr("C++ Memory Visualizer"))
         self.setMinimumSize(1200, 700)
         self._setup_ui()
-        self._setup_toolbar()
-        self._setup_menubar()
         self._setup_shortcuts()
         self._setup_statusbar()
         self._setup_overlay()
@@ -267,6 +267,10 @@ class MainWindow(QMainWindow):
         self._home_tab_index = self._tabs.indexOf(self._home_tab)
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
+        self.btn_settings = QPushButton(tr("Settings"))
+        self.btn_settings.clicked.connect(self._on_api_settings)
+        self._tabs.setCornerWidget(self.btn_settings, Qt.Corner.TopRightCorner)
+
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -279,6 +283,68 @@ class MainWindow(QMainWindow):
         return self.home_page
 
     def _build_code_tab(self) -> QWidget:
+        header = QHBoxLayout()
+        header.setContentsMargins(8, 6, 8, 6)
+        header.setSpacing(6)
+
+        example_label = QLabel(tr("Example:"))
+        example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        header.addWidget(example_label)
+
+        self._example_combo = QComboBox()
+        for key in EXAMPLE_CODES:
+            self._example_combo.addItem(tr(key), key)
+        self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
+        self._example_combo.currentIndexChanged.connect(self._on_example_changed)
+        self._example_combo.setStyleSheet(
+            f"QComboBox {{ padding: 3px 6px; font-size: 12px; border: none; "
+            f"border-bottom: 1px solid {BORDER}; background: transparent; color: {TEXT_PRIMARY}; }}"
+            f"QComboBox:focus {{ border-bottom: 1px solid {ACCENT}; }}"
+            f"QComboBox::drop-down {{ border: none; width: 16px; }}"
+            f"QComboBox QAbstractItemView {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
+            f"selection-background-color: {ACCENT}; }}"
+        )
+        header.addWidget(self._example_combo)
+        header.addStretch()
+
+        self.btn_run = QPushButton(tr("Run"))
+        self.btn_run.setObjectName("run")
+        header.addWidget(self.btn_run)
+
+        self.btn_prev = QPushButton(tr("Prev"))
+        self.btn_prev.setEnabled(False)
+        header.addWidget(self.btn_prev)
+
+        self.btn_next = QPushButton(tr("Next"))
+        self.btn_next.setEnabled(False)
+        header.addWidget(self.btn_next)
+
+        self.btn_reset = QPushButton(tr("Reset"))
+        self.btn_reset.setEnabled(False)
+        header.addWidget(self.btn_reset)
+
+        self.btn_zoom_out = QPushButton("\u2212")
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_fit = QPushButton("\u21C5")
+        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_zoom_fit):
+            b.setFixedSize(28, 28)
+            b.setStyleSheet(ZOOM_BTN_STYLE)
+        self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
+        self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
+        self.btn_zoom_fit.setToolTip(tr("Fit to View"))
+        header.addWidget(self.btn_zoom_out)
+        header.addWidget(self.btn_zoom_in)
+        header.addWidget(self.btn_zoom_fit)
+
+        self.auto_fit_check = QCheckBox(tr("Auto Fit"))
+        self.auto_fit_check.setChecked(True)
+        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
+        header.addWidget(self.auto_fit_check)
+
+        self.step_label = QLabel(tr("Ready"))
+        self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; padding: 0 4px;")
+        header.addWidget(self.step_label)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(2)
 
@@ -294,6 +360,10 @@ class MainWindow(QMainWindow):
         self.canvas_scene.setBackgroundBrush(QColor(CANVAS_BG))
         self.canvas_scene.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.canvas_view.setScene(self.canvas_scene)
+
+        self.btn_zoom_in.clicked.connect(self.canvas_view.zoom_in)
+        self.btn_zoom_out.clicked.connect(self.canvas_view.zoom_out)
+        self.btn_zoom_fit.clicked.connect(self.canvas_view.zoom_fit)
 
         right_pane = QWidget()
         right_layout = QVBoxLayout(right_pane)
@@ -356,6 +426,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.addLayout(header, 0)
         layout.addWidget(splitter, 1)
         layout.addWidget(self.tracker_panel, 0)
         return tab
@@ -512,71 +583,6 @@ class MainWindow(QMainWindow):
             ),
         ])
 
-    def _setup_toolbar(self):
-        toolbar = QToolBar("Main")
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-
-        self._example_label = QLabel(tr("Example:"))
-        self._example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding-left: 4px;")
-        toolbar.addWidget(self._example_label)
-        self._example_combo = QComboBox()
-        for key in EXAMPLE_CODES:
-            self._example_combo.addItem(tr(key), key)
-        self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
-        self._example_combo.currentIndexChanged.connect(self._on_example_changed)
-        toolbar.addWidget(self._example_combo)
-        toolbar.addSeparator()
-
-        self.btn_run = QPushButton(tr("Run"))
-        self.btn_next = QPushButton(tr("Next Step"))
-        self.btn_prev = QPushButton(tr("Prev Step"))
-        self.btn_reset = QPushButton(tr("Reset"))
-        self.btn_run.setObjectName("run")
-        self.btn_next.setEnabled(False)
-        self.btn_prev.setEnabled(False)
-        self.btn_reset.setEnabled(False)
-
-        toolbar.addWidget(self.btn_run)
-        toolbar.addSeparator()
-        toolbar.addWidget(self.btn_prev)
-        toolbar.addWidget(self.btn_next)
-        toolbar.addSeparator()
-        toolbar.addWidget(self.btn_reset)
-        toolbar.addSeparator()
-
-        self.btn_zoom_out = QPushButton("\u2212")
-        self.btn_zoom_in = QPushButton("+")
-        self.btn_zoom_fit = QPushButton("\u21C5")
-        self.btn_zoom_out.setFixedWidth(32)
-        self.btn_zoom_in.setFixedWidth(32)
-        self.btn_zoom_fit.setFixedWidth(36)
-        self.btn_zoom_out.setStyleSheet(ZOOM_BTN_STYLE)
-        self.btn_zoom_in.setStyleSheet(ZOOM_BTN_STYLE)
-        self.btn_zoom_fit.setStyleSheet(ZOOM_BTN_STYLE)
-        self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
-        self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
-        self.btn_zoom_fit.setToolTip(tr("Fit to View"))
-        self.btn_zoom_in.clicked.connect(self.canvas_view.zoom_in)
-        self.btn_zoom_out.clicked.connect(self.canvas_view.zoom_out)
-        self.btn_zoom_fit.clicked.connect(self.canvas_view.zoom_fit)
-        toolbar.addWidget(self.btn_zoom_out)
-        toolbar.addWidget(self.btn_zoom_in)
-        toolbar.addWidget(self.btn_zoom_fit)
-
-        self.auto_fit_check = QCheckBox(tr("Auto Fit"))
-        self.auto_fit_check.setChecked(True)
-        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
-        toolbar.addWidget(self.auto_fit_check)
-
-        spacer = QWidget()
-        spacer.setFixedWidth(16)
-        toolbar.addWidget(spacer)
-
-        self.step_label = QLabel(tr("Ready"))
-        self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; padding: 0 8px;")
-        toolbar.addWidget(self.step_label)
-
     def _on_example_changed(self, index: int):
         key = self._example_combo.itemData(index)
         if key in EXAMPLE_CODES:
@@ -590,19 +596,28 @@ class MainWindow(QMainWindow):
         if self._overlay.isVisible():
             self._overlay.setGeometry(self.centralWidget().rect())
 
-    def _setup_menubar(self):
-        self._settings_menu = QMenu(tr("Settings"), self)
-        self._api_settings_action = QAction(tr("AI Settings..."), self)
-        self._api_settings_action.triggered.connect(self._on_api_settings)
-        self._settings_menu.addAction(self._api_settings_action)
-        self.menuBar().addMenu(self._settings_menu)
-
     def _on_api_settings(self):
         from app.ui.widgets.api_key_dialog import show_api_key_dialog
-        if show_api_key_dialog(self):
-            load_language(self._config_path)
-            self._retranslate_ui()
-            self.statusBar().showMessage(tr("Settings saved."))
+        show_api_key_dialog(self)
+        load_language(self._config_path)
+        self.statusBar().showMessage(tr("Settings saved."))
+        self._retranslate()
+
+    def _retranslate(self):
+        self.setWindowTitle(tr("C++ Memory Visualizer"))
+        self._tabs.setTabText(self._home_tab_index, tr("Home"))
+        self._tabs.setTabText(self._tabs.indexOf(self._code_tab), tr("Code Editor"))
+        self._tabs.setTabText(self._tabs.indexOf(self._oj_tab), tr("OJ Analysis"))
+        self._tabs.setTabText(self._tabs.indexOf(self._file_tab), tr("File Import"))
+        self._tabs.setTabText(self._tabs.indexOf(self._review_tab), tr("Review"))
+        self._tabs.setTabText(self._tabs.indexOf(self._kb_tab), tr("Knowledge Base"))
+        self.btn_settings.setText(tr("Settings"))
+        self.btn_run.setText(tr("Run"))
+        self.btn_prev.setText(tr("Prev"))
+        self.btn_next.setText(tr("Next"))
+        self.btn_reset.setText(tr("Reset"))
+        self.auto_fit_check.setText(tr("Auto Fit"))
+        self.step_label.setText(tr("Ready") if "Ready" in self.step_label.text() or "就绪" in self.step_label.text() else self.step_label.text())
 
     def _setup_statusbar(self):
         self.setStatusBar(QStatusBar())
@@ -650,30 +665,20 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self._tabs.setTabText(index, tr(key))
 
-        self._example_label.setText(tr("Example:"))
-        for index, key in enumerate(EXAMPLE_CODES):
-            self._example_combo.setItemText(index, tr(key))
+        self.btn_settings.setText(tr("Settings"))
         self.btn_run.setText(tr("Run"))
-        self.btn_next.setText(tr("Next Step"))
-        self.btn_prev.setText(tr("Prev Step"))
+        self.btn_prev.setText(tr("Prev"))
+        self.btn_next.setText(tr("Next"))
         self.btn_reset.setText(tr("Reset"))
         self.btn_prev_big.setText(f"< {tr('Prev Step')}")
         self.btn_next_big.setText(f"{tr('Next Step')} >")
         self.btn_autoplay.setText(tr("Auto Play"))
-        self.btn_autoplay.setToolTip(tr("Auto-advance through steps"))
-        self._speed_slider.setToolTip(tr("Auto-play speed (200ms fast - 2000ms slow)"))
         self._speed_label.setText(tr("speed"))
-        self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
-        self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
-        self.btn_zoom_fit.setToolTip(tr("Fit to View"))
         self.auto_fit_check.setText(tr("Auto Fit"))
-        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
         self.step_label.setText(tr("Ready"))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
         self._overlay_label.setText(tr("Analyzing code with AI..."))
         self._overlay_cancel_btn.setText(tr("Cancel"))
-        self._settings_menu.setTitle(tr("Settings"))
-        self._api_settings_action.setText(tr("AI Settings..."))
         if hasattr(self, "home_page"):
             self.home_page.retranslate_ui()
         if hasattr(self, "oj_page"):

@@ -263,9 +263,11 @@ class OJPage(QWidget):
 
         # Save knowledge points
         for kp in analysis.get("knowledge_points", []):
-            error_store.add_knowledge_point(
-                kp.get("name", ""), "oj_analysis"
-            )
+            name = kp.get("name", "")
+            error_store.add_knowledge_point(name, "oj_analysis")
+            expl = kp.get("explanation", "")
+            if expl and not any(k.get("name") == name and k.get("description") for k in error_store.get_knowledge_points()):
+                error_store.set_knowledge_description(name, expl)
 
         self._trace = trace
         self._current_index = 0
@@ -378,20 +380,22 @@ class OJPage(QWidget):
         )
         kp_name = kp.get("name", "")
         kp_expl = kp.get("explanation", "")
-        def save_and_feedback(checked=False, btn=review_btn, n=kp_name, e=kp_expl):
+        def save_and_feedback():
+            question = tr("Review: {name}", name=kp_name)
             error_store.add_error(
-                knowledge_point=n, question="Manual review",
-                user_answer="Needs practice", correct_answer=e,
+                knowledge_point=kp_name, question=question,
+                user_answer="", correct_answer=kp_expl or tr("Study concept: {name}", name=kp_name),
+                deck=error_store.suggest_deck(kp_name),
             )
-            btn.setText("✓ " + tr("Added"))
-            btn.setStyleSheet(
+            review_btn.setText("✓ " + tr("Added"))
+            review_btn.setStyleSheet(
                 f"QPushButton {{ background-color: #1A3A2A; "
                 f"color: #4EC9B0; border: 1px solid #4EC9B0; "
                 f"padding: 2px 10px; font-size: 10px; "
                 f"margin-top: 4px; }}"
             )
-            btn.setEnabled(False)
-        review_btn.clicked.connect(save_and_feedback)
+            review_btn.setEnabled(False)
+        review_btn.clicked.connect(lambda: save_and_feedback())
         vbox.addWidget(review_btn)
 
         self._analysis_layout.addWidget(card)

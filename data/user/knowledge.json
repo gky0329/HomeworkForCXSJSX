@@ -105,13 +105,6 @@
     "timestamp": "2026-05-27T01:41:23.962602+00:00"
   },
   {
-    "name": "Person",
-    "source": "code_editor",
-    "count": 2,
-    "description": "## 概念\nPerson 是一个类名，通常用于表示具有姓名、年龄等属性的人类个体，是面向对象编程中常见的实体建模。\n\n## 内存模型\nPerson 对象可分配在栈（局部变量）或堆（new 关键字）上。栈上对象生命周期随作用域结束自动销毁，堆上对象需手动 delete 释放，否则导致内存泄漏。\n\n## 示例\n```cpp\n#include <iostream>\n#include <string>\nusing namespace std;\n\nclass Person {\npublic:\n    string name;\n    int age;\n    void introduce() {\n        cout << \"我叫\" << name << \"，今年\" << age << \"岁\" << endl;\n    }\n};\n\nint main() {\n    Person p1;          // 栈上分配\n    p1.name = \"张三\";\n    p1.age = 25;\n    p1.introduce();\n\n    Person* p2 = new Person();  // 堆上分配\n    p2->name = \"李四\";\n    p2->age = 30;\n    p2->introduce();\n    delete p2;          // 手动释放\n\n    return 0;\n}\n```\n\n## 常见错误\n- 忘记释放堆上 Person 对象导致内存泄漏，程序长时间运行后内存占用持续增长\n- 访问未初始化的 Person 成员变量，如未设置 name 或 age 就调用 introduce()，输出未定义值",
-    "timestamp": "2026-05-29T14:20:42.300896+00:00"
-  },
-  {
     "name": "构造/析构",
     "source": "code_editor",
     "count": 2,
