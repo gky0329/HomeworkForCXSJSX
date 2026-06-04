@@ -1050,6 +1050,13 @@ class DebugExecutor:
                     or self._wrapped_std_array_elements(parsed)
                     or self._wrapped_container_adapter_elements(parsed)
                 )
+                element_models = self._array_elements_from_parsed(
+                    elements,
+                    owner_address=stack_addr,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
+                )
                 member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
                     parsed.members,
                     owner_address=stack_addr,
@@ -1063,8 +1070,8 @@ class DebugExecutor:
                     value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif (is_pointer or is_reference) and self._is_null(value):
                     value = "nullptr"
-                elif elements:
-                    value = self._format_elements(elements)
+                elif element_models:
+                    value = self._format_array_element_models(element_models)
                 elif member_models:
                     value = self._format_struct_members(member_models)
                 captures = [
@@ -1090,12 +1097,9 @@ class DebugExecutor:
                     value="<lambda>" if is_function_object else value,
                     address=stack_addr,
                     is_pointer=is_pointer,
-                    is_array=bool(elements),
-                    element_count=len(elements) or None,
-                    elements=[
-                        ArrayElement(index=element.index, value=self._clean_value(element.value))
-                        for element in elements
-                    ],
+                    is_array=bool(element_models),
+                    element_count=len(element_models) or None,
+                    elements=element_models,
                     members=member_models,
                     is_object=bool(member_models),
                     class_name=object_class if member_models else "",
@@ -1172,12 +1176,16 @@ class DebugExecutor:
             self._target_sim_addr(addr, actual_stack_lookup, stack_addr_map, heap_addr_map)
             for addr in freed_heap
         }
+        dead_stack_target_addrs = set(stack_addr_map.values()) - set(actual_stack_lookup.values())
+        dangling_target_addrs = freed_target_addrs | dead_stack_target_addrs
         edge_keys = {(edge.source_address, edge.target_address) for edge in pointer_edges}
         for _, variables in frame_variables:
             for var in variables:
-                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, freed_target_addrs)
+                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs)
+                self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs)
         for block in heap_blocks_by_actual.values():
-            self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, freed_target_addrs)
+            self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
+            self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs)
 
         return MemoryState(
             line_number=original_line,
@@ -2177,17 +2185,21 @@ class DebugExecutor:
         array_info = heap_array_values.get(actual_addr)
         if array_info is not None:
             array_type, elements = array_info
+            element_models = self._array_elements_from_parsed(
+                elements,
+                owner_address=target_addr,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+            )
             return HeapBlock(
                 address=target_addr,
                 type=f"{self._clean_type(array_type)}[]",
-                value=self._format_elements(elements),
+                value=self._format_array_element_models(element_models),
                 is_freed=is_freed,
                 is_array=True,
-                element_count=len(elements),
-                elements=[
-                    ArrayElement(index=element.index, value=self._clean_value(element.value))
-                    for element in elements
-                ],
+                element_count=len(element_models),
+                elements=element_models,
             )
         object_info = heap_object_values.get(actual_addr)
         if object_info is not None:
@@ -2218,6 +2230,52 @@ class DebugExecutor:
             value=self._clean_value(heap_value),
             is_freed=is_freed,
         )
+
+    def _array_elements_from_parsed(
+        self,
+        elements: list[_ParsedElement],
+        owner_address: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> list[ArrayElement]:
+        return [
+            ArrayElement(
+                index=element.index,
+                type=self._clean_type(element.type),
+                value=self._array_element_display_value(
+                    element,
+                    actual_stack_lookup,
+                    stack_addr_map,
+                    heap_addr_map,
+                ),
+                address=self._array_element_sim_addr(owner_address, element.index),
+            )
+            for element in elements
+        ]
+
+    def _array_element_display_value(
+        self,
+        element: _ParsedElement,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> str:
+        value = self._clean_value(element.value)
+        is_reference = self._is_reference_type(element.type)
+        if (self._is_pointer_like_type(element.type) or is_reference) and self._is_null(value):
+            return "nullptr"
+        if (
+            (self._is_pointer_like_type(element.type) or is_reference)
+            and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+        ):
+            value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+            return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+        return value
+
+    @staticmethod
+    def _array_element_sim_addr(owner_address: str, index: int) -> str:
+        return f"{owner_address}[{index}]"
 
     def _struct_members_from_parsed(
         self,
@@ -2286,6 +2344,29 @@ class DebugExecutor:
                 source_address=member.address,
                 target_address=target_addr,
                 is_dangling=target_addr in freed_target_addrs,
+            ))
+            edge_keys.add(key)
+
+    def _append_array_pointer_edges(
+        self,
+        elements: list[ArrayElement],
+        pointer_edges: list[PointerEdge],
+        edge_keys: set[tuple[str, str]],
+        dangling_target_addrs: set[str],
+    ):
+        for element in elements:
+            if not element.address or not self._is_pointer_like_type(element.type):
+                continue
+            target_addr = element.value
+            if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                continue
+            key = (element.address, target_addr)
+            if key in edge_keys:
+                continue
+            pointer_edges.append(PointerEdge(
+                source_address=element.address,
+                target_address=target_addr,
+                is_dangling=target_addr in dangling_target_addrs,
             ))
             edge_keys.add(key)
 
@@ -2662,6 +2743,13 @@ class DebugExecutor:
     def _format_elements(elements: list[_ParsedElement]) -> str:
         return "{" + ", ".join(
             f"[{element.index}]={DebugExecutor._clean_value(element.value)}"
+            for element in elements
+        ) + "}"
+
+    @staticmethod
+    def _format_array_element_models(elements: list[ArrayElement]) -> str:
+        return "{" + ", ".join(
+            f"[{element.index}]={element.value}"
             for element in elements
         ) + "}"
 

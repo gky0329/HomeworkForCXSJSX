@@ -229,6 +229,52 @@ def test_memory_canvas_registers_member_pointer_edge_sources():
     assert len(canvas.get_edge_items()) == 1
 
 
+def test_memory_canvas_registers_array_element_pointer_edge_sources():
+    """Array pointer edges should originate from the element cell, not the whole var."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import ArrayElement, MemoryState, PointerEdge, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 800, 600)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=6,
+        source_code="*ptrs[1] = 9;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+            Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+            Variable(
+                name="ptrs",
+                type="std::vector<int*>",
+                value="{[0]=0xS001, [1]=0xS002}",
+                address="0xS003",
+                is_pointer=False,
+                is_array=True,
+                elements=[
+                    ArrayElement(index=0, type="int*", value="0xS001", address="0xS003[0]"),
+                    ArrayElement(index=1, type="int*", value="0xS002", address="0xS003[1]"),
+                ],
+            ),
+        ])],
+        heap=[],
+        edges=[PointerEdge(source_address="0xS003[1]", target_address="0xS002")],
+    )
+
+    canvas.render_state(state)
+
+    assert canvas.get_item_by_address("0xS003[1]") is not None
+    assert canvas.get_item_by_address("0xS002") is not None
+    assert len(canvas.get_edge_items()) == 1
+
+
 def test_canvas_view_uses_stable_fit_bounds():
     """Auto-fit should use trace-wide bounds instead of per-step item bounds."""
     from PySide6.QtCore import QRectF
@@ -1383,12 +1429,18 @@ __CXXMV_FRAME__0__{line + 1}__main
     assert ptrs.is_array is True
     assert ptrs.is_pointer is False
     assert ptrs.is_object is False
-    assert [(element.index, element.value) for element in ptrs.elements] == [
-        (0, "0x000000016fdfe6b0"),
-        (1, "0x000000016fdfe6b4"),
+    assert [(element.index, element.type, element.value, element.address) for element in ptrs.elements] == [
+        (0, "int*", values["a"].address, f"{ptrs.address}[0]"),
+        (1, "int*", values["b"].address, f"{ptrs.address}[1]"),
     ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (ptrs.elements[0].address, values["a"].address),
+        (ptrs.elements[1].address, values["b"].address),
+    }
     assert step.heap == []
-    assert step.edges == []
 
 
 def test_debug_executor_parses_vector_string_elements_from_summaries():
@@ -2713,12 +2765,18 @@ __CXXMV_FRAMEDX__0
     assert ptrs.is_array is True
     assert ptrs.is_pointer is False
     assert ptrs.is_object is False
-    assert [(element.index, element.value) for element in ptrs.elements] == [
-        (0, "0x000000aa0000efd0"),
-        (1, "0x000000aa0000efd4"),
+    assert [(element.index, element.type, element.value, element.address) for element in ptrs.elements] == [
+        (0, "int*", values["a"].address, f"{ptrs.address}[0]"),
+        (1, "int*", values["b"].address, f"{ptrs.address}[1]"),
     ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (ptrs.elements[0].address, values["a"].address),
+        (ptrs.elements[1].address, values["b"].address),
+    }
     assert step.heap == []
-    assert step.edges == []
 
 
 def test_debug_executor_parses_cdb_reference_as_non_pointer():
@@ -5198,7 +5256,7 @@ def test_native_debug_smoke_requires_container_adapter_elements():
 
 def test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container():
     """Native smoke should prove vector<int*> stays a container, not a pointer var."""
-    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
     from tools.native_debug_smoke import _validate_vector_pointer
 
     weak_trace = ExecutionTrace(steps=[
@@ -5235,13 +5293,16 @@ def test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_contain
                     is_pointer=False,
                     is_array=True,
                     elements=[
-                        ArrayElement(index=0, value="0xS001"),
-                        ArrayElement(index=1, value="0xS002"),
+                        ArrayElement(index=0, type="int*", value="0xS001", address="0xS003[0]"),
+                        ArrayElement(index=1, type="int*", value="0xS002", address="0xS003[1]"),
                     ],
                 ),
             ])],
             heap=[],
-            edges=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS001"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS002"),
+            ],
         ),
     ])
 
@@ -5826,6 +5887,7 @@ if __name__ == "__main__":
         test_clear_layout_recurses_nested_layouts,
         test_memory_canvas_does_not_remove_rekeyed_stack_item,
         test_memory_canvas_registers_member_pointer_edge_sources,
+        test_memory_canvas_registers_array_element_pointer_edge_sources,
         test_canvas_view_uses_stable_fit_bounds,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,

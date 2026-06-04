@@ -71,7 +71,12 @@ def _variable_summary(var: Variable) -> dict[str, object]:
         "is_array": var.is_array,
         "element_count": var.element_count,
         "elements": [
-            {"index": element.index, "value": element.value}
+            {
+                "index": element.index,
+                "type": element.type,
+                "value": element.value,
+                "address": element.address,
+            }
             for element in var.elements[:8]
         ],
         "is_object": var.is_object,
@@ -317,18 +322,36 @@ def _validate_vector_pointer(trace: ExecutionTrace) -> list[str]:
         errors.append("ptrs should not be marked as an object after element expansion")
     if var.members:
         errors.append("ptrs should show pointer elements instead of implementation members")
-    values = [element.value for element in var.elements]
-    if len(values) != 2:
+    elements = list(var.elements)
+    values = [element.value for element in elements]
+    if len(elements) != 2:
         errors.append(f"ptrs expected 2 pointer elements, got {values!r}")
     elif not all(value.startswith("0x") for value in values):
         errors.append(f"ptrs element values should be addresses, got {values!r}")
+    if elements and not all(element.type.endswith("*") for element in elements):
+        errors.append(f"ptrs element types should be pointer types, got {[element.type for element in elements]!r}")
+    if elements and not all(element.address for element in elements):
+        errors.append("ptrs elements should expose stable cell addresses")
     b_match = _last_var(trace, "b")
+    a_match = _last_var(trace, "a")
     if b_match is None:
         errors.append("missing b variable after *ptrs[1] write")
     elif b_match[1].value != "9":
         errors.append(f"b expected 9 after *ptrs[1] write, got {b_match[1].value!r}")
     if any(edge.source_address == var.address for edge in state.edges):
         errors.append("ptrs container itself should not own a pointer edge")
+    if a_match is not None and b_match is not None and len(elements) == 2:
+        expected_edges = {
+            (elements[0].address, a_match[1].address),
+            (elements[1].address, b_match[1].address),
+        }
+        actual_edges = {
+            (edge.source_address, edge.target_address)
+            for edge in state.edges
+        }
+        missing = expected_edges - actual_edges
+        if missing:
+            errors.append(f"missing ptrs element pointer edges: {sorted(missing)!r}")
     return errors
 
 

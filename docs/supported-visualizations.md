@@ -360,7 +360,7 @@ int b = 2;
 std::vector<int*> ptrs = {&a, &b};
 *ptrs[1] = 9;
 ```
-预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9
+预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9；`ptrs[0]` / `ptrs[1]` 单元格分别画出指向 `a` / `b` 的箭头
 
 ### 运算符重载测试
 ```cpp

@@ -30,6 +30,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_index_labels: list[QGraphicsTextItem] = []
         self._text_items: list[QGraphicsTextItem] = []
         self.member_items: dict[str, QGraphicsTextItem] = {}
+        self.element_items: dict[str, QGraphicsRectItem] = {}
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -55,6 +56,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_index_labels.clear()
         self._text_items.clear()
         self.member_items.clear()
+        self.element_items.clear()
         for child in list(self.childItems()):
             child.setParentItem(None)
             if child.scene() is not None:
@@ -153,6 +155,8 @@ class HeapItem(QGraphicsRectItem):
             cell.setPen(QPen(QColor(HEAP_BORDER), 1))
             cell.setBrush(QBrush(QColor("#4A3626")))
             self._array_cells.append(cell)
+            if elem.address:
+                self.element_items[elem.address] = cell
 
             value_label = self._keep_text(QGraphicsTextItem("", cell))
             value_label.setDefaultTextColor(QColor(STACK_VAR_TEXT))

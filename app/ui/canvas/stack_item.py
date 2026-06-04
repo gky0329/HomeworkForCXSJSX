@@ -98,6 +98,7 @@ class StackItem(QGraphicsRectItem):
         self._on_item_moved = on_item_moved
         self._array_cells: list[QGraphicsRectItem] = []
         self._array_cells_by_var: dict[str, list[QGraphicsRectItem]] = {}
+        self.element_items: dict[str, QGraphicsRectItem] = {}
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -153,6 +154,7 @@ class StackItem(QGraphicsRectItem):
         self._layout_items = []
         self._array_cells = []
         self._array_cells_by_var = {}
+        self.element_items = {}
         self._clear_children()
 
         self._title_item = QGraphicsTextItem(self)
@@ -322,6 +324,8 @@ class StackItem(QGraphicsRectItem):
             cell.setZValue(-0.5)
             self._array_cells.append(cell)
             cells.append(cell)
+            if elem.address:
+                self.element_items[elem.address] = cell
         self._array_cells_by_var[var.address] = cells
 
     def _array_cell_width(self, var: Variable, font: QFont) -> float:
