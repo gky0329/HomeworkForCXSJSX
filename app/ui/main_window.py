@@ -50,6 +50,28 @@ TAB_STYLE = (
 )
 
 EXAMPLE_CODES = {
+    "Roadshow Demo": (
+        "class Student {\n"
+        "public:\n"
+        "  int score;\n"
+        "  double progress;\n"
+        "};\n"
+        "int scores[3] = {72, 85, 91};\n"
+        "int total = scores[0] + scores[1] + scores[2];\n"
+        "double average = total / 3.0;\n"
+        "int* focus = &total;\n"
+        "*focus = total + 5;\n"
+        "Student alice;\n"
+        "alice.score = 88;\n"
+        "alice.progress = 0.75;\n"
+        "Student* mentor = new Student();\n"
+        "mentor->score = alice.score + 7;\n"
+        "mentor->progress = 0.95;\n"
+        "int* reward = new int(mentor->score);\n"
+        "*reward = *reward + 2;\n"
+        "delete reward;\n"
+        "delete mentor;\n"
+    ),
     "Basic Variables": (
         "int a = 42;\n"
         "int b = a + 10;\n"
@@ -102,6 +124,7 @@ class CanvasView(QGraphicsView):
         self._zoom_level = 1.0
         self._panning = False
         self._pan_last_pos = QPointF()
+        self._stable_fit_bounds = QRectF()
         self.setAcceptDrops(True)
         self.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -186,11 +209,17 @@ class CanvasView(QGraphicsView):
             self.scale(1 / ZOOM_FACTOR, 1 / ZOOM_FACTOR)
 
     def zoom_fit(self):
-        fit_rect = self._fit_bounds()
+        fit_rect = self._stable_fit_bounds if self._stable_fit_bounds.isValid() else self._fit_bounds()
         if not fit_rect.isValid() or fit_rect.isEmpty():
             return
         self.fitInView(fit_rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._zoom_level = self.transform().m11()
+
+    def set_stable_fit_bounds(self, bounds: QRectF):
+        self._stable_fit_bounds = QRectF(bounds)
+
+    def clear_stable_fit_bounds(self):
+        self._stable_fit_bounds = QRectF()
 
     def _fit_bounds(self):
         scene = self.scene()

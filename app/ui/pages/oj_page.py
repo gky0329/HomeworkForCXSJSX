@@ -285,6 +285,9 @@ class OJPage(QWidget):
         self._build_analysis(analysis)
 
         if trace.steps:
+            self._memory_canvas.clear()
+            self._memory_canvas.prepare_trace_layout(trace.steps)
+            self._canvas_view.set_stable_fit_bounds(self._memory_canvas.stable_fit_bounds())
             self._memory_canvas.render_state(trace.steps[0])
             self._canvas_view.zoom_fit()
             self._update_controls()
@@ -622,10 +625,18 @@ class OJPage(QWidget):
     def _create_canvas_view() -> QGraphicsView:
         class _OJCanvasView(QGraphicsView):
             def zoom_fit(self):
-                fit_rect = self._fit_bounds()
+                fit_rect = getattr(self, "_stable_fit_bounds", QRectF())
+                if not fit_rect.isValid():
+                    fit_rect = self._fit_bounds()
                 if not fit_rect.isValid() or fit_rect.isEmpty():
                     return
                 self.fitInView(fit_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+            def set_stable_fit_bounds(self, bounds: QRectF):
+                self._stable_fit_bounds = QRectF(bounds)
+
+            def clear_stable_fit_bounds(self):
+                self._stable_fit_bounds = QRectF()
 
             def _fit_bounds(self):
                 scene = self.scene()

@@ -121,11 +121,16 @@ class Engine:
     def _on_trace_ready(self, trace: ExecutionTrace):
         self._window.show_loading(False)
         self._trace = trace
+        self._canvas.clear()
 
         if trace.steps:
+            self._canvas.prepare_trace_layout(trace.steps)
+            self._window.canvas_view.set_stable_fit_bounds(self._canvas.stable_fit_bounds())
             self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
+            if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
+                QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
@@ -133,6 +138,7 @@ class Engine:
             )
         else:
             self._current_index = -1
+            self._window.canvas_view.clear_stable_fit_bounds()
             self._window.statusBar().showMessage(tr("AI returned empty trace"))
 
         self._update_controls()
@@ -204,6 +210,8 @@ class Engine:
         self._current_index = -1
         self._animator.stop_all()
         self._canvas.clear()
+        self._window.canvas_view.clear_stable_fit_bounds()
+        self._window.canvas_view.reset_view()
         self._window.tracker_panel.clear()
         self._window.step_label.setText(tr("Ready"))
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))

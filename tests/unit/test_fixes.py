@@ -173,6 +173,82 @@ def test_memory_canvas_does_not_remove_rekeyed_stack_item():
     assert stack_items[0].frame.frame_name == "foo"
 
 
+def test_canvas_view_uses_stable_fit_bounds():
+    """Auto-fit should use trace-wide bounds instead of per-step item bounds."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtWidgets import QApplication, QGraphicsScene
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.main_window import CanvasView
+
+    view = CanvasView()
+    view.resize(420, 300)
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 2000, 2000)
+    view.setScene(scene)
+    view.set_stable_fit_bounds(QRectF(0, 0, 800, 600))
+    view.zoom_fit()
+    first_scale = view.transform().m11()
+
+    scene.addRect(0, 0, 1600, 1600)
+    view.zoom_fit()
+    second_scale = view.transform().m11()
+
+    assert abs(first_scale - second_scale) < 0.000001
+
+
+def test_memory_canvas_prepares_trace_wide_fit_bounds():
+    """Trace layout planning should include later heap/object-heavy steps."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, MemoryState, StackFrame, StructMember, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 1600, 2000)
+    canvas = MemoryCanvas(QGraphicsView(), scene)
+    simple = MemoryState(
+        line_number=1,
+        source_code="int a = 1;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+        ])],
+        heap=[],
+        edges=[],
+    )
+    object_step = MemoryState(
+        line_number=2,
+        source_code="Point* p = new Point{1, 2};",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="p", type="Point*", value="0xH001", address="0xS001", is_pointer=True),
+        ])],
+        heap=[HeapBlock(
+            address="0xH001",
+            type="Point",
+            value="{x=1, label=long_member_name_for_layout}",
+            is_object=True,
+            class_name="Point",
+            members=[
+                StructMember(name="x", type="int", value="1"),
+                StructMember(name="label", type="string", value="long_member_name_for_layout"),
+            ],
+        )],
+        edges=[],
+    )
+
+    canvas.prepare_trace_layout([simple, object_step])
+    bounds = canvas.stable_fit_bounds()
+
+    assert bounds.isValid()
+    assert bounds.width() > 260
+    assert bounds.height() > 80
+
+
 def test_state_diff_detects_member_changes():
     """Nested struct/object member edits should count as value changes."""
     from app.core.memory_model import MemoryState, StackFrame, StructMember, Variable
@@ -303,6 +379,41 @@ def test_heap_item_array_sets_value_label():
     assert "7" in item._value_label.toPlainText()
 
 
+def test_stack_item_object_draws_member_summary_and_labels():
+    """Stack object variables should show both an object summary and member rows."""
+    from PySide6.QtWidgets import QApplication, QGraphicsTextItem
+    import sys
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import StackFrame, StructMember, Variable
+    from app.ui.canvas.stack_item import StackItem
+
+    item = StackItem(StackFrame(frame_name="main", variables=[
+        Variable(
+            name="c",
+            type="Counter",
+            value="{value=4, extra=13}",
+            address="0xS001",
+            is_pointer=False,
+            is_object=True,
+            class_name="Counter",
+            members=[
+                StructMember(name="value", type="int", value="4"),
+                StructMember(name="extra", type="int", value="13"),
+            ],
+        ),
+    ]))
+    texts = [
+        child.toPlainText()
+        for child in item.childItems()
+        if isinstance(child, QGraphicsTextItem)
+    ]
+
+    assert any("c: Counter = {value=4, extra=13}" in text for text in texts)
+    assert any(".value: int = 4" in text for text in texts)
+    assert any(".extra: int = 13" in text for text in texts)
+
+
 # ── Phase 3: No double JSON serialize ──────────────────────────────────
 
 def test_ai_service_returns_raw_string():
@@ -382,10 +493,13 @@ if __name__ == "__main__":
         test_memory_model_normalizes_llm_nulls_and_numbers,
         test_clear_layout_recurses_nested_layouts,
         test_memory_canvas_does_not_remove_rekeyed_stack_item,
+        test_canvas_view_uses_stable_fit_bounds,
+        test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
         test_heap_item_object_sets_value_label,
         test_heap_item_array_sets_value_label,
+        test_stack_item_object_draws_member_summary_and_labels,
         test_ai_service_returns_raw_string,
         test_extract_code_preserves_comments,
         test_graph_page_named_canvas_class,

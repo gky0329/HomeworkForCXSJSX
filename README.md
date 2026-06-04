@@ -11,6 +11,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Windows setup and native-debugger validation notes are in [`docs/windows.md`](docs/windows.md).
+
 ## Features
 
 - **Code Execution** — Write C++ code, click Run, see memory state step by step
@@ -60,6 +62,8 @@ python tests/unit/test_fixes.py
 - `MVP建设文档.md` — Implementation roadmap (Chinese)
 - `架构设计文档v2.md` — Architecture document (Chinese)
 - `FUTURE_WORK.md` — Planned features
+- `docs/roadshow_demo.md` — Roadshow demo code and talk track
+- `docs/windows.md` — Windows setup and native-debugger validation notes
 - `docs/` — Detailed feature docs
 
 ## Requirements

@@ -14,6 +14,21 @@ def _text_width(text: str, font: QFont) -> float:
     return text_width(text, font)
 
 
+def _member_preview(members, limit: int = 3) -> str:
+    visible = [m for m in members if m.name != "_vptr"]
+    parts = [f"{m.name}={m.value}" for m in visible[:limit]]
+    if len(visible) > limit:
+        parts.append("...")
+    return ", ".join(parts)
+
+
+def _object_header_text(var: Variable) -> str:
+    bases = f" : {', '.join(var.base_classes)}" if var.base_classes else ""
+    preview = _member_preview(var.members)
+    summary = f" = {{{preview}}}" if preview else ""
+    return f"  {var.name}: {var.class_name or var.type}{bases}{summary}"
+
+
 class VarItem(QGraphicsTextItem):
     def __init__(self, variable: Variable, parent=None):
         super().__init__(parent)
@@ -44,10 +59,7 @@ class VarItem(QGraphicsTextItem):
                 f"  {v.name}: λ = [{', '.join(caps)}]{badge_str}" if caps else f"  {v.name}: λ{badge_str}"
             )
         elif v.is_object:
-            bases = f" : {', '.join(v.base_classes)}" if v.base_classes else ""
-            self.setPlainText(
-                f"  {v.name}: {v.class_name or v.type}{bases}{badge_str}"
-            )
+            self.setPlainText(f"{_object_header_text(v)}{badge_str}")
         elif v.is_array and v.elements:
             items = [e.value for e in v.elements]
             self.setPlainText(
@@ -469,7 +481,7 @@ class StackItem(QGraphicsRectItem):
         max_width = _text_width(frame.frame_name, title_font)
         for var in frame.variables:
             if var.is_object:
-                max_width = max(max_width, _text_width(f"  {var.name}: {var.class_name or var.type}", body_font))
+                max_width = max(max_width, _text_width(_object_header_text(var), body_font))
                 for m in var.members:
                     if m.name == "_vptr":
                         continue
