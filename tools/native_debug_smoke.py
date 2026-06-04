@@ -373,6 +373,36 @@ def _validate_heap_polymorphic_delete(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_heap_leak_overwrite(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    ptr = values.get("p")
+    if ptr is None:
+        errors.append("missing pointer variable p")
+    elif not ptr.is_pointer:
+        errors.append("p should be marked as a pointer")
+
+    live_blocks = [block for block in state.heap if not block.is_freed]
+    if len(live_blocks) < 2:
+        errors.append(f"expected current heap plus leaked heap block, got {len(live_blocks)}")
+    block_values = {block.value for block in live_blocks}
+    if "1" not in block_values:
+        errors.append(f"missing overwritten leaked heap value 1, got {sorted(block_values)!r}")
+    if "3" not in block_values:
+        errors.append(f"missing current heap value 3, got {sorted(block_values)!r}")
+    if ptr is not None:
+        if not any(edge.source_address == ptr.address and edge.target_address == ptr.value for edge in state.edges):
+            errors.append("missing p -> current heap edge")
+        leaked_blocks = [block for block in live_blocks if block.value == "1"]
+        for block in leaked_blocks:
+            if any(edge.target_address == block.address for edge in state.edges):
+                errors.append(f"leaked heap block {block.address} should have no incoming pointer edge")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -712,6 +742,15 @@ CASES: dict[str, SmokeCase] = {
             "delete a;\n"
         ),
         validate=_validate_heap_polymorphic_delete,
+    ),
+    "heap_leak_overwrite": SmokeCase(
+        name="heap_leak_overwrite",
+        code=(
+            "int* p = new int(1);\n"
+            "p = new int(2);\n"
+            "*p = 3;\n"
+        ),
+        validate=_validate_heap_leak_overwrite,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",

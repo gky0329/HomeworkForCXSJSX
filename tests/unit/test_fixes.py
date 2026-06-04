@@ -1310,6 +1310,66 @@ frame #0: 0x4 program`main at program.cpp:{l4 + 1}:1
     assert trace.steps[2].edges[0].is_dangling is True
 
 
+def test_debug_executor_preserves_overwritten_heap_as_leak():
+    """Overwriting a heap pointer should keep the old live heap block visible."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = new int(1);\n"
+        "p = new int(2);\n"
+        "*p = 3;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:10
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:3
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe700: (int *) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *p = 1
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:3
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:3
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe700: (int *) p = 0x0000000100644700 {{
+0x0000000100644700:   (int) *p = 2
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:3
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l3 + 1}:3
+__CXXMV_FRAME__0__{l3 + 1}__main
+0x000000016fdfe700: (int *) p = 0x0000000100644700 {{
+0x0000000100644700:   (int) *p = 3
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    final = trace.steps[-1]
+    p = final.stack[0].variables[0]
+    heaps = {block.value: block for block in final.heap}
+    leaked = heaps["1"]
+    current = heaps["3"]
+
+    assert p.value != leaked.address
+    assert p.value == current.address
+    assert set(heaps) == {"1", "3"}
+    assert leaked.is_freed is False
+    assert current.is_freed is False
+    assert len(final.edges) == 1
+    assert final.edges[0].source_address == p.address
+    assert final.edges[0].target_address == current.address
+    assert final.edges[0].is_dangling is False
+    assert all(edge.target_address != leaked.address for edge in final.edges)
+
+
 def test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete():
     """A base pointer to a derived heap object should keep a stable stack address."""
     from app.core.debug_executor import DebugExecutor
@@ -2464,6 +2524,59 @@ __CXXMV_FRAMEV__0
     assert next(var for var in final.stack[0].variables if var.name == "sound").value == "7"
 
 
+def test_debug_executor_parses_cdb_overwritten_heap_as_leak():
+    """CDB/PDB pointer overwrite should keep the old live heap block visible."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = new int(1);\n"
+        "p = new int(2);\n"
+        "*p = 3;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l1}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000001df`4e700000 {{1}}
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000001df`4e800000 {{2}}
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l3 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000001df`4e800000 {{3}}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    final = trace.steps[-1]
+    p = final.stack[0].variables[0]
+    heaps = {block.value: block for block in final.heap}
+    leaked = heaps["1"]
+    current = heaps["3"]
+
+    assert set(heaps) == {"1", "3"}
+    assert p.value == current.address
+    assert leaked.is_freed is False
+    assert current.is_freed is False
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in final.edges
+    } == {(p.address, current.address, False)}
+    assert all(edge.target_address != leaked.address for edge in final.edges)
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -3464,6 +3577,43 @@ def test_native_debug_smoke_requires_heap_polymorphic_delete_state():
     assert _validate_heap_polymorphic_delete(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_heap_leak_overwrite_state():
+    """Native smoke should prove overwritten heap blocks stay visible as leaks."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_heap_leak_overwrite
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=3,
+            source_code="*p = 3;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="0xH002", address="0xS001", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH002", type="int", value="3")],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH002")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=3,
+            source_code="*p = 3;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="0xH002", address="0xS001", is_pointer=True),
+            ])],
+            heap=[
+                HeapBlock(address="0xH002", type="int", value="3"),
+                HeapBlock(address="0xH001", type="int", value="1"),
+            ],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH002")],
+        ),
+    ])
+
+    weak_errors = _validate_heap_leak_overwrite(weak_trace)
+    assert any("expected current heap plus leaked heap block" in error for error in weak_errors)
+    assert any("missing overwritten leaked heap value 1" in error for error in weak_errors)
+    assert _validate_heap_leak_overwrite(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -4099,6 +4249,7 @@ if __name__ == "__main__":
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
+        test_debug_executor_preserves_overwritten_heap_as_leak,
         test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
@@ -4132,6 +4283,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
+        test_debug_executor_parses_cdb_overwritten_heap_as_leak,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -4159,6 +4311,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_requires_inherited_virtual_object_state,
         test_native_debug_smoke_requires_heap_polymorphic_delete_state,
+        test_native_debug_smoke_requires_heap_leak_overwrite_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,

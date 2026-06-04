@@ -825,6 +825,7 @@ class DebugExecutor:
         heap_values: dict[str, tuple[str, str]] = {}
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]] = {}
         heap_object_values: dict[str, tuple[str, list[_ParsedMember]]] = {}
+        allocated_heap: set[str] = set()
         freed_heap: set[str] = set()
         declarations = self._declaration_lines(prepared.original_lines)
 
@@ -851,6 +852,7 @@ class DebugExecutor:
                 continue
 
             delete_name = self._deleted_pointer_name(source_code)
+            new_name = self._new_pointer_name(source_code)
             parsed_frames = self._parse_cdb_stack_snapshots(
                 after_chunk,
                 prepared,
@@ -879,6 +881,8 @@ class DebugExecutor:
                             f"{element_type}[]",
                             self._format_elements(var.pointee_elements),
                         )
+                    if new_name and var.name == new_name:
+                        allocated_heap.add(var.pointee_addr)
 
             if delete_name and delete_name in pointer_targets:
                 freed_heap.add(pointer_targets[delete_name])
@@ -893,6 +897,7 @@ class DebugExecutor:
                 heap_values=heap_values,
                 heap_array_values=heap_array_values,
                 heap_object_values=heap_object_values,
+                allocated_heap=allocated_heap,
                 freed_heap=freed_heap,
                 class_info=prepared.class_info,
             ))
@@ -910,6 +915,7 @@ class DebugExecutor:
         heap_values: dict[str, tuple[str, str]] = {}
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]] = {}
         heap_object_values: dict[str, tuple[str, list[_ParsedMember]]] = {}
+        allocated_heap: set[str] = set()
         freed_heap: set[str] = set()
         declarations = self._declaration_lines(prepared.original_lines)
 
@@ -940,6 +946,7 @@ class DebugExecutor:
                 continue
 
             delete_name = self._deleted_pointer_name(source_code)
+            new_name = self._new_pointer_name(source_code)
             parsed_frames = self._parse_stack_snapshots(
                 after_chunk,
                 prepared,
@@ -966,6 +973,8 @@ class DebugExecutor:
                             f"{element_type}[]",
                             self._format_elements(array_exprs[var.name]),
                         )
+                    if new_name and var.name == new_name:
+                        allocated_heap.add(var.pointee_addr)
 
             if delete_name and delete_name in pointer_targets:
                 freed_heap.add(pointer_targets[delete_name])
@@ -980,6 +989,7 @@ class DebugExecutor:
                 heap_values=heap_values,
                 heap_array_values=heap_array_values,
                 heap_object_values=heap_object_values,
+                allocated_heap=allocated_heap,
                 freed_heap=freed_heap,
                 class_info=prepared.class_info,
             )
@@ -998,6 +1008,7 @@ class DebugExecutor:
         heap_values: dict[str, tuple[str, str]],
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
         heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        allocated_heap: set[str],
         freed_heap: set[str],
         class_info: dict[str, _ClassInfo] | None = None,
     ) -> MemoryState:
@@ -1095,56 +1106,33 @@ class DebugExecutor:
             ))
 
             if parsed.pointee_addr not in actual_stack_lookup and parsed.pointee_addr not in stack_addr_map:
-                heap_type, heap_value = heap_values.get(
-                    parsed.pointee_addr,
-                    (self._pointee_type(parsed.type), parsed.pointee_value),
-                )
-                array_info = heap_array_values.get(parsed.pointee_addr)
-                if array_info is not None:
-                    array_type, elements = array_info
-                    heap_blocks_by_actual[parsed.pointee_addr] = HeapBlock(
-                        address=target_addr,
-                        type=f"{self._clean_type(array_type)}[]",
-                        value=self._format_elements(elements),
-                        is_freed=is_dangling,
-                        is_array=True,
-                        element_count=len(elements),
-                        elements=[
-                            ArrayElement(index=element.index, value=self._clean_value(element.value))
-                            for element in elements
-                        ],
-                    )
-                    continue
-                object_info = heap_object_values.get(parsed.pointee_addr)
-                if object_info is not None:
-                    object_type, members = object_info
-                    class_name = self._object_class_name(object_type or self._pointee_type(parsed.type))
-                    metadata = class_info.get(class_name, _ClassInfo())
-                    heap_blocks_by_actual[parsed.pointee_addr] = HeapBlock(
-                        address=target_addr,
-                        type=self._clean_type(object_type or self._pointee_type(parsed.type)),
-                        value=self._format_members(members),
-                        is_freed=is_dangling,
-                        members=[
-                            StructMember(
-                                name=member.name,
-                                type=self._clean_type(member.type),
-                                value=self._clean_value(member.value),
-                            )
-                            for member in members
-                        ],
-                        is_object=True,
-                        class_name=class_name,
-                        base_classes=metadata.base_classes,
-                        virtual_methods=metadata.virtual_methods,
-                    )
-                    continue
-                heap_blocks_by_actual[parsed.pointee_addr] = HeapBlock(
-                    address=target_addr,
-                    type=self._clean_type(heap_type or self._pointee_type(parsed.type)),
-                    value=self._clean_value(heap_value),
+                heap_blocks_by_actual[parsed.pointee_addr] = self._heap_block_from_history(
+                    actual_addr=parsed.pointee_addr,
+                    target_addr=target_addr,
+                    default_type=self._pointee_type(parsed.type),
+                    default_value=parsed.pointee_value,
                     is_freed=is_dangling,
+                    heap_values=heap_values,
+                    heap_array_values=heap_array_values,
+                    heap_object_values=heap_object_values,
+                    class_info=class_info,
                 )
+
+        for actual_addr in sorted(allocated_heap):
+            if actual_addr in heap_blocks_by_actual or actual_addr in freed_heap:
+                continue
+            target_addr = self._sim_addr(heap_addr_map, actual_addr, "H")
+            heap_blocks_by_actual[actual_addr] = self._heap_block_from_history(
+                actual_addr=actual_addr,
+                target_addr=target_addr,
+                default_type="unknown",
+                default_value="",
+                is_freed=False,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                class_info=class_info,
+            )
 
         return MemoryState(
             line_number=original_line,
@@ -1427,6 +1415,8 @@ class DebugExecutor:
                     var.pointee_type = self._pointee_type(var.type)
                     var.pointee_elements = elements
                     var.pointee_members = members
+                    if not elements and not members:
+                        var.pointee_value = self._clean_value(payload)
                 elif elements:
                     var.elements = elements
                 elif members:
@@ -2061,10 +2051,73 @@ class DebugExecutor:
         return match.group(1) if match else ""
 
     @staticmethod
+    def _new_pointer_name(source_code: str) -> str:
+        match = re.search(r"\b([A-Za-z_]\w*)\s*=\s*new\b", source_code)
+        return match.group(1) if match else ""
+
+    @staticmethod
     def _sim_addr(mapping: dict[str, str], actual_addr: str, prefix: str) -> str:
         if actual_addr not in mapping:
             mapping[actual_addr] = f"0x{prefix}{len(mapping) + 1:03d}"
         return mapping[actual_addr]
+
+    def _heap_block_from_history(
+        self,
+        actual_addr: str,
+        target_addr: str,
+        default_type: str,
+        default_value: str,
+        is_freed: bool,
+        heap_values: dict[str, tuple[str, str]],
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        class_info: dict[str, _ClassInfo],
+    ) -> HeapBlock:
+        heap_type, heap_value = heap_values.get(actual_addr, (default_type, default_value))
+        array_info = heap_array_values.get(actual_addr)
+        if array_info is not None:
+            array_type, elements = array_info
+            return HeapBlock(
+                address=target_addr,
+                type=f"{self._clean_type(array_type)}[]",
+                value=self._format_elements(elements),
+                is_freed=is_freed,
+                is_array=True,
+                element_count=len(elements),
+                elements=[
+                    ArrayElement(index=element.index, value=self._clean_value(element.value))
+                    for element in elements
+                ],
+            )
+        object_info = heap_object_values.get(actual_addr)
+        if object_info is not None:
+            object_type, members = object_info
+            class_name = self._object_class_name(object_type or default_type)
+            metadata = class_info.get(class_name, _ClassInfo())
+            return HeapBlock(
+                address=target_addr,
+                type=self._clean_type(object_type or default_type),
+                value=self._format_members(members),
+                is_freed=is_freed,
+                members=[
+                    StructMember(
+                        name=member.name,
+                        type=self._clean_type(member.type),
+                        value=self._clean_value(member.value),
+                    )
+                    for member in members
+                ],
+                is_object=True,
+                class_name=class_name,
+                base_classes=metadata.base_classes,
+                virtual_methods=metadata.virtual_methods,
+            )
+        return HeapBlock(
+            address=target_addr,
+            type=self._clean_type(heap_type or default_type),
+            value=self._clean_value(heap_value),
+            is_freed=is_freed,
+        )
 
     def _target_sim_addr(
         self,
