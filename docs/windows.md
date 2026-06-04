@@ -121,6 +121,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case std_array_object_po
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case priority_queue_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_int
+python tools/native_debug_smoke.py --backend msvc-pdb --case vector_string
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_pointer_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case optional_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case optional_variant_object_member_pointer

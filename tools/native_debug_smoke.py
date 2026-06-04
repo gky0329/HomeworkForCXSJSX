@@ -344,6 +344,38 @@ def _validate_vector(trace: ExecutionTrace) -> list[str]:
     return []
 
 
+def _validate_vector_string(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    words = values.get("words")
+    length = values.get("length")
+    if words is None:
+        return ["missing vector string variable words"]
+    errors: list[str] = []
+    if not words.is_array:
+        errors.append("words should be marked as an array/container")
+    if words.is_object:
+        errors.append("words should show string elements instead of implementation members")
+    if words.members:
+        errors.append("words should not expose std::vector implementation members")
+    elements = list(words.elements)
+    element_values = [element.value for element in elements]
+    if element_values != ["one", "three", "two"]:
+        errors.append(f"words elements expected ['one', 'three', 'two'], got {element_values!r}")
+    if any("{" in value or "size=" in value for value in element_values):
+        errors.append(f"words elements should collapse to readable strings, got {element_values!r}")
+    element_types = [element.type for element in elements if element.type]
+    if element_types and not all("string" in element_type for element_type in element_types):
+        errors.append(f"words element types should be string-like, got {element_types!r}")
+    if length is None:
+        errors.append("missing length variable")
+    elif length.value != "5":
+        errors.append(f"length expected 5, got {length.value!r}")
+    return errors
+
+
 def _validate_vector_pointer(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "ptrs")
     if match is None:
@@ -2334,6 +2366,20 @@ CASES: dict[str, SmokeCase] = {
             "v[1] = 8;\n"
         ),
         validate=_validate_vector,
+    ),
+    "vector_string": SmokeCase(
+        name="vector_string",
+        code=(
+            "#include <string>\n"
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "vector<string> words;\n"
+            'words.push_back("one");\n'
+            'words.push_back("two");\n'
+            'words.insert(words.begin() + 1, "three");\n'
+            "int length = words[1].size();\n"
+        ),
+        validate=_validate_vector_string,
     ),
     "vector_pointer_stack": SmokeCase(
         name="vector_pointer_stack",

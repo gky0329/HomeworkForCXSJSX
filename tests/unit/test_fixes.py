@@ -7678,6 +7678,7 @@ def test_native_debug_smoke_requires_stl_container_breadth():
         _validate_list_pointer,
         _validate_set_pointer,
         _validate_unordered_map_pointer,
+        _validate_vector_string,
     )
 
     for case_name in (
@@ -7685,6 +7686,7 @@ def test_native_debug_smoke_requires_stl_container_breadth():
         "list_pointer_stack",
         "set_pointer_stack",
         "unordered_map_pointer",
+        "vector_string",
     ):
         assert case_name in CASES
 
@@ -7820,6 +7822,55 @@ def test_native_debug_smoke_requires_stl_container_breadth():
     weak_unordered_map.steps[0].edges = []
     assert any("missing unordered_map entry edge" in error for error in _validate_unordered_map_pointer(weak_unordered_map))
     assert _validate_unordered_map_pointer(strong_unordered_map) == []
+
+    weak_vector_string = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="int length = words[1].size();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="words",
+                    type="vector<string>",
+                    value="{size=3}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[],
+                ),
+                Variable(name="length", type="int", value="5", address="0xS002", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    strong_vector_string = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="int length = words[1].size();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="words",
+                    type="vector<string>",
+                    value="{[0]=one, [1]=three, [2]=two}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="string", value="one", address="0xS001[0]"),
+                        ArrayElement(index=1, type="string", value="three", address="0xS001[1]"),
+                        ArrayElement(index=2, type="string", value="two", address="0xS001[2]"),
+                    ],
+                ),
+                Variable(name="length", type="int", value="5", address="0xS002", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    weak_vector_string_errors = _validate_vector_string(weak_vector_string)
+    assert "words should be marked as an array/container" in weak_vector_string_errors
+    assert "words should show string elements instead of implementation members" in weak_vector_string_errors
+    assert _validate_vector_string(strong_vector_string) == []
 
 
 def test_native_debug_smoke_requires_map_pointer_entry_edges():

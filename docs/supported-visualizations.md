@@ -93,6 +93,8 @@ STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包
 
 常见顺序/关联/哈希容器（如 `std::deque<T>`、`std::list<T>`、`std::set<T>`、`std::unordered_map<K, V>`）在原生调试器路径下会按逻辑元素渲染为 `elements` cell。若元素或 entry value 是指针类型，例如 `list<int*>`、`set<int*>`、`unordered_map<string, int*>`，元素 cell 会作为箭头起点指向对应栈/堆目标。
 
+字符串容器会把调试器展开出的字符数组和实现字段折叠成业务可读的字符串元素。例如 `vector<string>{"one", "three", "two"}` 应显示为三个 cell：`one`、`three`、`two`，而不是 `_Mypair` / `_Bx` / 字符 buffer 等实现细节。
+
 ---
 
 ## 2.1 智能指针
