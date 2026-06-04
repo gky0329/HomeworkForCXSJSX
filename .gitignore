@@ -7,7 +7,9 @@ venv/
 dist/
 build/
 .DS_Store
+**/.DS_Store
 .Trash/
 config.yaml
+data/user/
 .vscode/
 data/user/

@@ -490,7 +490,7 @@ class KnowledgePage(QWidget):
     def _build_interactive_quiz(self, num: int, q: dict, kp_name: str) -> QFrame:
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background-color: {EDITOR_BG}; border: 1px solid {BORDER}; "
+            f"QFrame {{ background-color: {EDITOR_BG}; border: 1px solid {BORDER}; }}"
         )
         layout = QVBoxLayout(card)
         layout.setContentsMargins(10, 8, 10, 8)

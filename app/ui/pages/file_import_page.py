@@ -109,6 +109,7 @@ class FileImportPage(QWidget):
         self._config_path = config_path
         self._file_text = ""
         self._worker: ProcessWorker | None = None
+        self._quiz_worker: AIExplainWorker | None = None
         self._kps_data: list[dict] = []
         self._setup_ui()
 

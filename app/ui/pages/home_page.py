@@ -11,7 +11,7 @@ from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, HIGHLIGHT, SUCCESS,
+    STACK_BORDER, ACCENT, SUCCESS,
 )
 
 
