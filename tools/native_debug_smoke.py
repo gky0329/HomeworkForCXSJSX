@@ -336,6 +336,47 @@ def _validate_recursive_call_stack(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_object_method_call(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    method_state = None
+    for state in trace.steps:
+        frame_names = [frame.frame_name for frame in state.stack]
+        if frame_names and frame_names[0] == "add" and "main" in frame_names[1:]:
+            method_state = state
+            break
+
+    if method_state is None:
+        errors.append("missing observed Counter::add -> main method call stack")
+    else:
+        method_values = {var.name: var for var in method_state.stack[0].variables}
+        this_var = method_values.get("this")
+        delta = method_values.get("delta")
+        if this_var is None or not this_var.is_pointer:
+            errors.append("method frame should expose this as a pointer")
+        if delta is None or delta.value != "5":
+            errors.append(f"method delta expected 5, got {delta.value if delta else None!r}")
+        main_frame = next((frame for frame in method_state.stack if frame.frame_name == "main"), None)
+        c = next((var for var in main_frame.variables if var.name == "c"), None) if main_frame else None
+        if c is None:
+            errors.append("caller frame missing Counter object c during method call")
+        elif not c.is_object:
+            errors.append("c should be marked as an object")
+        elif _member_map(c).get("value") != "7":
+            errors.append(f"c.value expected 7 during method call, got {_member_map(c).get('value')!r}")
+        if this_var is not None and c is not None:
+            if this_var.value != c.address:
+                errors.append(f"this should point at c address {c.address}, got {this_var.value!r}")
+            if not any(edge.source_address == this_var.address and edge.target_address == c.address for edge in method_state.edges):
+                errors.append("missing this -> c stack pointer edge")
+
+    result = _last_var(trace, "result")
+    if result is None:
+        errors.append("missing final method result variable")
+    elif result[1].value != "7":
+        errors.append(f"method result expected 7, got {result[1].value!r}")
+    return errors
+
+
 CASES: dict[str, SmokeCase] = {
     "basic_double": SmokeCase(
         name="basic_double",
@@ -397,6 +438,21 @@ CASES: dict[str, SmokeCase] = {
             "int result = fact(3);\n"
         ),
         validate=_validate_recursive_call_stack,
+    ),
+    "object_method_call": SmokeCase(
+        name="object_method_call",
+        code=(
+            "struct Counter {\n"
+            "    int value;\n"
+            "    int add(int delta) {\n"
+            "        value += delta;\n"
+            "        return value;\n"
+            "    }\n"
+            "};\n"
+            "Counter c{2};\n"
+            "int result = c.add(5);\n"
+        ),
+        validate=_validate_object_method_call,
     ),
     "vector_int": SmokeCase(
         name="vector_int",

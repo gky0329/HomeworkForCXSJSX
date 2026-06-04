@@ -1807,6 +1807,60 @@ __CXXMV_FRAMEV__3
     assert [frame.variables[0].value for frame in step.stack[:3]] == ["1", "2", "3"]
 
 
+def test_debug_executor_parses_cdb_object_method_call_stack():
+    """CDB/PDB method calls should expose this, arguments, and caller object state."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Counter {\n"
+        "    int value;\n"
+        "    int add(int delta) {\n"
+        "        value += delta;\n"
+        "        return value;\n"
+        "    }\n"
+        "};\n"
+        "Counter c{2};\n"
+        "int result = c.add(5);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    value_line = generated_lines[4]
+    return_line = generated_lines[5]
+    call_line = generated_lines[9]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!Counter::add+0x11 [C:\tmp\program.cpp @ {value_line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!Counter::add+0x15 [C:\tmp\program.cpp @ {return_line}]
+01 000000aa`0000f040 program!main+0x31 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000ef90 Counter * this = 000000aa`0000efd0
+000000aa`0000efa0 int delta = 5
+__CXXMV_FRAMEV__1
+000000aa`0000efd0 Counter c = {{value=7}}
+000000aa`0000efe0 int result = -1
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+
+    assert step.line_number == 4
+    assert [frame.frame_name for frame in step.stack] == ["add", "main"]
+    this_var = step.stack[0].variables[0]
+    delta = step.stack[0].variables[1]
+    c = step.stack[1].variables[0]
+    assert this_var.name == "this"
+    assert this_var.is_pointer is True
+    assert this_var.value == c.address
+    assert delta.name == "delta"
+    assert delta.value == "5"
+    assert c.is_object is True
+    assert c.members[0].name == "value"
+    assert c.members[0].value == "7"
+    assert step.edges[0].source_address == this_var.address
+    assert step.edges[0].target_address == c.address
+
+
 def test_debug_executor_cdb_skips_step_in_transition_snapshots():
     """CDB should not label callee variables as the caller source line."""
     from app.core.debug_executor import DebugExecutor
@@ -2790,6 +2844,80 @@ def test_native_debug_smoke_requires_recursive_call_stack_state():
     assert _validate_recursive_call_stack(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_object_method_call_state():
+    """Native smoke should prove object methods expose this and updated members."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_object_method_call
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code="int result = c.add(5);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="c",
+                    type="Counter",
+                    value="{value=7}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="int", value="7")],
+                ),
+                Variable(name="result", type="int", value="7", address="0xS002", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="value += delta;",
+            stack=[
+                StackFrame(frame_name="add", variables=[
+                    Variable(name="this", type="Counter*", value="0xS001", address="0xS003", is_pointer=True),
+                    Variable(name="delta", type="int", value="5", address="0xS004", is_pointer=False),
+                ]),
+                StackFrame(frame_name="main", variables=[
+                    Variable(
+                        name="c",
+                        type="Counter",
+                        value="{value=7}",
+                        address="0xS001",
+                        is_pointer=False,
+                        is_object=True,
+                        members=[StructMember(name="value", type="int", value="7")],
+                    ),
+                ]),
+            ],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS003", target_address="0xS001")],
+        ),
+        MemoryState(
+            line_number=9,
+            source_code="int result = c.add(5);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="c",
+                    type="Counter",
+                    value="{value=7}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="int", value="7")],
+                ),
+                Variable(name="result", type="int", value="7", address="0xS002", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_object_method_call(weak_trace)
+    assert "missing observed Counter::add -> main method call stack" in weak_errors
+    assert _validate_object_method_call(strong_trace) == []
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2850,6 +2978,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
+        test_debug_executor_parses_cdb_object_method_call_stack,
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
@@ -2878,6 +3007,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
         test_native_debug_smoke_requires_recursive_call_stack_state,
+        test_native_debug_smoke_requires_object_method_call_state,
     ]
 
     passed = 0

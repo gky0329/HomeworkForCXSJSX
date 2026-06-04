@@ -72,6 +72,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --verbose --dump-traces .\
 python tools/native_debug_smoke.py --backend msvc-pdb --case basic_double
 python tools/native_debug_smoke.py --backend msvc-pdb --case call_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case recursive_factorial
+python tools/native_debug_smoke.py --backend msvc-pdb --case object_method_call
 python tools/native_debug_smoke.py --backend msvc-pdb --case reference_stack_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object
