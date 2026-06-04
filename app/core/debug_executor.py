@@ -756,6 +756,9 @@ class DebugExecutor:
             location = self._cdb_frame_location(before_chunk, prepared)
             if location is None:
                 continue
+            after_location = self._cdb_frame_location(after_chunk, prepared)
+            if self._is_step_in_transition(location, after_location, prepared):
+                continue
             original_line = prepared.line_map.get(location.line)
             if original_line is None:
                 continue
@@ -1059,7 +1062,10 @@ class DebugExecutor:
             return False
         if prepared.source_path and Path(after.file).name != Path(prepared.source_path).name:
             return True
-        return before.function != after.function
+        return (
+            DebugExecutor._clean_frame_name(before.function)
+            != DebugExecutor._clean_frame_name(after.function)
+        )
 
     def _parse_stack_snapshots(
         self,

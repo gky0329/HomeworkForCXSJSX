@@ -1644,6 +1644,99 @@ __CXXMV_FRAMEV__1
     assert step.heap == []
 
 
+def test_debug_executor_cdb_skips_step_in_transition_snapshots():
+    """CDB should not label callee variables as the caller source line."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int square(int x) {\n"
+        "    int y = x * x;\n"
+        "    return y;\n"
+        "}\n"
+        "int result = square(3);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    y_line = generated_lines[2]
+    call_line = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x11 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!square+0x2 [C:\tmp\program.cpp @ {y_line}]
+01 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int x = 3
+000000aa`0000efc4 int y = -1
+__CXXMV_FRAMEV__1
+000000aa`0000efd0 int result = -1
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+
+    assert trace.steps == []
+
+
+def test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns():
+    """CDB should keep the caller assignment once a stepped-in function returns."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int square(int x) {\n"
+        "    int y = x * x;\n"
+        "    return y;\n"
+        "}\n"
+        "int result = square(3);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    y_line = generated_lines[2]
+    return_line = generated_lines[3]
+    call_line = generated_lines[5]
+    wrapper_return_line = call_line + 1
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x11 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!square+0x2 [C:\tmp\program.cpp @ {y_line}]
+01 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int x = 3
+__CXXMV_FRAMEV__1
+000000aa`0000efd0 int result = -1
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!square+0x2 [C:\tmp\program.cpp @ {y_line}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!square+0x9 [C:\tmp\program.cpp @ {return_line}]
+01 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int x = 3
+000000aa`0000efc4 int y = 9
+__CXXMV_FRAMEV__1
+000000aa`0000efd0 int result = -1
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!square+0x9 [C:\tmp\program.cpp @ {return_line}]
+__CXXMV_AFTER__2
+00 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int result = -1
+__CXXMV_BEFORE__3
+00 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_AFTER__3
+00 000000aa`0000f048 program!main+0x28 [C:\tmp\program.cpp @ {wrapper_return_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int result = 9
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+
+    assert [step.line_number for step in trace.steps] == [2, 5]
+    assert trace.steps[0].stack[0].frame_name == "square"
+    result = trace.steps[1].stack[0].variables[0]
+    assert result.name == "result"
+    assert result.value == "9"
+
+
 def test_debug_executor_parses_cdb_arrays_and_objects():
     """CDB/PDB structured local values should become array/object model fields."""
     from app.core.debug_executor import DebugExecutor
@@ -2130,6 +2223,8 @@ if __name__ == "__main__":
         test_debug_executor_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
+        test_debug_executor_cdb_skips_step_in_transition_snapshots,
+        test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
