@@ -93,6 +93,7 @@ class StackItem(QGraphicsRectItem):
         super().__init__()
         self.frame = frame
         self.var_items: dict[str, VarItem] = {}
+        self.member_items: dict[str, QGraphicsTextItem] = {}
         self._layout_items: list[QGraphicsTextItem] = []
         self._on_item_moved = on_item_moved
         self._array_cells: list[QGraphicsRectItem] = []
@@ -148,6 +149,7 @@ class StackItem(QGraphicsRectItem):
     def update_frame(self, frame: StackFrame):
         self.frame = frame
         self.var_items = {}
+        self.member_items = {}
         self._layout_items = []
         self._array_cells = []
         self._array_cells_by_var = {}
@@ -394,6 +396,8 @@ class StackItem(QGraphicsRectItem):
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(self.PADDING + 16, y)
             self._layout_items.append(label)
+            if m.address:
+                self.member_items[m.address] = label
             y += 18
         return y
 
@@ -451,6 +455,8 @@ class StackItem(QGraphicsRectItem):
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(self.PADDING + 12, y)
             self._layout_items.append(label)
+            if m.address:
+                self.member_items[m.address] = label
             y += 18
         return y
 

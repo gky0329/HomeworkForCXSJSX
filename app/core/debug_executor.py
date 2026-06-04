@@ -65,6 +65,7 @@ class _ParsedMember:
     name: str
     type: str
     value: str
+    actual_addr: str = ""
 
 
 @dataclass
@@ -865,14 +866,15 @@ class DebugExecutor:
             for var in parsed_vars:
                 if var.pointee_addr:
                     pointer_targets[var.name] = var.pointee_addr
-                    if var.pointee_value and var.name != delete_name:
+                    skip_heap_refresh = var.name == delete_name or var.pointee_addr in freed_heap
+                    if var.pointee_value and not skip_heap_refresh:
                         heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
-                    if var.pointee_members and var.name != delete_name:
+                    if var.pointee_members and not skip_heap_refresh:
                         heap_object_values[var.pointee_addr] = (
                             var.pointee_type or self._pointee_type(var.type),
                             var.pointee_members,
                         )
-                    if var.pointee_elements and var.name != delete_name:
+                    if var.pointee_elements and not skip_heap_refresh:
                         element_type = var.pointee_type or self._pointee_type(var.type)
                         heap_array_values[var.pointee_addr] = (
                             element_type,
@@ -960,14 +962,15 @@ class DebugExecutor:
             for var in parsed_vars:
                 if var.pointee_addr:
                     pointer_targets[var.name] = var.pointee_addr
-                    if var.pointee_value and var.name != delete_name:
+                    skip_heap_refresh = var.name == delete_name or var.pointee_addr in freed_heap
+                    if var.pointee_value and not skip_heap_refresh:
                         heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
-                    if var.pointee_members and var.name != delete_name:
+                    if var.pointee_members and not skip_heap_refresh:
                         heap_object_values[var.pointee_addr] = (
                             var.pointee_type or self._pointee_type(var.type),
                             var.pointee_members,
                         )
-                    if var.name in array_exprs and var.name != delete_name:
+                    if var.name in array_exprs and not skip_heap_refresh:
                         element_type = prepared.heap_arrays.get(var.name, (self._pointee_type(var.type), 0))[0]
                         heap_array_values[var.pointee_addr] = (element_type, array_exprs[var.name])
                         heap_values[var.pointee_addr] = (
@@ -1041,6 +1044,14 @@ class DebugExecutor:
                 value = parsed.value
                 is_reference = "&" in parsed.type and "*" not in parsed.type
                 is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
+                is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
+                member_models = [] if is_function_object else self._struct_members_from_parsed(
+                    parsed.members,
+                    owner_address=stack_addr,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
+                )
                 if is_pointer and self._is_hex_addr(value) and not self._is_null(value):
                     value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif is_reference and self._is_hex_addr(value) and not self._is_null(value):
@@ -1049,9 +1060,8 @@ class DebugExecutor:
                     value = "nullptr"
                 elif parsed.elements:
                     value = self._format_elements(parsed.elements)
-                elif parsed.members:
-                    value = self._format_members(parsed.members)
-                is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
+                elif member_models:
+                    value = self._format_struct_members(member_models)
                 captures = [
                     LambdaCapture(
                         name=member.name,
@@ -1081,14 +1091,7 @@ class DebugExecutor:
                         ArrayElement(index=element.index, value=self._clean_value(element.value))
                         for element in parsed.elements
                     ],
-                    members=[] if is_function_object else [
-                        StructMember(
-                            name=member.name,
-                            type=self._clean_type(member.type),
-                            value=self._clean_value(member.value),
-                        )
-                        for member in parsed.members
-                    ],
+                    members=member_models,
                     is_object=bool(parsed.members) and not is_function_object,
                     class_name=object_class if parsed.members and not is_function_object else "",
                     base_classes=object_info.base_classes if parsed.members and not is_function_object else [],
@@ -1136,6 +1139,9 @@ class DebugExecutor:
                     heap_array_values=heap_array_values,
                     heap_object_values=heap_object_values,
                     class_info=class_info,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
                 )
 
         for actual_addr in sorted(allocated_heap):
@@ -1152,7 +1158,21 @@ class DebugExecutor:
                 heap_array_values=heap_array_values,
                 heap_object_values=heap_object_values,
                 class_info=class_info,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
             )
+
+        freed_target_addrs = {
+            self._target_sim_addr(addr, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            for addr in freed_heap
+        }
+        edge_keys = {(edge.source_address, edge.target_address) for edge in pointer_edges}
+        for _, variables in frame_variables:
+            for var in variables:
+                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, freed_target_addrs)
+        for block in heap_blocks_by_actual.values():
+            self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, freed_target_addrs)
 
         return MemoryState(
             line_number=original_line,
@@ -1494,6 +1514,7 @@ class DebugExecutor:
                         name=name,
                         type=clean_type,
                         value=self._clean_value(raw_value),
+                        actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
                     ))
                     pending_element.value = self._format_members(pending_element_members)
                     continue
@@ -1528,6 +1549,7 @@ class DebugExecutor:
                         name=name,
                         type=clean_type,
                         value=self._clean_value(raw_value),
+                        actual_addr=f"{pending.actual_addr}:{name}",
                     ))
                 continue
 
@@ -1603,6 +1625,7 @@ class DebugExecutor:
                             name=child_name.lstrip("*&"),
                             type=self._clean_type(child_type),
                             value=self._clean_value(child_value),
+                            actual_addr=actual_addr,
                         ))
                 elif pending_container is not None:
                     element_index = self._array_index(child_name)
@@ -1617,6 +1640,7 @@ class DebugExecutor:
                             name=child_name.lstrip("*&"),
                             type=self._clean_type(child_type),
                             value=self._clean_value(child_value),
+                            actual_addr=actual_addr,
                         ))
                 continue
 
@@ -2124,6 +2148,9 @@ class DebugExecutor:
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
         heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
         class_info: dict[str, _ClassInfo],
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
     ) -> HeapBlock:
         heap_type, heap_value = heap_values.get(actual_addr, (default_type, default_value))
         array_info = heap_array_values.get(actual_addr)
@@ -2146,19 +2173,19 @@ class DebugExecutor:
             object_type, members = object_info
             class_name = self._object_class_name(object_type or default_type)
             metadata = class_info.get(class_name, _ClassInfo())
+            member_models = self._struct_members_from_parsed(
+                members,
+                owner_address=target_addr,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+            )
             return HeapBlock(
                 address=target_addr,
                 type=self._clean_type(object_type or default_type),
-                value=self._format_members(members),
+                value=self._format_struct_members(member_models),
                 is_freed=is_freed,
-                members=[
-                    StructMember(
-                        name=member.name,
-                        type=self._clean_type(member.type),
-                        value=self._clean_value(member.value),
-                    )
-                    for member in members
-                ],
+                members=member_models,
                 is_object=True,
                 class_name=class_name,
                 base_classes=metadata.base_classes,
@@ -2170,6 +2197,76 @@ class DebugExecutor:
             value=self._clean_value(heap_value),
             is_freed=is_freed,
         )
+
+    def _struct_members_from_parsed(
+        self,
+        members: list[_ParsedMember],
+        owner_address: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> list[StructMember]:
+        return [
+            StructMember(
+                name=member.name,
+                type=self._clean_type(member.type),
+                value=self._member_display_value(
+                    member,
+                    actual_stack_lookup,
+                    stack_addr_map,
+                    heap_addr_map,
+                ),
+                address=self._member_sim_addr(owner_address, member.name, index),
+            )
+            for index, member in enumerate(members)
+        ]
+
+    def _member_display_value(
+        self,
+        member: _ParsedMember,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> str:
+        value = self._clean_value(member.value)
+        is_reference = "&" in member.type and "*" not in member.type
+        if (self._is_pointer_like_type(member.type) or is_reference) and self._is_null(value):
+            return "nullptr"
+        if (
+            (self._is_pointer_like_type(member.type) or is_reference)
+            and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+        ):
+            value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+            return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+        return value
+
+    @staticmethod
+    def _member_sim_addr(owner_address: str, member_name: str, index: int) -> str:
+        safe_name = re.sub(r"[^A-Za-z0-9_]+", "_", member_name or f"member_{index}").strip("_")
+        return f"{owner_address}.{safe_name or f'member_{index}'}"
+
+    def _append_member_pointer_edges(
+        self,
+        members: list[StructMember],
+        pointer_edges: list[PointerEdge],
+        edge_keys: set[tuple[str, str]],
+        freed_target_addrs: set[str],
+    ):
+        for member in members:
+            if not member.address or not self._is_pointer_like_type(member.type):
+                continue
+            target_addr = member.value
+            if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                continue
+            key = (member.address, target_addr)
+            if key in edge_keys:
+                continue
+            pointer_edges.append(PointerEdge(
+                source_address=member.address,
+                target_address=target_addr,
+                is_dangling=target_addr in freed_target_addrs,
+            ))
+            edge_keys.add(key)
 
     def _target_sim_addr(
         self,
@@ -2442,5 +2539,12 @@ class DebugExecutor:
     def _format_members(members: list[_ParsedMember]) -> str:
         return "{" + ", ".join(
             f"{member.name}={DebugExecutor._clean_value(member.value)}"
+            for member in members
+        ) + "}"
+
+    @staticmethod
+    def _format_struct_members(members: list[StructMember]) -> str:
+        return "{" + ", ".join(
+            f"{member.name}={member.value}"
             for member in members
         ) + "}"

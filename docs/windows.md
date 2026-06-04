@@ -77,6 +77,8 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case inherited_virtual_o
 python tools/native_debug_smoke.py --backend msvc-pdb --case reference_stack_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_dangling_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case double_pointer_stack
+python tools/native_debug_smoke.py --backend msvc-pdb --case member_pointer_linked_list
+python tools/native_debug_smoke.py --backend msvc-pdb --case heap_member_pointer_linked_list
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_array
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object

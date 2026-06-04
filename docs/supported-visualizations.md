@@ -204,6 +204,25 @@
 - Edge 指向的堆块 class_name 为 `"Dog"`，包含 Dog 全部成员
 - Canvas 通过观察指针箭头指向的实际 class_name 理解多态
 
+### 7.4 对象成员指针
+
+```json
+{
+  "name": "second",
+  "type": "Node",
+  "value": "{value=2, next=0xS001}",
+  "address": "0xS002",
+  "is_object": true,
+  "members": [
+    {"name": "value", "type": "int", "value": "2", "address": "0xS002.value"},
+    {"name": "next", "type": "Node*", "value": "0xS001", "address": "0xS002.next"}
+  ]
+}
+```
+
+- Canvas: `.next: Node* = 0xS001` 这一行作为箭头起点，指向目标 `Node` 对象。
+- 适合链表、树、图节点等课堂/OJ 高频结构，例如 `second.next -> first`。
+
 ---
 
 ## 8. Lambda / 函数对象 (is_function_object)

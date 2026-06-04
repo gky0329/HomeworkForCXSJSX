@@ -146,6 +146,8 @@ class MemoryCanvas:
             self._stack_items.append(item)
             for addr, var_item in item.var_items.items():
                 self._address_to_item[addr] = var_item
+            for addr, member_item in item.member_items.items():
+                self._address_to_item[addr] = member_item
             stack_y += item.rect().height() + ITEM_GAP
 
         heap_y = START_Y
@@ -165,6 +167,8 @@ class MemoryCanvas:
                 item.update_block(block)
             self._heap_items.append(item)
             self._address_to_item[block.address] = item
+            for addr, member_item in item.member_items.items():
+                self._address_to_item[addr] = member_item
             heap_y += item.rect().height() + ITEM_GAP
 
         # remove items that are no longer present
@@ -209,10 +213,12 @@ class MemoryCanvas:
     def _on_item_moved(self, item: QGraphicsItem, cause: str = "move"):
         # Update edges for moved/changed item
         if isinstance(item, StackItem):
-            for addr in item.var_items:
+            for addr in list(item.var_items) + list(item.member_items):
                 self._update_edges_for_address(addr)
         elif isinstance(item, HeapItem):
             self._update_edges_for_address(item.address)
+            for addr in item.member_items:
+                self._update_edges_for_address(addr)
 
         # Only attempt layout reordering when the item changed size/content.
         # Do not attempt during interactive moves to avoid re-entrant moves.
@@ -308,10 +314,12 @@ class MemoryCanvas:
 
         for item in moved_items:
             if isinstance(item, StackItem):
-                for addr in item.var_items:
+                for addr in list(item.var_items) + list(item.member_items):
                     self._update_edges_for_address(addr)
             elif isinstance(item, HeapItem):
                 self._update_edges_for_address(item.address)
+                for addr in item.member_items:
+                    self._update_edges_for_address(addr)
 
     def _update_edges_for_address(self, address: str):
         for edge in self._edge_by_source.get(address, []):

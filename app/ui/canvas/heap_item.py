@@ -29,6 +29,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_value_labels: list[QGraphicsTextItem] = []
         self._array_index_labels: list[QGraphicsTextItem] = []
         self._text_items: list[QGraphicsTextItem] = []
+        self.member_items: dict[str, QGraphicsTextItem] = {}
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -53,6 +54,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_value_labels.clear()
         self._array_index_labels.clear()
         self._text_items.clear()
+        self.member_items.clear()
         for child in list(self.childItems()):
             child.setParentItem(None)
             if child.scene() is not None:
@@ -251,6 +253,8 @@ class HeapItem(QGraphicsRectItem):
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, title_bottom + i * member_h)
+            if m.address:
+                self.member_items[m.address] = label
             self._value_label = label
 
         self._refresh_geometry()
@@ -328,6 +332,8 @@ class HeapItem(QGraphicsRectItem):
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, y)
+            if m.address:
+                self.member_items[m.address] = label
             self._value_label = label
             y += member_h
 

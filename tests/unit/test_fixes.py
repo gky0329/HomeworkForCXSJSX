@@ -173,6 +173,62 @@ def test_memory_canvas_does_not_remove_rekeyed_stack_item():
     assert stack_items[0].frame.frame_name == "foo"
 
 
+def test_memory_canvas_registers_member_pointer_edge_sources():
+    """Member pointer edges should originate from the member label, not disappear."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 800, 600)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=5,
+        source_code="head->next->value = 3;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(
+                name="first",
+                type="Node",
+                value="{value=3, next=nullptr}",
+                address="0xS001",
+                is_pointer=False,
+                is_object=True,
+                members=[
+                    StructMember(name="value", type="int", value="3", address="0xS001.value"),
+                    StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                ],
+            ),
+            Variable(
+                name="second",
+                type="Node",
+                value="{value=2, next=0xS001}",
+                address="0xS002",
+                is_pointer=False,
+                is_object=True,
+                members=[
+                    StructMember(name="value", type="int", value="2", address="0xS002.value"),
+                    StructMember(name="next", type="Node*", value="0xS001", address="0xS002.next"),
+                ],
+            ),
+        ])],
+        heap=[],
+        edges=[PointerEdge(source_address="0xS002.next", target_address="0xS001")],
+    )
+
+    canvas.render_state(state)
+
+    assert canvas.get_item_by_address("0xS002.next") is not None
+    assert canvas.get_item_by_address("0xS001") is not None
+    assert len(canvas.get_edge_items()) == 1
+
+
 def test_canvas_view_uses_stable_fit_bounds():
     """Auto-fit should use trace-wide bounds instead of per-step item bounds."""
     from PySide6.QtCore import QRectF
@@ -1080,6 +1136,59 @@ __CXXMV_FRAME__0__{l5 + 1}__main
         ("factor", "int&", values["factor"].address, True),
     ]
     assert values["result"].value == "16"
+
+
+def test_debug_executor_parses_lldb_member_pointer_edges():
+    """LLDB object members that are pointers should become member-origin edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1, nullptr};\n"
+        "Node second{2, &first};\n"
+        "Node* head = &second;\n"
+        "head->next->value = 3;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l5 = generated_lines[5]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l5}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l5 + 1}:1
+__CXXMV_FRAME__0__{l5 + 1}__main
+0x000000016fdfe6b0: (Node) first = {{
+0x000000016fdfe6b0:   (int) value = 3
+0x000000016fdfe6b8:   (Node *) next = 0x0000000000000000
+}}
+0x000000016fdfe6c0: (Node) second = {{
+0x000000016fdfe6c0:   (int) value = 2
+0x000000016fdfe6c8:   (Node *) next = 0x000000016fdfe6b0
+}}
+0x000000016fdfe6d0: (Node *) head = 0x000000016fdfe6c0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    second = values["second"]
+    head = values["head"]
+    next_member = next(member for member in second.members if member.name == "next")
+
+    assert first.members[0].value == "3"
+    assert next_member.value == first.address
+    assert next_member.address == f"{second.address}.next"
+    assert head.value == second.address
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (head.address, second.address),
+        (next_member.address, first.address),
+    }
+    assert step.heap == []
 
 
 def test_debug_executor_parses_vector_elements_as_array_variable():
@@ -2295,6 +2404,62 @@ __CXXMV_FRAMEV__0
         (values["p"].address, values["a"].address),
         (values["pp"].address, values["p"].address),
     }
+
+
+def test_debug_executor_parses_cdb_member_pointer_edges():
+    """CDB/PDB object pointer members should become member-origin edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1, nullptr};\n"
+        "Node second{2, &first};\n"
+        "Node* head = &second;\n"
+        "head->next->value = 3;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l5 = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l5 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Node first = {{value=3,next=0x0}}
+000000aa`0000efd0 Node second = {{value=2,next=000000aa`0000efc0}}
+000000aa`0000efe0 Node * head = 000000aa`0000efd0
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    first : {{...}} [Type: Node]
+        value : 3 [Type: int]
+        next : 0x0 [Type: Node *]
+    second : {{...}} [Type: Node]
+        value : 2 [Type: int]
+        next : 000000aa`0000efc0 [Type: Node *]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    second = values["second"]
+    head = values["head"]
+    next_member = next(member for member in second.members if member.name == "next")
+
+    assert first.members[0].value == "3"
+    assert next_member.type == "Node*"
+    assert next_member.value == first.address
+    assert next_member.address == f"{second.address}.next"
+    assert head.value == second.address
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (head.address, second.address),
+        (next_member.address, first.address),
+    }
+    assert step.heap == []
 
 
 def test_debug_executor_parses_cdb_reference_as_non_pointer():
@@ -4879,6 +5044,180 @@ def test_native_debug_smoke_requires_double_pointer_stack_state():
     assert _validate_double_pointer_stack(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_member_pointer_linked_list_state():
+    """Native smoke should prove object member pointers render as real edges."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_member_pointer_linked_list
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="head->next->value = 3;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=3, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="3"),
+                        StructMember(name="next", type="Node*", value="nullptr"),
+                    ],
+                ),
+                Variable(
+                    name="second",
+                    type="Node",
+                    value="{value=2, next=0xS001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2"),
+                        StructMember(name="next", type="Node*", value="0xS001"),
+                    ],
+                ),
+                Variable(name="head", type="Node*", value="0xS002", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS003", target_address="0xS002")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="head->next->value = 3;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=3, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="3", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="second",
+                    type="Node",
+                    value="{value=2, next=0xS001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xS002.value"),
+                        StructMember(name="next", type="Node*", value="0xS001", address="0xS002.next"),
+                    ],
+                ),
+                Variable(name="head", type="Node*", value="0xS002", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003", target_address="0xS002"),
+                PointerEdge(source_address="0xS002.next", target_address="0xS001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_member_pointer_linked_list(weak_trace)
+    assert "second.next should have a member source address" in weak_errors
+    assert _validate_member_pointer_linked_list(strong_trace) == []
+
+
+def test_native_debug_smoke_requires_heap_member_pointer_linked_list_state():
+    """Native smoke should preserve heap node member pointers across delete."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_heap_member_pointer_linked_list
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="delete first;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="first", type="Node*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="second", type="Node*", value="0xH002", address="0xS002", is_pointer=True),
+            ])],
+            heap=[
+                HeapBlock(
+                    address="0xH001",
+                    type="Node",
+                    value="{value=4, next=nullptr}",
+                    is_freed=True,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="4", address="0xH001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xH001.next"),
+                    ],
+                ),
+                HeapBlock(
+                    address="0xH002",
+                    type="Node",
+                    value="{value=2, next=0xH003}",
+                    is_freed=True,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xH002.value"),
+                        StructMember(name="next", type="Node*", value="0xH003", address="0xH002.next"),
+                    ],
+                ),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001", is_dangling=True),
+                PointerEdge(source_address="0xS002", target_address="0xH002", is_dangling=True),
+                PointerEdge(source_address="0xH002.next", target_address="0xH003", is_dangling=False),
+            ],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="delete first;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="first", type="Node*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="second", type="Node*", value="0xH002", address="0xS002", is_pointer=True),
+            ])],
+            heap=[
+                HeapBlock(
+                    address="0xH001",
+                    type="Node",
+                    value="{value=4, next=nullptr}",
+                    is_freed=True,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="4", address="0xH001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xH001.next"),
+                    ],
+                ),
+                HeapBlock(
+                    address="0xH002",
+                    type="Node",
+                    value="{value=2, next=0xH001}",
+                    is_freed=True,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xH002.value"),
+                        StructMember(name="next", type="Node*", value="0xH001", address="0xH002.next"),
+                    ],
+                ),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001", is_dangling=True),
+                PointerEdge(source_address="0xS002", target_address="0xH002", is_dangling=True),
+                PointerEdge(source_address="0xH002.next", target_address="0xH001", is_dangling=True),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_heap_member_pointer_linked_list(weak_trace)
+    assert any("second heap next should still target first heap" in error for error in weak_errors)
+    assert any("missing dangling second heap next -> first heap edge" in error for error in weak_errors)
+    assert _validate_heap_member_pointer_linked_list(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_recursive_call_stack_state():
     """Native smoke should prove recursion exposes nested stack frames."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -5019,6 +5358,7 @@ if __name__ == "__main__":
         test_memory_model_normalizes_llm_nulls_and_numbers,
         test_clear_layout_recurses_nested_layouts,
         test_memory_canvas_does_not_remove_rekeyed_stack_item,
+        test_memory_canvas_registers_member_pointer_edge_sources,
         test_canvas_view_uses_stable_fit_bounds,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
@@ -5039,6 +5379,7 @@ if __name__ == "__main__":
         test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_lldb_script_expands_smart_pointers,
         test_debug_executor_parses_lambda_captures_as_function_object,
+        test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
@@ -5072,6 +5413,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
         test_debug_executor_parses_cdb_expired_stack_pointer_as_dangling,
         test_debug_executor_parses_cdb_double_pointer_stack_edges,
+        test_debug_executor_parses_cdb_member_pointer_edges,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -5126,6 +5468,8 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
         test_native_debug_smoke_requires_double_pointer_stack_state,
+        test_native_debug_smoke_requires_member_pointer_linked_list_state,
+        test_native_debug_smoke_requires_heap_member_pointer_linked_list_state,
         test_native_debug_smoke_requires_recursive_call_stack_state,
         test_native_debug_smoke_requires_object_method_call_state,
     ]

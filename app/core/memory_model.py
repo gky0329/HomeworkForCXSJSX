@@ -30,8 +30,9 @@ class StructMember(MemoryBaseModel):
     name: str = ""
     type: str = ""
     value: str = ""
+    address: str = ""
 
-    _normalize_text = field_validator("name", "type", "value", mode="before")(_empty_string_if_none)
+    _normalize_text = field_validator("name", "type", "value", "address", mode="before")(_empty_string_if_none)
 
 
 class LambdaCapture(MemoryBaseModel):

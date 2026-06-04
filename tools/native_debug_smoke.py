@@ -79,7 +79,12 @@ def _variable_summary(var: Variable) -> dict[str, object]:
         "base_classes": list(var.base_classes),
         "virtual_methods": list(var.virtual_methods),
         "members": [
-            {"name": member.name, "type": member.type, "value": member.value}
+            {
+                "name": member.name,
+                "type": member.type,
+                "value": member.value,
+                "address": member.address,
+            }
             for member in var.members[:8]
         ],
         "captures": [
@@ -134,7 +139,12 @@ def _trace_summary(trace: ExecutionTrace) -> dict[str, object]:
                 "base_classes": list(block.base_classes),
                 "virtual_methods": list(block.virtual_methods),
                 "members": [
-                    {"name": member.name, "type": member.type, "value": member.value}
+                    {
+                        "name": member.name,
+                        "type": member.type,
+                        "value": member.value,
+                        "address": member.address,
+                    }
                     for member in block.members[:8]
                 ],
             }
@@ -797,6 +807,94 @@ def _validate_double_pointer_stack(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_member_pointer_linked_list(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    first = values.get("first")
+    second = values.get("second")
+    head = values.get("head")
+    if first is None:
+        errors.append("missing linked-list node first")
+    elif _member_map(first).get("value") != "3":
+        errors.append(f"first.value expected 3 after head->next write, got {_member_map(first).get('value')!r}")
+    if second is None:
+        errors.append("missing linked-list node second")
+    else:
+        next_members = [member for member in second.members if member.name == "next"]
+        if not next_members:
+            errors.append("second.next member should exist")
+        elif first is not None:
+            next_member = next_members[0]
+            if next_member.value != first.address:
+                errors.append(f"second.next should target first address {first.address}, got {next_member.value!r}")
+            if not next_member.address:
+                errors.append("second.next should have a member source address")
+            elif not any(
+                edge.source_address == next_member.address and edge.target_address == first.address
+                for edge in state.edges
+            ):
+                errors.append("missing second.next -> first member pointer edge")
+    if head is None:
+        errors.append("missing head pointer")
+    elif second is not None:
+        if head.value != second.address:
+            errors.append(f"head should target second address {second.address}, got {head.value!r}")
+        if not any(edge.source_address == head.address and edge.target_address == second.address for edge in state.edges):
+            errors.append("missing head -> second pointer edge")
+    return errors
+
+
+def _validate_heap_member_pointer_linked_list(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    first_ptr = values.get("first")
+    second_ptr = values.get("second")
+    if first_ptr is None or second_ptr is None:
+        errors.append("missing heap linked-list pointer variables first and second")
+        return errors
+    first_heap = next((block for block in state.heap if block.address == first_ptr.value), None)
+    second_heap = next((block for block in state.heap if block.address == second_ptr.value), None)
+    if first_heap is None:
+        errors.append(f"missing first heap node {first_ptr.value}")
+    if second_heap is None:
+        errors.append(f"missing second heap node {second_ptr.value}")
+    if first_heap is not None:
+        if _member_map(first_heap).get("value") != "4":
+            errors.append(f"first heap value expected 4, got {_member_map(first_heap).get('value')!r}")
+        if not first_heap.is_freed:
+            errors.append("first heap node should remain visible as freed after delete first")
+    if second_heap is not None:
+        if not second_heap.is_freed:
+            errors.append("second heap node should remain visible as freed after delete second")
+        next_members = [member for member in second_heap.members if member.name == "next"]
+        if not next_members:
+            errors.append("second heap node should keep next member")
+        elif first_heap is not None:
+            next_member = next_members[0]
+            if next_member.value != first_heap.address:
+                errors.append(f"second heap next should still target first heap {first_heap.address}, got {next_member.value!r}")
+            if not next_member.address:
+                errors.append("second heap next should have a member source address")
+            elif not any(
+                edge.source_address == next_member.address
+                and edge.target_address == first_heap.address
+                and edge.is_dangling
+                for edge in state.edges
+            ):
+                errors.append("missing dangling second heap next -> first heap edge after delete first")
+    if not any(edge.source_address == first_ptr.address and edge.target_address == first_ptr.value and edge.is_dangling for edge in state.edges):
+        errors.append("missing dangling first pointer edge after delete first")
+    if not any(edge.source_address == second_ptr.address and edge.target_address == second_ptr.value and edge.is_dangling for edge in state.edges):
+        errors.append("missing dangling second pointer edge after delete second")
+    return errors
+
+
 def _validate_recursive_call_stack(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     recursive_state = None
@@ -1047,6 +1145,29 @@ CASES: dict[str, SmokeCase] = {
             "**pp = 7;\n"
         ),
         validate=_validate_double_pointer_stack,
+    ),
+    "member_pointer_linked_list": SmokeCase(
+        name="member_pointer_linked_list",
+        code=(
+            "struct Node { int value; Node* next; };\n"
+            "Node first{1, nullptr};\n"
+            "Node second{2, &first};\n"
+            "Node* head = &second;\n"
+            "head->next->value = 3;\n"
+        ),
+        validate=_validate_member_pointer_linked_list,
+    ),
+    "heap_member_pointer_linked_list": SmokeCase(
+        name="heap_member_pointer_linked_list",
+        code=(
+            "struct Node { int value; Node* next; };\n"
+            "Node* first = new Node{1, nullptr};\n"
+            "Node* second = new Node{2, first};\n"
+            "second->next->value = 4;\n"
+            "delete second;\n"
+            "delete first;\n"
+        ),
+        validate=_validate_heap_member_pointer_linked_list,
     ),
     "recursive_factorial": SmokeCase(
         name="recursive_factorial",
