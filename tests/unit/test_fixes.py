@@ -2060,6 +2060,79 @@ __CXXMV_FRAME__0__{l5 + 1}__main
     assert final.edges == []
 
 
+def test_debug_executor_marks_expired_lldb_weak_ptr_as_dangling():
+    """LLDB weak_ptr should not keep a heap block live after all shared owners reset."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "using namespace std;\n"
+        "shared_ptr<int> sp = make_shared<int>(3);\n"
+        "weak_ptr<int> wp = sp;\n"
+        "sp.reset();\n"
+        "bool gone = wp.expired();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    l6 = generated_lines[6]
+    shared_type = "std::__1::shared_ptr<int>"
+    weak_type = "std::__1::weak_ptr<int>"
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l3}:21
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l4}:1
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe700: ({shared_type}) sp = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *sp = 3
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l4}:1
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l5}:1
+__CXXMV_FRAME__0__{l5}__main
+0x000000016fdfe700: ({shared_type}) sp = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *sp = 3
+}}
+0x000000016fdfe710: ({weak_type}) wp = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *wp = 3
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l5}:1
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l6}:11
+__CXXMV_FRAME__0__{l6}__main
+0x000000016fdfe700: ({shared_type}) sp = 0x0
+0x000000016fdfe710: ({weak_type}) wp = 0x00000001006446a0
+__CXXMV_BEFORE__3
+frame #0: 0x4 program`main at program.cpp:{l6}:11
+__CXXMV_AFTER__3
+frame #0: 0x5 program`main at program.cpp:{l6 + 1}:1
+__CXXMV_FRAME__0__{l6 + 1}__main
+0x000000016fdfe700: ({shared_type}) sp = 0x0
+0x000000016fdfe710: ({weak_type}) wp = 0x00000001006446a0
+0x000000016fdfe720: (bool) gone = true
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    final = trace.steps[-1]
+    values = {var.name: var for var in final.stack[0].variables}
+    heap = final.heap[0]
+
+    assert values["sp"].value == "nullptr"
+    assert values["wp"].value == heap.address
+    assert values["gone"].value == "true"
+    assert heap.value == "3"
+    assert heap.is_freed is True
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in final.edges
+    } == {(values["wp"].address, heap.address, True)}
+
+
 def test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete():
     """A base pointer to a derived heap object should keep a stable stack address."""
     from app.core.debug_executor import DebugExecutor
@@ -3616,6 +3689,71 @@ __CXXMV_FRAMEV__0
     assert final.edges == []
 
 
+def test_debug_executor_marks_expired_cdb_weak_ptr_as_dangling():
+    """CDB/PDB weak_ptr should not keep a heap block live after all shared owners reset."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "using namespace std;\n"
+        "std::shared_ptr<int> sp = std::make_shared<int>(3);\n"
+        "std::weak_ptr<int> wp = sp;\n"
+        "sp.reset();\n"
+        "bool gone = wp.expired();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    l6 = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> sp = 000001df`4e700000 {{3}}
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> sp = 000001df`4e700000 {{3}}
+000000aa`0000efd0 std::weak_ptr<int> wp = 000001df`4e700000 {{3}}
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l6}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> sp = 00000000`00000000
+000000aa`0000efd0 std::weak_ptr<int> wp = 000001df`4e700000 {{3}}
+__CXXMV_BEFORE__3
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l6}]
+__CXXMV_AFTER__3
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l6 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> sp = 00000000`00000000
+000000aa`0000efd0 std::weak_ptr<int> wp = 000001df`4e700000 {{3}}
+000000aa`0000efe0 bool gone = true
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    final = trace.steps[-1]
+    values = {var.name: var for var in final.stack[0].variables}
+    heap = final.heap[0]
+
+    assert values["sp"].value == "nullptr"
+    assert values["wp"].value == heap.address
+    assert values["gone"].value == "true"
+    assert heap.value == "3"
+    assert heap.is_freed is True
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in final.edges
+    } == {(values["wp"].address, heap.address, True)}
+
+
 def test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap():
     """CDB/PDB shared_ptr summaries should keep multiple owner edges to one heap block."""
     from app.core.debug_executor import DebugExecutor
@@ -5100,6 +5238,44 @@ def test_native_debug_smoke_requires_shared_ptr_owner_state():
     assert _validate_shared_ptr_owners(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_weak_ptr_expired_state():
+    """Native smoke should prove expired weak_ptr targets are dangling, not live owners."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_weak_ptr_expired
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="bool gone = wp.expired();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sp", type="std::shared_ptr<int>", value="nullptr", address="0xS001", is_pointer=True),
+                Variable(name="wp", type="std::weak_ptr<int>", value="0xH001", address="0xS002", is_pointer=True),
+                Variable(name="gone", type="bool", value="true", address="0xS003", is_pointer=False),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="3")],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="bool gone = wp.expired();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sp", type="std::shared_ptr<int>", value="nullptr", address="0xS001", is_pointer=True),
+                Variable(name="wp", type="std::weak_ptr<int>", value="0xH001", address="0xS002", is_pointer=True),
+                Variable(name="gone", type="bool", value="true", address="0xS003", is_pointer=False),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="3", is_freed=True)],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xH001", is_dangling=True)],
+        ),
+    ])
+
+    weak_errors = _validate_weak_ptr_expired(weak_trace)
+    assert "expired weak_ptr target heap should be marked freed" in weak_errors
+    assert "missing dangling wp -> expired heap edge" in weak_errors
+    assert _validate_weak_ptr_expired(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_control_flow_loop_state():
     """Native smoke should prove real debugger execution follows loop/branch paths."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -6547,6 +6723,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_heap_object_members_from_pointer,
         test_debug_executor_preserves_overwritten_heap_as_leak,
         test_debug_executor_parses_unique_ptr_as_heap_pointer,
+        test_debug_executor_marks_expired_lldb_weak_ptr_as_dangling,
         test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
@@ -6588,6 +6765,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,
         test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
+        test_debug_executor_marks_expired_cdb_weak_ptr_as_dangling,
         test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap,
         test_debug_executor_parses_cdb_control_flow_loop_scope,
         test_debug_executor_parses_cdb_lambda_captures_as_function_object,
@@ -6622,6 +6800,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_heap_leak_overwrite_state,
         test_native_debug_smoke_requires_unique_ptr_heap_state,
         test_native_debug_smoke_requires_shared_ptr_owner_state,
+        test_native_debug_smoke_requires_weak_ptr_expired_state,
         test_native_debug_smoke_requires_control_flow_loop_state,
         test_native_debug_smoke_requires_lambda_capture_state,
         test_native_debug_smoke_requires_heap_array_delete_state,

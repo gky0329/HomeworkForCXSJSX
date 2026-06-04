@@ -735,6 +735,48 @@ def _validate_shared_ptr_owners(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_weak_ptr_expired(trace: ExecutionTrace) -> list[str]:
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(final_state)}
+    sp = values.get("sp")
+    wp = values.get("wp")
+    gone = values.get("gone")
+    errors: list[str] = []
+    if sp is None:
+        errors.append("missing shared_ptr variable sp")
+    elif sp.value != "nullptr":
+        errors.append(f"sp expected nullptr after reset, got {sp.value!r}")
+    if wp is None:
+        errors.append("missing weak_ptr variable wp")
+        return errors
+    if not wp.is_pointer:
+        errors.append("weak_ptr wp should render as pointer-like")
+    if gone is None:
+        errors.append("missing gone bool from wp.expired()")
+    elif gone.value != "true":
+        errors.append(f"gone expected true after owner reset, got {gone.value!r}")
+
+    target_heap = next((block for block in final_state.heap if block.address == wp.value), None)
+    if target_heap is None:
+        errors.append(f"missing historical heap block for expired weak_ptr target {wp.value!r}")
+    else:
+        if not target_heap.is_freed:
+            errors.append("expired weak_ptr target heap should be marked freed")
+        if target_heap.value != "3":
+            errors.append(f"expired weak_ptr target value expected 3, got {target_heap.value!r}")
+    dangling_edges = [
+        edge for edge in final_state.edges
+        if edge.source_address == wp.address and edge.target_address == wp.value and edge.is_dangling
+    ]
+    if not dangling_edges:
+        errors.append("missing dangling wp -> expired heap edge")
+    if sp is not None and any(edge.source_address == sp.address for edge in final_state.edges):
+        errors.append("reset shared_ptr sp should not keep an owner edge")
+    return errors
+
+
 def _validate_control_flow_loop(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     if_state_values: list[int] = []
@@ -1317,6 +1359,18 @@ CASES: dict[str, SmokeCase] = {
             "*b = 11;\n"
         ),
         validate=_validate_shared_ptr_owners,
+    ),
+    "weak_ptr_expired": SmokeCase(
+        name="weak_ptr_expired",
+        code=(
+            "#include <memory>\n"
+            "using namespace std;\n"
+            "shared_ptr<int> sp = make_shared<int>(3);\n"
+            "weak_ptr<int> wp = sp;\n"
+            "sp.reset();\n"
+            "bool gone = wp.expired();\n"
+        ),
+        validate=_validate_weak_ptr_expired,
     ),
     "control_flow_loop": SmokeCase(
         name="control_flow_loop",

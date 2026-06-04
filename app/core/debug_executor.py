@@ -1117,6 +1117,21 @@ class DebugExecutor:
             frame_variables.append((parsed_frame.name, variables))
 
         parsed_vars = [var for parsed_frame in parsed_frames for var in parsed_frame.variables]
+        shared_owner_targets = {
+            var.pointee_addr
+            for var in parsed_vars
+            if var.pointee_addr
+            and not self._is_null(var.pointee_addr)
+            and self._is_shared_pointer_type(var.type)
+        }
+        expired_weak_targets = {
+            var.pointee_addr
+            for var in parsed_vars
+            if var.pointee_addr
+            and not self._is_null(var.pointee_addr)
+            and self._is_weak_pointer_type(var.type)
+            and var.pointee_addr not in shared_owner_targets
+        }
         for parsed in parsed_vars:
             if not parsed.pointee_addr or self._is_null(parsed.pointee_addr):
                 continue
@@ -1135,7 +1150,7 @@ class DebugExecutor:
                 parsed.pointee_addr in stack_addr_map
                 and parsed.pointee_addr not in actual_stack_lookup
             )
-            is_dangling = parsed.pointee_addr in freed_heap or is_dead_stack_target
+            is_dangling = parsed.pointee_addr in freed_heap or parsed.pointee_addr in expired_weak_targets or is_dead_stack_target
             pointer_edges.append(PointerEdge(
                 source_address=source_addr,
                 target_address=target_addr,
@@ -1179,7 +1194,7 @@ class DebugExecutor:
 
         freed_target_addrs = {
             self._target_sim_addr(addr, actual_stack_lookup, stack_addr_map, heap_addr_map)
-            for addr in freed_heap
+            for addr in (freed_heap | expired_weak_targets)
         }
         dead_stack_target_addrs = set(stack_addr_map.values()) - set(actual_stack_lookup.values())
         dangling_target_addrs = freed_target_addrs | dead_stack_target_addrs
@@ -3020,6 +3035,30 @@ class DebugExecutor:
                 "std::weak_ptr<",
                 "std::__1::unique_ptr<",
                 "std::__1::shared_ptr<",
+                "std::__1::weak_ptr<",
+            )
+        )
+
+    @staticmethod
+    def _is_shared_pointer_type(type_text: str) -> bool:
+        compact = type_text.replace(" ", "")
+        return any(
+            token in compact
+            for token in (
+                "shared_ptr<",
+                "std::shared_ptr<",
+                "std::__1::shared_ptr<",
+            )
+        )
+
+    @staticmethod
+    def _is_weak_pointer_type(type_text: str) -> bool:
+        compact = type_text.replace(" ", "")
+        return any(
+            token in compact
+            for token in (
+                "weak_ptr<",
+                "std::weak_ptr<",
                 "std::__1::weak_ptr<",
             )
         )

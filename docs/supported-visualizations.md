@@ -93,6 +93,20 @@ STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包
 
 ---
 
+## 2.1 智能指针
+
+`std::unique_ptr<T>` / `std::shared_ptr<T>` 会按 pointer-like owner 渲染，目标对象显示为 heap block。多个 `shared_ptr` 指向同一对象时共享同一个 `0xH...` block，并分别画 owner edge。
+
+`std::weak_ptr<T>` 不视为 owner。只要仍有 live `shared_ptr` owner，`weak_ptr` 会显示为普通弱引用边；当所有 `shared_ptr` owner reset 后，`weak_ptr` 仍保留历史目标地址，但目标 heap 标记为 freed，边显示为 dangling，避免误导用户以为 weak_ptr 延长了对象生命周期。
+
+```cpp
+std::shared_ptr<int> sp = std::make_shared<int>(3);
+std::weak_ptr<int> wp = sp;
+sp.reset();
+bool gone = wp.expired();
+```
+预期: `sp` 显示 `nullptr`，`wp` 指向历史 heap block；该 heap block 标记为 freed，`wp -> heap` 为 dangling edge，`gone = true`。
+
 ## 3. struct / class (members)
 
 ```json
