@@ -760,6 +760,8 @@ class DebugExecutor:
                     f".echo __CXXMV_FRAMEV__{frame_idx}",
                     f".frame {frame_idx}",
                     "dv /t /v",
+                    f".echo __CXXMV_FRAMEDX__{frame_idx}",
+                    "dx -r2 @$curframe.Locals",
                 ])
         commands.append("q")
         return "\n".join(commands) + "\n"
@@ -1216,7 +1218,7 @@ class DebugExecutor:
         matches = list(marker_re.finditer(text))
         if not matches:
             variables = [
-                var for var in self._parse_cdb_variables(text)
+                var for var in self._parse_cdb_frame_variables(text)
                 if declarations.get(var.name, 0) <= fallback_original_line
             ]
             return [_ParsedFrame(
@@ -1254,7 +1256,7 @@ class DebugExecutor:
             if seen_names[frame_name] > 1:
                 frame_name = f"{frame_name}({seen_names[frame_name]})"
             variables = [
-                var for var in self._parse_cdb_variables(frame_chunk)
+                var for var in self._parse_cdb_frame_variables(frame_chunk)
                 if declarations.get(var.name, 0) <= declaration_cutoff
             ]
             frames.append(_ParsedFrame(
@@ -1310,6 +1312,32 @@ class DebugExecutor:
             )
         return locations
 
+    def _parse_cdb_frame_variables(self, text: str) -> list[_ParsedVar]:
+        variables = self._parse_cdb_variables(text)
+        dx_variables = self._parse_cdb_dx_variables(text)
+        by_name = {var.name: var for var in variables}
+
+        for dx_var in dx_variables:
+            existing = by_name.get(dx_var.name)
+            if existing is None:
+                variables.append(dx_var)
+                by_name[dx_var.name] = dx_var
+                continue
+            if dx_var.elements:
+                existing.elements = dx_var.elements
+            if dx_var.members and not dx_var.elements:
+                existing.members = dx_var.members
+            if dx_var.pointee_addr and not existing.pointee_addr:
+                existing.pointee_addr = dx_var.pointee_addr
+            if dx_var.pointee_elements:
+                existing.pointee_elements = dx_var.pointee_elements
+            if dx_var.pointee_members:
+                existing.pointee_members = dx_var.pointee_members
+            if dx_var.value and not self._is_hex_addr(existing.value):
+                existing.value = dx_var.value
+
+        return variables
+
     def _parse_cdb_variables(self, text: str) -> list[_ParsedVar]:
         variables: list[_ParsedVar] = []
         pattern = re.compile(
@@ -1358,6 +1386,75 @@ class DebugExecutor:
             if "*" in var.type and self._is_hex_addr(value) and not self._is_null(value):
                 var.pointee_addr = value
             variables.append(var)
+        return variables
+
+    def _parse_cdb_dx_variables(self, text: str) -> list[_ParsedVar]:
+        variables: list[_ParsedVar] = []
+        pending: _ParsedVar | None = None
+        pending_indent = 0
+        pattern = re.compile(
+            r"^(?P<indent>\s+)"
+            r"(?P<name>\[\d+\]|[A-Za-z_]\w*)\s*:\s*"
+            r"(?P<value>.*?)\s*"
+            r"\[Type:\s*(?P<type>.*)\]\s*$"
+        )
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if (
+                not stripped
+                or stripped.startswith("__CXXMV_")
+                or stripped.startswith("@$curframe")
+                or stripped.startswith("[<")
+            ):
+                continue
+            match = pattern.match(line)
+            if match is None:
+                continue
+
+            indent = len(match.group("indent"))
+            name = match.group("name")
+            raw_value = match.group("value").strip()
+            clean_type = self._clean_type(match.group("type"))
+            clean_value = self._clean_cdb_value(raw_value)
+            if self._is_cdb_addr(clean_value):
+                clean_value = self._normalize_cdb_addr(clean_value)
+
+            if pending is not None and indent > pending_indent:
+                element_index = self._array_index(name)
+                if element_index is not None:
+                    pending.elements.append(_ParsedElement(
+                        index=element_index,
+                        type=clean_type,
+                        value=self._clean_value(raw_value),
+                    ))
+                else:
+                    pending.members.append(_ParsedMember(
+                        name=name,
+                        type=clean_type,
+                        value=self._clean_value(raw_value),
+                    ))
+                continue
+
+            var = _ParsedVar(
+                actual_addr=f"cdbdx:{len(variables)}:{name}",
+                type=clean_type,
+                name=name,
+                value=clean_value,
+            )
+            payload = self._structured_payload(raw_value)
+            if payload:
+                element_type = self._array_element_type(clean_type)
+                elements = self._parse_structured_elements(payload, element_type)
+                members = [] if elements else self._parse_structured_members(payload)
+                var.elements = elements
+                var.members = members
+            if "*" in var.type and self._is_hex_addr(clean_value) and not self._is_null(clean_value):
+                var.pointee_addr = clean_value
+            variables.append(var)
+            pending = var
+            pending_indent = indent
+
         return variables
 
     def _parse_variables(self, text: str) -> list[_ParsedVar]:
