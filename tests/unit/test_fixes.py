@@ -895,6 +895,62 @@ __CXXMV_FRAME__0__{l3 + 1}__main
     assert changed_ref.value == changed_a.address
 
 
+def test_debug_executor_marks_expired_stack_pointer_dangling():
+    """Pointers to locals that left scope should not become fake heap blocks."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = nullptr;\n"
+        "{\n"
+        "    int local = 5;\n"
+        "    p = &local;\n"
+        "}\n"
+        "int after = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l6 = generated_lines[6]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l3}:15
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l4}:8
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe700: (int *) p = 0x0
+0x000000016fdfe704: (int) local = 5
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l4}:8
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l6}:11
+__CXXMV_FRAME__0__{l6}__main
+0x000000016fdfe700: (int *) p = 0x000000016fdfe704
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l6}:11
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l6 + 1}:3
+__CXXMV_FRAME__0__{l6 + 1}__main
+0x000000016fdfe700: (int *) p = 0x000000016fdfe704
+0x000000016fdfe708: (int) after = 9
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    assign_step = trace.steps[1]
+    final = trace.steps[-1]
+    p = next(var for var in final.stack[0].variables if var.name == "p")
+    after = next(var for var in final.stack[0].variables if var.name == "after")
+
+    assert p.value == "0xS002"
+    assert after.value == "9"
+    assert assign_step.heap == []
+    assert final.heap == []
+    assert assign_step.edges[0].target_address == "0xS002"
+    assert assign_step.edges[0].is_dangling is True
+    assert final.edges[0].target_address == "0xS002"
+    assert final.edges[0].is_dangling is True
+
+
 def test_debug_executor_formats_std_string_summary_as_scalar():
     """std::string should show its readable value instead of an empty object shell."""
     from app.core.debug_executor import DebugExecutor
@@ -1909,6 +1965,62 @@ __CXXMV_FRAMEV__1
     assert step.stack[0].variables[0].value == step.stack[1].variables[0].address
     assert step.edges[0].target_address == step.stack[1].variables[0].address
     assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_expired_stack_pointer_as_dangling():
+    """CDB/PDB pointers to expired stack locals should not become heap blocks."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = nullptr;\n"
+        "{\n"
+        "    int local = 5;\n"
+        "    p = &local;\n"
+        "}\n"
+        "int after = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l6 = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 00000000`00000000
+000000aa`0000efc8 int local = 5
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l6}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000000aa`0000efc8
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l6}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l6 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000000aa`0000efc8
+000000aa`0000efd0 int after = 9
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    assign_step = trace.steps[1]
+    final = trace.steps[-1]
+    p = next(var for var in final.stack[0].variables if var.name == "p")
+    after = next(var for var in final.stack[0].variables if var.name == "after")
+
+    assert p.value == "0xS002"
+    assert after.value == "9"
+    assert assign_step.heap == []
+    assert final.heap == []
+    assert assign_step.edges[0].target_address == "0xS002"
+    assert assign_step.edges[0].is_dangling is True
+    assert final.edges[0].target_address == "0xS002"
+    assert final.edges[0].is_dangling is True
 
 
 def test_debug_executor_parses_cdb_double_pointer_stack_edges():
@@ -3469,6 +3581,43 @@ def test_native_debug_smoke_requires_pointer_reset_null_state():
     assert _validate_pointer_reset_null(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_stack_dangling_pointer_state():
+    """Native smoke should prove expired stack targets are dangling, not heap."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_stack_dangling_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="int after = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="after", type="int", value="9", address="0xS003", is_pointer=False),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="5")],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="int after = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="0xS002", address="0xS001", is_pointer=True),
+                Variable(name="after", type="int", value="9", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xS002", is_dangling=True)],
+        ),
+    ])
+
+    weak_errors = _validate_stack_dangling_pointer(weak_trace)
+    assert any("should not create heap blocks" in error for error in weak_errors)
+    assert any("historical stack address" in error for error in weak_errors)
+    assert "missing dangling p -> expired stack variable edge" in weak_errors
+    assert _validate_stack_dangling_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_stack_array_elements():
     """Native smoke should prove stack arrays preserve updated element cells."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -3941,6 +4090,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_c_string_pointer_summary,
         test_debug_executor_keeps_locals_on_wrapped_snippet_last_line,
         test_debug_executor_parses_reference_target_address,
+        test_debug_executor_marks_expired_stack_pointer_dangling,
         test_debug_executor_formats_std_string_summary_as_scalar,
         test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_parses_vector_elements_as_array_variable,
@@ -3972,6 +4122,7 @@ if __name__ == "__main__":
         test_debug_executor_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
+        test_debug_executor_parses_cdb_expired_stack_pointer_as_dangling,
         test_debug_executor_parses_cdb_double_pointer_stack_edges,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
@@ -4010,6 +4161,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_heap_polymorphic_delete_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
+        test_native_debug_smoke_requires_stack_dangling_pointer_state,
         test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,

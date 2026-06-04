@@ -1029,9 +1029,9 @@ class DebugExecutor:
                 is_reference = "&" in parsed.type and "*" not in parsed.type
                 is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
                 if is_pointer and self._is_hex_addr(value) and not self._is_null(value):
-                    value = self._target_sim_addr(value, actual_stack_lookup, heap_addr_map)
+                    value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif is_reference and self._is_hex_addr(value) and not self._is_null(value):
-                    value = self._target_sim_addr(value, actual_stack_lookup, heap_addr_map)
+                    value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif (is_pointer or is_reference) and self._is_null(value):
                     value = "nullptr"
                 elif parsed.elements:
@@ -1077,15 +1077,24 @@ class DebugExecutor:
             source_addr = stack_addr_map.get(parsed.actual_addr)
             if source_addr is None:
                 continue
-            target_addr = self._target_sim_addr(parsed.pointee_addr, actual_stack_lookup, heap_addr_map)
-            is_dangling = parsed.pointee_addr in freed_heap
+            target_addr = self._target_sim_addr(
+                parsed.pointee_addr,
+                actual_stack_lookup,
+                stack_addr_map,
+                heap_addr_map,
+            )
+            is_dead_stack_target = (
+                parsed.pointee_addr in stack_addr_map
+                and parsed.pointee_addr not in actual_stack_lookup
+            )
+            is_dangling = parsed.pointee_addr in freed_heap or is_dead_stack_target
             pointer_edges.append(PointerEdge(
                 source_address=source_addr,
                 target_address=target_addr,
                 is_dangling=is_dangling,
             ))
 
-            if parsed.pointee_addr not in actual_stack_lookup:
+            if parsed.pointee_addr not in actual_stack_lookup and parsed.pointee_addr not in stack_addr_map:
                 heap_type, heap_value = heap_values.get(
                     parsed.pointee_addr,
                     (self._pointee_type(parsed.type), parsed.pointee_value),
@@ -2061,10 +2070,13 @@ class DebugExecutor:
         self,
         actual_addr: str,
         actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
     ) -> str:
         if actual_addr in actual_stack_lookup:
             return actual_stack_lookup[actual_addr]
+        if actual_addr in stack_addr_map:
+            return stack_addr_map[actual_addr]
         return self._sim_addr(heap_addr_map, actual_addr, "H")
 
     @staticmethod

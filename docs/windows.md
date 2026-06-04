@@ -75,6 +75,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case recursive_factorial
 python tools/native_debug_smoke.py --backend msvc-pdb --case object_method_call
 python tools/native_debug_smoke.py --backend msvc-pdb --case inherited_virtual_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case reference_stack_pointer
+python tools/native_debug_smoke.py --backend msvc-pdb --case stack_dangling_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case double_pointer_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_array

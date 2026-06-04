@@ -507,6 +507,36 @@ def _validate_reference_stack_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_stack_dangling_pointer(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    ptr = values.get("p")
+    after = values.get("after")
+    if ptr is None:
+        errors.append("missing pointer variable p")
+    elif not ptr.is_pointer:
+        errors.append("p should be marked as a pointer")
+    if after is None:
+        errors.append("missing after-scope variable after")
+    elif after.value != "9":
+        errors.append(f"after expected 9, got {after.value!r}")
+    if state.heap:
+        errors.append(f"dangling stack pointer should not create heap blocks, got {len(state.heap)}")
+    if ptr is not None:
+        if not ptr.value.startswith("0xS"):
+            errors.append(f"p should target a historical stack address, got {ptr.value!r}")
+        dangling_edges = [
+            edge for edge in state.edges
+            if edge.source_address == ptr.address and edge.target_address == ptr.value and edge.is_dangling
+        ]
+        if not dangling_edges:
+            errors.append("missing dangling p -> expired stack variable edge")
+    return errors
+
+
 def _validate_double_pointer_stack(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     for state in trace.steps:
@@ -722,6 +752,18 @@ CASES: dict[str, SmokeCase] = {
             "*p = 11;\n"
         ),
         validate=_validate_reference_stack_pointer,
+    ),
+    "stack_dangling_pointer": SmokeCase(
+        name="stack_dangling_pointer",
+        code=(
+            "int* p = nullptr;\n"
+            "{\n"
+            "    int local = 5;\n"
+            "    p = &local;\n"
+            "}\n"
+            "int after = 9;\n"
+        ),
+        validate=_validate_stack_dangling_pointer,
     ),
     "double_pointer_stack": SmokeCase(
         name="double_pointer_stack",
