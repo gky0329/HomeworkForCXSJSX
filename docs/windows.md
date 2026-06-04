@@ -47,7 +47,33 @@ $env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"
 python tests/unit/test_fixes.py --verbose
 ```
 
-Manual smoke cases before sharing a Windows native build:
+Then run the native debugger smoke suite. This calls `DebugExecutor` and renders
+each returned trace through `MemoryCanvas` in offscreen Qt, so it catches both
+debugger-output bugs and canvas-rendering crashes:
+
+```powershell
+$env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"
+python tools/native_debug_smoke.py --backend msvc-pdb
+```
+
+Useful variants:
+
+```powershell
+# Show detected toolchains and why a backend is unavailable.
+python tools/native_debug_smoke.py --list-backends
+
+# Produce JSON that can be pasted into chat or an issue.
+python tools/native_debug_smoke.py --backend msvc-pdb --json
+
+# Narrow a failure to one case.
+python tools/native_debug_smoke.py --backend msvc-pdb --case basic_double
+python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case vector_int
+python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_int
+```
+
+Manual UI smoke cases before sharing a Windows native build:
 
 ```cpp
 int a = 42;

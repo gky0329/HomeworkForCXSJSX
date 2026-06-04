@@ -55,6 +55,12 @@ Or set environment variable: `DEEPSEEK_API_KEY=sk-xxx`
 python tests/unit/test_fixes.py
 ```
 
+Native debugger smoke test, including direct canvas rendering:
+
+```bash
+python tools/native_debug_smoke.py
+```
+
 ## Documentation
 
 - `AGENTS.md` — Agent instructions and conventions
