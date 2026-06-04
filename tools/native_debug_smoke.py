@@ -609,6 +609,59 @@ def _validate_map_unique_ptr_object(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_polymorphic_smart_pointer_container(trace: ExecutionTrace, container_name: str) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    container = values.get(container_name)
+    sound = values.get("sound")
+    errors: list[str] = []
+    if container is None:
+        return [f"missing polymorphic container {container_name}"]
+    if not container.is_array:
+        errors.append(f"{container_name} should be marked as an array/container")
+    elements = list(container.elements)
+    if len(elements) != 1:
+        errors.append(f"{container_name} expected one polymorphic element, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    target = next((edge.target_address for edge in state.edges if edge.source_address == element.address), "")
+    if not target:
+        errors.append(f"missing {container_name} element -> polymorphic heap edge")
+        return errors
+    heap = next((block for block in state.heap if block.address == target), None)
+    if heap is None:
+        errors.append(f"missing polymorphic heap object for {container_name} target {target!r}")
+        return errors
+    if not heap.is_object:
+        errors.append("polymorphic target should be an object heap block")
+    if heap.class_name != "Dog":
+        errors.append(f"polymorphic target class_name expected Dog, got {heap.class_name!r}")
+    if "Animal" not in heap.base_classes:
+        errors.append(f"Dog heap should list Animal as a base class, got {heap.base_classes!r}")
+    if "speak()" not in heap.virtual_methods:
+        errors.append(f"Dog heap should list speak() as a virtual method, got {heap.virtual_methods!r}")
+    members = {member.name: member.value for member in heap.members}
+    if members.get("Animal") is None or "age=3" not in members.get("Animal", ""):
+        errors.append(f"Dog heap base Animal should include age=3, got {members.get('Animal')!r}")
+    if members.get("bones") != "4":
+        errors.append(f"Dog heap bones expected 4, got {members.get('bones')!r}")
+    if sound is None:
+        errors.append("missing virtual call result sound")
+    elif sound.value != "7":
+        errors.append(f"sound expected 7 from virtual call, got {sound.value!r}")
+    return errors
+
+
+def _validate_vector_polymorphic_unique_ptr(trace: ExecutionTrace) -> list[str]:
+    return _validate_polymorphic_smart_pointer_container(trace, "animals")
+
+
+def _validate_map_polymorphic_shared_ptr(trace: ExecutionTrace) -> list[str]:
+    return _validate_polymorphic_smart_pointer_container(trace, "animals")
+
+
 def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     live_blocks = [block for step in trace.steps for block in step.heap if block.is_object]
@@ -1641,6 +1694,20 @@ CASES: dict[str, SmokeCase] = {
         ),
         validate=_validate_vector_unique_ptr_object,
     ),
+    "vector_polymorphic_unique_ptr": SmokeCase(
+        name="vector_polymorphic_unique_ptr",
+        code=(
+            "#include <memory>\n"
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "struct Animal { int age; Animal(int a=0): age(a) {} virtual int speak(){ return age; } virtual ~Animal(){} };\n"
+            "struct Dog : Animal { int bones; Dog(int a=0,int b=0): Animal(a), bones(b) {} int speak() override { return age + bones; } };\n"
+            "vector<unique_ptr<Animal>> animals;\n"
+            "animals.push_back(make_unique<Dog>(3,4));\n"
+            "int sound = animals[0]->speak();\n"
+        ),
+        validate=_validate_vector_polymorphic_unique_ptr,
+    ),
     "std_array_shared_ptr": SmokeCase(
         name="std_array_shared_ptr",
         code=(
@@ -1902,6 +1969,21 @@ CASES: dict[str, SmokeCase] = {
             'm["n"]->next->value = 6;\n'
         ),
         validate=_validate_map_unique_ptr_object,
+    ),
+    "map_polymorphic_shared_ptr": SmokeCase(
+        name="map_polymorphic_shared_ptr",
+        code=(
+            "#include <map>\n"
+            "#include <memory>\n"
+            "#include <string>\n"
+            "using namespace std;\n"
+            "struct Animal { int age; Animal(int a=0): age(a) {} virtual int speak(){ return age; } virtual ~Animal(){} };\n"
+            "struct Dog : Animal { int bones; Dog(int a=0,int b=0): Animal(a), bones(b) {} int speak() override { return age + bones; } };\n"
+            "map<string, shared_ptr<Animal>> animals;\n"
+            "animals[\"dog\"] = make_shared<Dog>(3,4);\n"
+            "int sound = animals[\"dog\"]->speak();\n"
+        ),
+        validate=_validate_map_polymorphic_shared_ptr,
     ),
     "stdin_sum": SmokeCase(
         name="stdin_sum",

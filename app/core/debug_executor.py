@@ -882,9 +882,14 @@ class DebugExecutor:
                     if var.pointee_value and not skip_heap_refresh:
                         heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
                     if var.pointee_members and not skip_heap_refresh:
-                        heap_object_values[var.pointee_addr] = (
+                        pointee_type = self._dynamic_object_type_from_members(
                             var.pointee_type or self._pointee_type(var.type),
                             var.pointee_members,
+                            prepared.class_info,
+                        )
+                        heap_object_values[var.pointee_addr] = (
+                            pointee_type,
+                            self._typed_members_for_owner(var.pointee_members, pointee_type, prepared.class_info),
                         )
                     if var.pointee_elements and not skip_heap_refresh:
                         element_type = var.pointee_type or self._pointee_type(var.type)
@@ -986,9 +991,14 @@ class DebugExecutor:
                     if var.pointee_value and not skip_heap_refresh:
                         heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
                     if var.pointee_members and not skip_heap_refresh:
-                        heap_object_values[var.pointee_addr] = (
+                        pointee_type = self._dynamic_object_type_from_members(
                             var.pointee_type or self._pointee_type(var.type),
                             var.pointee_members,
+                            prepared.class_info,
+                        )
+                        heap_object_values[var.pointee_addr] = (
+                            pointee_type,
+                            self._typed_members_for_owner(var.pointee_members, pointee_type, prepared.class_info),
                         )
                     if var.name in array_exprs and not skip_heap_refresh:
                         element_type = prepared.heap_arrays.get(var.name, (self._pointee_type(var.type), 0))[0]
@@ -1280,6 +1290,11 @@ class DebugExecutor:
                     continue
                 pointee_type = element.pointee_type or self._pointee_type(element.type)
                 if element.pointee_members:
+                    pointee_type = self._dynamic_object_type_from_members(
+                        pointee_type,
+                        element.pointee_members,
+                        class_info,
+                    )
                     heap_object_values[element.pointee_addr] = (
                         pointee_type,
                         self._typed_members_for_owner(element.pointee_members, pointee_type, class_info),
@@ -1333,6 +1348,11 @@ class DebugExecutor:
                     continue
                 pointee_members = self._parse_structured_members(pointee_payload)
                 if pointee_members:
+                    pointee_type = self._dynamic_object_type_from_members(
+                        pointee_type,
+                        pointee_members,
+                        class_info,
+                    )
                     heap_object_values[value] = (
                         pointee_type,
                         self._typed_members_for_owner(pointee_members, pointee_type, class_info),
@@ -1350,17 +1370,64 @@ class DebugExecutor:
         class_info: dict[str, _ClassInfo],
     ) -> list[_ParsedMember]:
         object_class = DebugExecutor._object_class_name(owner_type)
-        declared_types = class_info.get(object_class, _ClassInfo()).member_types
+        owner_info = class_info.get(object_class, _ClassInfo())
+        declared_types = owner_info.member_types
         typed_members: list[_ParsedMember] = []
         for member in members:
             member_name = DebugExecutor._semantic_member_name(owner_type, member)
             typed_members.append(_ParsedMember(
                 name=member.name,
-                type=member.type or declared_types.get(member_name, "") or declared_types.get(member.name, ""),
+                type=(
+                    member.type
+                    or declared_types.get(member_name, "")
+                    or declared_types.get(member.name, "")
+                    or (member.name if member.name in owner_info.base_classes else "")
+                ),
                 value=member.value,
                 actual_addr=member.actual_addr,
             ))
         return typed_members
+
+    @staticmethod
+    def _dynamic_object_type_from_members(
+        static_type: str,
+        members: list[_ParsedMember],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        static_class = DebugExecutor._object_class_name(static_type)
+        if not static_class or static_class not in class_info:
+            return static_type
+
+        member_names = {
+            DebugExecutor._semantic_member_name(static_type, member)
+            for member in members
+        }
+
+        def inherits(candidate: str, target: str, seen: set[str] | None = None) -> bool:
+            seen = seen or set()
+            if candidate in seen:
+                return False
+            seen.add(candidate)
+            bases = class_info.get(candidate, _ClassInfo()).base_classes
+            if target in bases:
+                return True
+            return any(inherits(base, target, seen) for base in bases)
+
+        best_class = static_class
+        best_score = 0
+        for candidate, info in class_info.items():
+            if candidate == static_class or not inherits(candidate, static_class):
+                continue
+            score = 0
+            if static_class in member_names:
+                score += 2
+            score += len(set(info.member_types) & member_names)
+            score += len(set(info.base_classes) & member_names)
+            if score > best_score:
+                best_class = candidate
+                best_score = score
+
+        return best_class if best_score > 0 else static_type
 
     def _apply_std_array_expression_elements(
         self,
@@ -2410,7 +2477,7 @@ class DebugExecutor:
             "        return raw_val\n"
             "    if val and not is_expandable_container_type(typ) and not is_c_array_type(typ):\n"
             "        return val\n"
-            "    if depth >= 2:\n"
+            "    if depth >= 3:\n"
             "        return val\n"
             "    count=min(value.GetNumChildren(), 16)\n"
             "    parts=[]\n"

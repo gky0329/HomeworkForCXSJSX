@@ -101,6 +101,8 @@ STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包
 
 若容器内的智能指针指向结构体/类对象（例如 `vector<unique_ptr<Node>>`、`map<string, unique_ptr<Node>>`），目标 heap block 会按对象渲染，保留成员列表与成员指针边，例如 `Node.next -> first`。
 
+若容器内的智能指针静态类型是基类但运行时对象是派生类（例如 `vector<unique_ptr<Animal>>` 实际持有 `Dog`），执行器会根据调试器展开出的基类/派生成员推断 heap block 的动态类型，显示 `Dog`、`extends Animal`、虚函数元数据和派生类成员。
+
 `std::weak_ptr<T>` 不视为 owner。只要仍有 live `shared_ptr` owner，`weak_ptr` 会显示为普通弱引用边；当所有 `shared_ptr` owner reset 后，`weak_ptr` 仍保留历史目标地址，但目标 heap 标记为 freed，边显示为 dangling，避免误导用户以为 weak_ptr 延长了对象生命周期。
 
 ```cpp

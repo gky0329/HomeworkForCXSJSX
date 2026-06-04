@@ -89,6 +89,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case shared_ptr_owners
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_shared_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_unique_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_unique_ptr_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case vector_polymorphic_unique_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case std_array_shared_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case weak_ptr_expired
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_array_delete
@@ -105,6 +106,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_unique_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_unique_ptr_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case map_polymorphic_shared_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case control_flow_loop
 python tools/native_debug_smoke.py --backend msvc-pdb --case lambda_capture
 python tools/native_debug_smoke.py --backend msvc-pdb --case stdin_sum

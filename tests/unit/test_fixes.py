@@ -1879,6 +1879,61 @@ __CXXMV_FRAME__0__{line + 1}__main
     }
 
 
+def test_debug_executor_parses_lldb_vector_polymorphic_unique_ptr_dynamic_heap_type():
+    """vector<unique_ptr<Base>> should infer the derived heap object from debugger members."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "#include <memory>\n"
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "vector<unique_ptr<Animal>> animals;\n"
+        "animals.push_back(make_unique<Dog>());\n"
+        "static_cast<Dog*>(animals[0].get())->age = 3;\n"
+        "static_cast<Dog*>(animals[0].get())->bones = 4;\n"
+        "int sound = animals[0]->speak();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[10]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:13
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6c0: (std::__1::vector<std::__1::unique_ptr<Animal, std::__1::default_delete<Animal> >, std::__1::allocator<std::__1::unique_ptr<Animal, std::__1::default_delete<Animal> > > >) animals = {{
+0x000000010065c6a0:   (std::__1::unique_ptr<Animal, std::__1::default_delete<Animal> >) [0] = 0x000000010065d000 {{Animal={{age=3}}, bones=4}}
+}}
+0x000000016fdfe6fc: (int) sound = 7
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    animals = values["animals"]
+    heap = step.heap[0]
+
+    assert animals.is_array is True
+    assert animals.elements[0].value == heap.address
+    assert heap.type == "Dog"
+    assert heap.is_object is True
+    assert heap.class_name == "Dog"
+    assert heap.base_classes == ["Animal"]
+    assert heap.virtual_methods == ["speak()"]
+    assert [(member.name, member.type, member.value) for member in heap.members] == [
+        ("Animal", "Animal", "{age=3}"),
+        ("bones", "int", "4"),
+    ]
+    assert values["sound"].value == "7"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {(animals.elements[0].address, heap.address, False)}
+
+
 def test_debug_executor_preserves_nested_array_child_values():
     """Nested array child values should not be stripped to empty strings."""
     from app.core.debug_executor import DebugExecutor
@@ -4717,6 +4772,67 @@ __CXXMV_FRAMEDX__0
     }
 
 
+def test_debug_executor_parses_cdb_dx_map_polymorphic_shared_ptr_dynamic_heap_type():
+    """CDB/PDB map<string, shared_ptr<Base>> should infer derived heap metadata."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <memory>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "map<string, shared_ptr<Animal>> animals;\n"
+        'animals["dog"] = make_shared<Dog>();\n'
+        'static_cast<Dog*>(animals["dog"].get())->age = 3;\n'
+        'static_cast<Dog*>(animals["dog"].get())->bones = 4;\n'
+        'int sound = animals["dog"]->speak();\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[11]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efe0 std::map<std::string,std::shared_ptr<Animal>> animals = size=1
+000000aa`0000efd0 int sound = 7
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    animals : {{ size=1 }} [Type: std::map<std::string,std::shared_ptr<Animal>>]
+        [0] : {{first="dog", second=000001df`4e700000 {{Animal={{age=3}}, bones=4}}}} [Type: std::pair<const std::string,std::shared_ptr<Animal>>]
+            first : "dog" [Type: std::string]
+            second : 000001df`4e700000 {{Animal={{age=3}}, bones=4}} [Type: std::shared_ptr<Animal>]
+    sound : 7 [Type: int]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    animals = values["animals"]
+    heap = step.heap[0]
+
+    assert animals.is_array is True
+    assert animals.elements[0].value == "{first=dog, second=0xH001}"
+    assert heap.type == "Dog"
+    assert heap.is_object is True
+    assert heap.class_name == "Dog"
+    assert heap.base_classes == ["Animal"]
+    assert heap.virtual_methods == ["speak()"]
+    assert [(member.name, member.type, member.value) for member in heap.members] == [
+        ("Animal", "Animal", "{age=3}"),
+        ("bones", "int", "4"),
+    ]
+    assert values["sound"].value == "7"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {(animals.elements[0].address, heap.address, False)}
+
+
 def test_debug_executor_parses_cdb_dx_nested_map_pair_children():
     """Nested CDB dx pair rows should be folded into map array element values."""
     from app.core.debug_executor import DebugExecutor
@@ -6767,6 +6883,82 @@ def test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry():
     assert _validate_map_unique_ptr_object(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_polymorphic_smart_pointer_container_heap():
+    """Native smoke should prove smart pointer containers preserve derived heap metadata."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_map_polymorphic_shared_ptr, _validate_vector_polymorphic_unique_ptr
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="int sound = animals[0]->speak();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="animals",
+                    type="std::vector<std::unique_ptr<Animal>>",
+                    value="{[0]=0xH001}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<Animal>", value="0xH001", address="0xS001[0]")],
+                ),
+                Variable(name="sound", type="int", value="7", address="0xS002", is_pointer=False),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Animal",
+                value="{Animal={age=3}, bones=4}",
+                is_object=True,
+                class_name="Animal",
+                members=[
+                    StructMember(name="Animal", type="", value="{age=3}", address="0xH001.Animal"),
+                    StructMember(name="bones", type="", value="4", address="0xH001.bones"),
+                ],
+            )],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="int sound = animals[0]->speak();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="animals",
+                    type="std::vector<std::unique_ptr<Animal>>",
+                    value="{[0]=0xH001}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<Animal>", value="0xH001", address="0xS001[0]")],
+                ),
+                Variable(name="sound", type="int", value="7", address="0xS002", is_pointer=False),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Dog",
+                value="{Animal={age=3}, bones=4}",
+                is_object=True,
+                class_name="Dog",
+                base_classes=["Animal"],
+                virtual_methods=["speak()"],
+                members=[
+                    StructMember(name="Animal", type="Animal", value="{age=3}", address="0xH001.Animal"),
+                    StructMember(name="bones", type="int", value="4", address="0xH001.bones"),
+                ],
+            )],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+
+    weak_errors = _validate_vector_polymorphic_unique_ptr(weak_trace)
+    assert any("class_name expected Dog" in error for error in weak_errors)
+    assert any("should list Animal as a base class" in error for error in weak_errors)
+    assert any("should list speak() as a virtual method" in error for error in weak_errors)
+    assert _validate_vector_polymorphic_unique_ptr(strong_trace) == []
+    assert _validate_map_polymorphic_shared_ptr(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -7380,6 +7572,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_map_children_as_key_value_entries,
         test_debug_executor_parses_lldb_map_pointer_values_as_entry_edges,
         test_debug_executor_parses_lldb_vector_unique_ptr_object_heap_members,
+        test_debug_executor_parses_lldb_vector_polymorphic_unique_ptr_dynamic_heap_type,
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
@@ -7444,6 +7637,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_map_pointer_values_as_entry_edges,
         test_debug_executor_parses_cdb_dx_map_unique_ptr_values_as_heap_entries,
         test_debug_executor_parses_cdb_dx_map_unique_ptr_object_heap_members,
+        test_debug_executor_parses_cdb_dx_map_polymorphic_shared_ptr_dynamic_heap_type,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
@@ -7484,6 +7678,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,
+        test_native_debug_smoke_requires_polymorphic_smart_pointer_container_heap,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
