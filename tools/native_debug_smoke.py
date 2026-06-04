@@ -30,6 +30,7 @@ class SmokeCase:
     name: str
     code: str
     validate: Callable[[ExecutionTrace], list[str]]
+    stdin_text: str = ""
 
 
 def _all_variables(state: MemoryState) -> list[Variable]:
@@ -148,6 +149,7 @@ def _write_trace_dump(
             {
                 "case": case.name,
                 "code": case.code,
+                "stdin": case.stdin_text,
                 "summary": summary,
                 "trace": trace.model_dump(mode="json"),
             },
@@ -233,6 +235,18 @@ def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_stdin_sum(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var.value for var in _all_variables(state)}
+    errors: list[str] = []
+    for name, expected in {"x": "7", "y": "5", "sum": "12"}.items():
+        if values.get(name) != expected:
+            errors.append(f"{name} expected {expected}, got {values.get(name)!r}")
+    return errors
+
+
 CASES: dict[str, SmokeCase] = {
     "basic_double": SmokeCase(
         name="basic_double",
@@ -285,6 +299,19 @@ CASES: dict[str, SmokeCase] = {
         ),
         validate=_validate_map,
     ),
+    "stdin_sum": SmokeCase(
+        name="stdin_sum",
+        code=(
+            "#include <iostream>\n"
+            "using namespace std;\n"
+            "int x = 0;\n"
+            "int y = 0;\n"
+            "cin >> x >> y;\n"
+            "int sum = x + y;\n"
+        ),
+        validate=_validate_stdin_sum,
+        stdin_text="7 5\n",
+    ),
 }
 
 
@@ -334,7 +361,7 @@ def _run_case(
         "trace_path": None,
     }
     try:
-        trace = DebugExecutor(preferred_backend=backend).run_code(case.code)
+        trace = DebugExecutor(preferred_backend=backend).run_code(case.code, case.stdin_text)
         result["steps"] = len(trace.steps)
         summary = _trace_summary(trace)
         result["summary"] = summary

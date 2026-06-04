@@ -2528,6 +2528,43 @@ def test_native_debug_smoke_requires_final_freed_heap_state():
     assert _validate_heap_object(strong_trace) == []
 
 
+def test_native_debug_smoke_forwards_stdin_to_debug_executor():
+    """Native smoke should validate input-aware debugger runs, not only no-stdin code."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import CASES, _run_case
+
+    captured = {}
+
+    class FakeDebugExecutor:
+        def __init__(self, preferred_backend=None):
+            captured["backend"] = preferred_backend
+
+        def run_code(self, code, stdin_text=""):
+            captured["code"] = code
+            captured["stdin"] = stdin_text
+            return ExecutionTrace(steps=[
+                MemoryState(
+                    line_number=6,
+                    source_code="int sum = x + y;",
+                    stack=[StackFrame(frame_name="main", variables=[
+                        Variable(name="x", type="int", value="7", address="0xS001", is_pointer=False),
+                        Variable(name="y", type="int", value="5", address="0xS002", is_pointer=False),
+                        Variable(name="sum", type="int", value="12", address="0xS003", is_pointer=False),
+                    ])],
+                    heap=[],
+                    edges=[],
+                ),
+            ])
+
+    with patch("tools.native_debug_smoke.DebugExecutor", FakeDebugExecutor):
+        result = _run_case(CASES["stdin_sum"], "msvc-pdb", render=False)
+
+    assert result["ok"] is True
+    assert captured["backend"] == "msvc-pdb"
+    assert captured["stdin"] == "7 5\n"
+    assert "cin >> x >> y" in captured["code"]
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2610,6 +2647,7 @@ if __name__ == "__main__":
         test_graph_page_named_canvas_class,
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
+        test_native_debug_smoke_forwards_stdin_to_debug_executor,
     ]
 
     passed = 0
