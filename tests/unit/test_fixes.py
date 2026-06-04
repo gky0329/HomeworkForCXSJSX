@@ -2476,6 +2476,58 @@ def test_native_debug_smoke_summarizes_and_dumps_trace():
     assert payload["trace"]["steps"][0]["line_number"] == 2
 
 
+def test_native_debug_smoke_requires_final_freed_heap_state():
+    """Heap smoke should prove delete leaves a freed block and dangling edge visible."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge
+    from tools.native_debug_smoke import _validate_heap_object
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="Point* hp = new Point{1, 2.5};",
+            stack=[],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Point",
+                value="{x=1, y=2.5}",
+                is_object=True,
+            )],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=3,
+            source_code="delete hp;",
+            stack=[],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=3,
+            source_code="delete hp;",
+            stack=[],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Point",
+                value="{x=1, y=2.5}",
+                is_object=True,
+                is_freed=True,
+            )],
+            edges=[PointerEdge(
+                source_address="0xS001",
+                target_address="0xH001",
+                is_dangling=True,
+            )],
+        ),
+    ])
+
+    weak_errors = _validate_heap_object(weak_trace)
+    assert "final state is missing freed heap block after delete" in weak_errors
+    assert "final state is missing dangling pointer edge after delete" in weak_errors
+    assert _validate_heap_object(strong_trace) == []
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2557,6 +2609,7 @@ if __name__ == "__main__":
         test_extract_code_preserves_comments,
         test_graph_page_named_canvas_class,
         test_native_debug_smoke_summarizes_and_dumps_trace,
+        test_native_debug_smoke_requires_final_freed_heap_state,
     ]
 
     passed = 0

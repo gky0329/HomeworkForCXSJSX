@@ -54,6 +54,13 @@ def _member_map(var: Variable) -> dict[str, str]:
     return {member.name: member.value for member in var.members}
 
 
+def _last_observed_state(trace: ExecutionTrace) -> MemoryState | None:
+    for state in reversed(trace.steps):
+        if state.stack or state.heap or state.edges:
+            return state
+    return trace.steps[-1] if trace.steps else None
+
+
 def _variable_summary(var: Variable) -> dict[str, object]:
     return {
         "name": var.name,
@@ -75,14 +82,7 @@ def _variable_summary(var: Variable) -> dict[str, object]:
 
 
 def _trace_summary(trace: ExecutionTrace) -> dict[str, object]:
-    last_state: MemoryState | None = None
-    for state in reversed(trace.steps):
-        if state.stack or state.heap or state.edges:
-            last_state = state
-            break
-    if last_state is None and trace.steps:
-        last_state = trace.steps[-1]
-
+    last_state = _last_observed_state(trace)
     if last_state is None:
         return {
             "step_count": 0,
@@ -221,12 +221,15 @@ def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     live_blocks = [block for step in trace.steps for block in step.heap if block.is_object]
     if not live_blocks:
         errors.append("missing object heap block")
-    freed_blocks = [block for step in trace.steps for block in step.heap if block.is_freed]
+    final_state = _last_observed_state(trace)
+    final_heap = final_state.heap if final_state is not None else []
+    final_edges = final_state.edges if final_state is not None else []
+    freed_blocks = [block for block in final_heap if block.is_freed]
     if not freed_blocks:
-        errors.append("missing freed heap block after delete")
-    dangling_edges = [edge for step in trace.steps for edge in step.edges if edge.is_dangling]
+        errors.append("final state is missing freed heap block after delete")
+    dangling_edges = [edge for edge in final_edges if edge.is_dangling]
     if not dangling_edges:
-        errors.append("missing dangling pointer edge after delete")
+        errors.append("final state is missing dangling pointer edge after delete")
     return errors
 
 
