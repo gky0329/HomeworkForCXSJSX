@@ -235,6 +235,38 @@ def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return ["trace has no observed state"]
+
+    arr = next((var for var in _all_variables(final_state) if var.name == "arr"), None)
+    if arr is None:
+        errors.append("missing heap array pointer arr")
+    elif not arr.is_pointer:
+        errors.append("arr should be marked as a pointer")
+
+    blocks = [block for block in final_state.heap if block.is_array]
+    if not blocks:
+        errors.append("final state is missing heap array block")
+    else:
+        block = blocks[0]
+        values = [element.value for element in block.elements]
+        if block.type != "int[]":
+            errors.append(f"heap array type expected int[], got {block.type!r}")
+        if values != ["1", "9", "3"]:
+            errors.append(f"heap array elements expected ['1', '9', '3'], got {values!r}")
+        if not block.is_freed:
+            errors.append("heap array should remain visible as freed after delete[]")
+        if arr is not None and arr.value != block.address:
+            errors.append(f"arr should target heap array {block.address}, got {arr.value!r}")
+
+    if not any(edge.is_dangling for edge in final_state.edges):
+        errors.append("final state is missing dangling pointer edge after delete[]")
+    return errors
+
+
 def _validate_stdin_sum(trace: ExecutionTrace) -> list[str]:
     state = _last_observed_state(trace)
     if state is None:
@@ -404,6 +436,15 @@ CASES: dict[str, SmokeCase] = {
             "delete hp;\n"
         ),
         validate=_validate_heap_object,
+    ),
+    "heap_array_delete": SmokeCase(
+        name="heap_array_delete",
+        code=(
+            "int* arr = new int[3]{1, 2, 3};\n"
+            "arr[1] = 9;\n"
+            "delete[] arr;\n"
+        ),
+        validate=_validate_heap_array_delete,
     ),
     "call_stack": SmokeCase(
         name="call_stack",

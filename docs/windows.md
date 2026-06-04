@@ -76,6 +76,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case object_method_call
 python tools/native_debug_smoke.py --backend msvc-pdb --case reference_stack_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case heap_array_delete
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case stdin_sum
