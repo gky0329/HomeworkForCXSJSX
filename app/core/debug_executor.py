@@ -36,12 +36,19 @@ class DebugBackendStatus:
 
 
 @dataclass
+class _ClassInfo:
+    base_classes: list[str] = field(default_factory=list)
+    virtual_methods: list[str] = field(default_factory=list)
+
+
+@dataclass
 class _PreparedSource:
     source: str
     original_lines: list[str]
     line_map: dict[int, int]
     heap_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
     step_in_lines: set[int] = field(default_factory=set)
+    class_info: dict[str, _ClassInfo] = field(default_factory=dict)
     source_path: str = ""
 
 
@@ -402,6 +409,7 @@ class DebugExecutor:
 
     def _prepare_source(self, code: str) -> _PreparedSource:
         original_lines = code.splitlines()
+        class_info = self._class_metadata(original_lines)
         if re.search(r"\bmain\s*\(", code):
             line_map = {i: i for i in range(1, len(original_lines) + 1)}
             return _PreparedSource(
@@ -410,6 +418,7 @@ class DebugExecutor:
                 line_map=line_map,
                 heap_arrays=self._heap_array_declarations(original_lines),
                 step_in_lines=self._step_in_lines(original_lines, line_map),
+                class_info=class_info,
             )
 
         source, line_map = self._wrap_snippet_source(original_lines)
@@ -419,6 +428,7 @@ class DebugExecutor:
             line_map=line_map,
             heap_arrays=self._heap_array_declarations(original_lines),
             step_in_lines=self._step_in_lines(source.splitlines(), line_map),
+            class_info=class_info,
         )
 
     def _wrap_snippet_source(self, original_lines: list[str]) -> tuple[str, dict[int, int]]:
@@ -882,6 +892,7 @@ class DebugExecutor:
                 heap_array_values=heap_array_values,
                 heap_object_values=heap_object_values,
                 freed_heap=freed_heap,
+                class_info=prepared.class_info,
             ))
 
         return ExecutionTrace(steps=states)
@@ -966,6 +977,7 @@ class DebugExecutor:
                 heap_array_values=heap_array_values,
                 heap_object_values=heap_object_values,
                 freed_heap=freed_heap,
+                class_info=prepared.class_info,
             )
             states.append(state)
 
@@ -982,7 +994,9 @@ class DebugExecutor:
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
         heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
         freed_heap: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
     ) -> MemoryState:
+        class_info = class_info or {}
         actual_stack_lookup: dict[str, str] = {}
         frame_variables: list[tuple[str, list[Variable]]] = []
         pointer_edges: list[PointerEdge] = []
@@ -1010,6 +1024,8 @@ class DebugExecutor:
                     value = self._format_elements(parsed.elements)
                 elif parsed.members:
                     value = self._format_members(parsed.members)
+                object_class = self._object_class_name(parsed.type)
+                object_info = class_info.get(object_class, _ClassInfo())
                 variables.append(Variable(
                     name=parsed.name,
                     type=self._clean_type(parsed.type),
@@ -1031,7 +1047,9 @@ class DebugExecutor:
                         for member in parsed.members
                     ],
                     is_object=bool(parsed.members),
-                    class_name=self._clean_type(parsed.type) if parsed.members else "",
+                    class_name=object_class if parsed.members else "",
+                    base_classes=object_info.base_classes if parsed.members else [],
+                    virtual_methods=object_info.virtual_methods if parsed.members else [],
                     is_reference=is_reference,
                 ))
             frame_variables.append((parsed_frame.name, variables))
@@ -1077,6 +1095,8 @@ class DebugExecutor:
                 object_info = heap_object_values.get(parsed.pointee_addr)
                 if object_info is not None:
                     object_type, members = object_info
+                    class_name = self._object_class_name(object_type or self._pointee_type(parsed.type))
+                    metadata = class_info.get(class_name, _ClassInfo())
                     heap_blocks_by_actual[parsed.pointee_addr] = HeapBlock(
                         address=target_addr,
                         type=self._clean_type(object_type or self._pointee_type(parsed.type)),
@@ -1091,7 +1111,9 @@ class DebugExecutor:
                             for member in members
                         ],
                         is_object=True,
-                        class_name=self._clean_type(object_type or self._pointee_type(parsed.type)),
+                        class_name=class_name,
+                        base_classes=metadata.base_classes,
+                        virtual_methods=metadata.virtual_methods,
                     )
                     continue
                 heap_blocks_by_actual[parsed.pointee_addr] = HeapBlock(
@@ -1665,6 +1687,74 @@ class DebugExecutor:
         return declarations
 
     @staticmethod
+    def _class_metadata(lines: list[str]) -> dict[str, _ClassInfo]:
+        source = "\n".join(lines)
+        class_re = re.compile(
+            r"\b(?:class|struct)\s+"
+            r"(?P<name>[A-Za-z_]\w*)"
+            r"(?:\s*:\s*(?P<bases>[^{]+))?"
+            r"\s*\{(?P<body>.*?)\}\s*;",
+            re.DOTALL,
+        )
+        info: dict[str, _ClassInfo] = {}
+        for match in class_re.finditer(source):
+            name = match.group("name")
+            bases = DebugExecutor._parse_base_classes(match.group("bases") or "")
+            virtuals = DebugExecutor._parse_virtual_methods(match.group("body") or "")
+            info[name] = _ClassInfo(base_classes=bases, virtual_methods=virtuals)
+
+        def inherited_virtuals(class_name: str, seen: set[str] | None = None) -> list[str]:
+            seen = seen or set()
+            if class_name in seen:
+                return []
+            seen.add(class_name)
+            current = info.get(class_name)
+            if current is None:
+                return []
+            methods: list[str] = []
+            for base in current.base_classes:
+                for method in inherited_virtuals(base, seen):
+                    if method not in methods:
+                        methods.append(method)
+            for method in current.virtual_methods:
+                if method not in methods:
+                    methods.append(method)
+            return methods
+
+        for class_name, class_info in list(info.items()):
+            class_info.virtual_methods = inherited_virtuals(class_name)
+        return info
+
+    @staticmethod
+    def _parse_base_classes(base_text: str) -> list[str]:
+        bases: list[str] = []
+        for raw in base_text.split(","):
+            clean = re.sub(r"\b(?:public|protected|private|virtual)\b", "", raw).strip()
+            clean = clean.split("<", 1)[0].strip() if "<" in clean else clean
+            match = re.search(r"([A-Za-z_]\w*(?:::\w+)?)$", clean)
+            if match:
+                name = match.group(1).rsplit("::", 1)[-1]
+                if name not in bases:
+                    bases.append(name)
+        return bases
+
+    @staticmethod
+    def _parse_virtual_methods(body: str) -> list[str]:
+        methods: list[str] = []
+        patterns = (
+            r"\bvirtual\b[^;{}]*?\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)",
+            r"\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:override|final)\b",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, body):
+                name = match.group("name")
+                if name not in {"if", "for", "while", "switch", "return"}:
+                    method = f"{name}()"
+                    if method not in methods:
+                        methods.append(method)
+        return methods
+
+    @staticmethod
     def _heap_array_declarations(lines: list[str]) -> dict[str, tuple[str, int]]:
         declarations: dict[str, tuple[str, int]] = {}
         pattern = re.compile(
@@ -1798,13 +1888,24 @@ class DebugExecutor:
             "import sys\n"
             "target=lldb.debugger.GetSelectedTarget()\n"
             "thread=target.GetProcess().GetSelectedThread()\n"
-            "def addr_of(value):\n"
+            "def synthetic_addr(name, value_idx=-1, frame_idx=-1):\n"
+            "    seed=((frame_idx + 1) * 1000003 + (value_idx + 1) * 9176) & 0xfffffffffffffff\n"
+            "    for ch in (name or ''):\n"
+            "        seed=((seed * 131) + ord(ch)) & 0xfffffffffffffff\n"
+            "    return '0xf%015x' % seed\n"
+            "def addr_of(value, value_idx=-1, frame_idx=-1):\n"
+            "    typ=type_of(value)\n"
+            "    name=value.GetName() or ''\n"
+            "    loc=value.GetLocation() or ''\n"
+            "    if loc == 'scalar' and '*' in typ:\n"
+            "        return synthetic_addr(name, value_idx, frame_idx)\n"
+            "    if loc.startswith('0x'):\n"
+            "        return loc.split()[0]\n"
             "    addr=value.GetAddress()\n"
             "    if addr.IsValid():\n"
             "        load=addr.GetLoadAddress(target)\n"
             "        if load != lldb.LLDB_INVALID_ADDRESS:\n"
             "            return '0x%x' % load\n"
-            "    loc=value.GetLocation() or ''\n"
             "    return loc.split()[0] if loc.startswith('0x') else '0x0'\n"
             "def val_of(value):\n"
             "    return value.GetValue() or value.GetSummary() or ''\n"
@@ -1844,13 +1945,13 @@ class DebugExecutor:
             "        summary=value.GetSummary() or ''\n"
             "        return summary\n"
             "    return ''\n"
-            "def emit_child(child, name=None):\n"
-            "    print('%s:   (%s) %s = %s' % (addr_of(child), type_of(child), name or child.GetName() or '', flat_value(child)))\n"
-            "def emit_value(value):\n"
+            "def emit_child(child, name=None, frame_idx=-1):\n"
+            "    print('%s:   (%s) %s = %s' % (addr_of(child, -1, frame_idx), type_of(child), name or child.GetName() or '', flat_value(child)))\n"
+            "def emit_value(value, value_idx=-1, frame_idx=-1):\n"
             "    name=value.GetName() or ''\n"
             "    typ=type_of(value)\n"
             "    val=val_of(value)\n"
-            "    addr=addr_of(value)\n"
+            "    addr=addr_of(value, value_idx, frame_idx)\n"
             "    summary=value.GetSummary() or ''\n"
             "    if is_std_string_type(typ) and val:\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
@@ -1877,16 +1978,16 @@ class DebugExecutor:
             "            deref_child_count=min(deref.GetNumChildren(), 32)\n"
             "            if deref_child_count > 0:\n"
             "                for child_idx in range(deref_child_count):\n"
-            "                    emit_child(deref.GetChildAtIndex(child_idx))\n"
+            "                    emit_child(deref.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
             "            else:\n"
-            "                emit_child(deref, '*' + name)\n"
+            "                emit_child(deref, '*' + name, frame_idx=frame_idx)\n"
             "        print('}')\n"
             "        return\n"
             "    child_count=min(value.GetNumChildren(), 32)\n"
             "    if child_count > 0:\n"
             "        print('%s: (%s) %s = {' % (addr, typ, name))\n"
             "        for child_idx in range(child_count):\n"
-            "            emit_child(value.GetChildAtIndex(child_idx))\n"
+            "            emit_child(value.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
             "        print('}')\n"
             "        return\n"
             "    print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
@@ -1902,7 +2003,7 @@ class DebugExecutor:
             "    sys.stdout.flush()\n"
             "    values=frame.GetVariables(True, True, False, True)\n"
             "    for value_idx in range(values.GetSize()):\n"
-            "        emit_value(values.GetValueAtIndex(value_idx))\n"
+            "        emit_value(values.GetValueAtIndex(value_idx), value_idx, idx)\n"
         )
         return f"script exec({script!r})"
 
@@ -2083,6 +2184,15 @@ class DebugExecutor:
     @staticmethod
     def _clean_type(type_text: str) -> str:
         return re.sub(r"\s+", " ", type_text.replace(" *", "*").replace(" &", "&")).strip()
+
+    @staticmethod
+    def _object_class_name(type_text: str) -> str:
+        cleaned = DebugExecutor._clean_type(type_text)
+        cleaned = re.sub(r"\b(?:class|struct|const|volatile)\b", "", cleaned).strip()
+        cleaned = cleaned.replace("*", "").replace("&", "").strip()
+        if "::" in cleaned:
+            cleaned = cleaned.rsplit("::", 1)[-1]
+        return cleaned
 
     @staticmethod
     def _clean_value(value: str) -> str:

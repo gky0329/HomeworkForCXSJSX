@@ -75,6 +75,9 @@ def _variable_summary(var: Variable) -> dict[str, object]:
             for element in var.elements[:8]
         ],
         "is_object": var.is_object,
+        "class_name": var.class_name,
+        "base_classes": list(var.base_classes),
+        "virtual_methods": list(var.virtual_methods),
         "members": [
             {"name": member.name, "type": member.type, "value": member.value}
             for member in var.members[:8]
@@ -118,6 +121,9 @@ def _trace_summary(trace: ExecutionTrace) -> dict[str, object]:
                     for element in block.elements[:8]
                 ],
                 "is_object": block.is_object,
+                "class_name": block.class_name,
+                "base_classes": list(block.base_classes),
+                "virtual_methods": list(block.virtual_methods),
                 "members": [
                     {"name": member.name, "type": member.type, "value": member.value}
                     for member in block.members[:8]
@@ -185,6 +191,49 @@ def _validate_stack_object(trace: ExecutionTrace) -> list[str]:
     for name, expected in {"id": "7", "score": "99", "name": "Ada"}.items():
         if members.get(name) != expected:
             errors.append(f"s.{name} expected {expected}, got {members.get(name)!r}")
+    return errors
+
+
+def _validate_inherited_virtual_object(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    d = values.get("d")
+    ptr = values.get("a")
+    sound = values.get("sound")
+    if d is None:
+        errors.append("missing Dog object d")
+    else:
+        if not d.is_object:
+            errors.append("d should be marked as an object")
+        if d.class_name != "Dog":
+            errors.append(f"d class_name expected Dog, got {d.class_name!r}")
+        if "Animal" not in d.base_classes:
+            errors.append(f"d should list Animal as a base class, got {d.base_classes!r}")
+        if "speak()" not in d.virtual_methods:
+            errors.append(f"d should list speak() as a virtual method, got {d.virtual_methods!r}")
+        members = _member_map(d)
+        if members.get("Animal") is None or "age=3" not in members.get("Animal", ""):
+            errors.append(f"d base Animal member should include age=3, got {members.get('Animal')!r}")
+        if members.get("bones") != "4":
+            errors.append(f"d.bones expected 4, got {members.get('bones')!r}")
+    if ptr is None:
+        errors.append("missing base pointer a")
+    elif d is not None:
+        if not ptr.is_pointer:
+            errors.append("a should be marked as a pointer")
+        if ptr.value != d.address:
+            errors.append(f"a should target d address {d.address}, got {ptr.value!r}")
+        if ptr.address == d.address:
+            errors.append("a pointer variable address should not collapse onto d's object address")
+        if not any(edge.source_address == ptr.address and edge.target_address == d.address for edge in state.edges):
+            errors.append("missing a -> d stack pointer edge")
+    if sound is None:
+        errors.append("missing virtual call result sound")
+    elif sound.value != "7":
+        errors.append(f"sound expected 7 from virtual call, got {sound.value!r}")
     return errors
 
 
@@ -534,6 +583,19 @@ CASES: dict[str, SmokeCase] = {
             "s.score = 99.0;\n"
         ),
         validate=_validate_stack_object,
+    ),
+    "inherited_virtual_object": SmokeCase(
+        name="inherited_virtual_object",
+        code=(
+            "class Animal { public: int age; virtual int speak() { return age; } };\n"
+            "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+            "Dog d;\n"
+            "d.age = 3;\n"
+            "d.bones = 4;\n"
+            "Animal* a = &d;\n"
+            "int sound = a->speak();\n"
+        ),
+        validate=_validate_inherited_virtual_object,
     ),
     "stack_array": SmokeCase(
         name="stack_array",

@@ -526,6 +526,57 @@ __CXXMV_FRAME__0__10__main
     assert changed.members[0].value == "4"
 
 
+def test_debug_executor_parses_lldb_inherited_virtual_object_metadata():
+    """Native object snapshots should carry base-class and virtual-method metadata."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Animal { public: int age; virtual int speak() { return age; } };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "Dog d;\n"
+        "d.age = 3;\n"
+        "d.bones = 4;\n"
+        "Animal* a = &d;\n"
+        "int sound = a->speak();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l7 = generated_lines[7]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l7}:13
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l7 + 1}:3
+__CXXMV_FRAME__0__{l7 + 1}__main
+0x000000016fdfe700: (Dog) d = {{
+0x000000016fdfe700:   (Animal) Animal = {{age=3}}
+0x000000016fdfe708:   (int) bones = 4
+}}
+0xf000000000000001: (Dog *) a = 0x000000016fdfe700
+0x000000016fdfe6fc: (int) sound = 7
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    state = trace.steps[0]
+    values = {var.name: var for var in state.stack[0].variables}
+    dog = values["d"]
+    pointer = values["a"]
+
+    assert dog.is_object is True
+    assert dog.class_name == "Dog"
+    assert dog.base_classes == ["Animal"]
+    assert dog.virtual_methods == ["speak()"]
+    assert [(member.name, member.value) for member in dog.members] == [
+        ("Animal", "{age=3}"),
+        ("bones", "4"),
+    ]
+    assert pointer.value == dog.address
+    assert pointer.address != dog.address
+    assert state.edges[0].source_address == pointer.address
+    assert state.edges[0].target_address == dog.address
+    assert values["sound"].value == "7"
+
+
 def test_debug_executor_formats_double_values_for_display():
     """Floating point scalar values should render readably on the canvas."""
     from app.core.debug_executor import DebugExecutor
@@ -2137,6 +2188,54 @@ __CXXMV_FRAMEV__0
     ]
 
 
+def test_debug_executor_parses_cdb_inherited_virtual_object_metadata():
+    """CDB/PDB object snapshots should carry base classes and virtual methods."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Animal { public: int age; virtual int speak() { return age; } };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "Dog d;\n"
+        "d.age = 3;\n"
+        "d.bones = 4;\n"
+        "Animal* a = &d;\n"
+        "int sound = a->speak();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l7 = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x30 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x38 [C:\tmp\program.cpp @ {l7 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Dog d = {{Animal={{age=3}}, bones=4}}
+000000aa`0000efd0 Dog * a = 000000aa`0000efc0
+000000aa`0000efd8 int sound = 7
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    state = trace.steps[0]
+    values = {var.name: var for var in state.stack[0].variables}
+    dog = values["d"]
+    pointer = values["a"]
+
+    assert dog.is_object is True
+    assert dog.class_name == "Dog"
+    assert dog.base_classes == ["Animal"]
+    assert dog.virtual_methods == ["speak()"]
+    assert [(member.name, member.value) for member in dog.members] == [
+        ("Animal", "{age=3}"),
+        ("bones", "4"),
+    ]
+    assert pointer.value == dog.address
+    assert pointer.address != dog.address
+    assert state.edges[0].source_address == pointer.address
+    assert state.edges[0].target_address == dog.address
+    assert values["sound"].value == "7"
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -2902,6 +3001,9 @@ def test_native_debug_smoke_summarizes_and_dumps_trace():
                 type="Point",
                 value="{x=1, y=2.5}",
                 is_object=True,
+                class_name="Point",
+                base_classes=["Shape"],
+                virtual_methods=["area()"],
                 members=[
                     StructMember(name="x", type="int", value="1"),
                     StructMember(name="y", type="double", value="2.5"),
@@ -2914,6 +3016,9 @@ def test_native_debug_smoke_summarizes_and_dumps_trace():
     summary = _trace_summary(trace)
     assert summary["step_count"] == 1
     assert summary["frames"][0]["variables"][0]["name"] == "hp"
+    assert summary["heap"][0]["class_name"] == "Point"
+    assert summary["heap"][0]["base_classes"] == ["Shape"]
+    assert summary["heap"][0]["virtual_methods"] == ["area()"]
     assert summary["heap"][0]["members"][1]["value"] == "2.5"
     assert summary["edges"][0]["target"] == "0xH001"
 
@@ -2976,6 +3081,73 @@ def test_native_debug_smoke_requires_final_freed_heap_state():
     assert "final state is missing freed heap block after delete" in weak_errors
     assert "final state is missing dangling pointer edge after delete" in weak_errors
     assert _validate_heap_object(strong_trace) == []
+
+
+def test_native_debug_smoke_requires_inherited_virtual_object_state():
+    """Native smoke should prove OO metadata and polymorphic stack edges are visible."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_inherited_virtual_object
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="int sound = a->speak();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="d",
+                    type="Dog",
+                    value="{Animal={age=3}, bones=4}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Dog",
+                    members=[
+                        StructMember(name="Animal", type="Animal", value="{age=3}"),
+                        StructMember(name="bones", type="int", value="4"),
+                    ],
+                ),
+                Variable(name="a", type="Animal*", value="0xS001", address="0xS001", is_pointer=True),
+                Variable(name="sound", type="int", value="6", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="int sound = a->speak();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="d",
+                    type="Dog",
+                    value="{Animal={age=3}, bones=4}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Dog",
+                    base_classes=["Animal"],
+                    virtual_methods=["speak()"],
+                    members=[
+                        StructMember(name="Animal", type="Animal", value="{age=3}"),
+                        StructMember(name="bones", type="int", value="4"),
+                    ],
+                ),
+                Variable(name="a", type="Animal*", value="0xS001", address="0xS002", is_pointer=True),
+                Variable(name="sound", type="int", value="7", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xS001")],
+        ),
+    ])
+
+    weak_errors = _validate_inherited_virtual_object(weak_trace)
+    assert any("base class" in error for error in weak_errors)
+    assert any("virtual method" in error for error in weak_errors)
+    assert "a pointer variable address should not collapse onto d's object address" in weak_errors
+    assert "missing a -> d stack pointer edge" in weak_errors
+    assert any("sound expected 7" in error for error in weak_errors)
+    assert _validate_inherited_virtual_object(strong_trace) == []
 
 
 def test_native_debug_smoke_requires_heap_array_delete_state():
@@ -3559,6 +3731,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_lldb_snapshots,
         test_debug_executor_parses_arrays_and_struct_members,
         test_debug_executor_parses_lldb_class_object_members,
+        test_debug_executor_parses_lldb_inherited_virtual_object_metadata,
         test_debug_executor_formats_double_values_for_display,
         test_debug_executor_filters_future_long_long_locals,
         test_debug_executor_filters_future_double_pointer_locals,
@@ -3603,6 +3776,7 @@ if __name__ == "__main__":
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
+        test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -3628,6 +3802,7 @@ if __name__ == "__main__":
         test_graph_page_named_canvas_class,
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
+        test_native_debug_smoke_requires_inherited_virtual_object_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_array_elements,
