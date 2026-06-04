@@ -1013,6 +1013,75 @@ def test_debug_executor_lldb_script_expands_smart_pointers():
     assert "emit_child(deref, '*' + name" in script
 
 
+def test_debug_executor_parses_lambda_captures_as_function_object():
+    """LLDB lambda closure members should become LambdaCapture rows."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int base = 3;\n"
+        "int factor = 4;\n"
+        "auto f = [base, &factor](int x) { return base + factor + x; };\n"
+        "factor = 7;\n"
+        "int result = f(6);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l3}:10
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l4}:8
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe6b0: (int) base = 3
+0x000000016fdfe6b4: (int) factor = 4
+0x000000016fdfe6b8: ((unnamed class)) f = {{
+0x000000016fdfe6b8:   (int) base = 3
+0x000000016fdfe6bc:   (int &) factor = 0x000000016fdfe6b4
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l4}:8
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l5}:14
+__CXXMV_FRAME__0__{l5}__main
+0x000000016fdfe6b0: (int) base = 3
+0x000000016fdfe6b4: (int) factor = 7
+0x000000016fdfe6b8: ((unnamed class)) f = {{
+0x000000016fdfe6b8:   (int) base = 3
+0x000000016fdfe6bc:   (int &) factor = 0x000000016fdfe6b4
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l5}:14
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l5 + 1}:1
+__CXXMV_FRAME__0__{l5 + 1}__main
+0x000000016fdfe6b0: (int) base = 3
+0x000000016fdfe6b4: (int) factor = 7
+0x000000016fdfe6b8: ((unnamed class)) f = {{
+0x000000016fdfe6b8:   (int) base = 3
+0x000000016fdfe6bc:   (int &) factor = 0x000000016fdfe6b4
+}}
+0x000000016fdfe6c0: (int) result = 16
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    final = trace.steps[-1]
+    values = {var.name: var for var in final.stack[0].variables}
+    fn = values["f"]
+
+    assert fn.type == "lambda"
+    assert fn.value == "<lambda>"
+    assert fn.is_function_object is True
+    assert fn.is_object is False
+    assert [(capture.name, capture.type, capture.value, capture.by_ref) for capture in fn.captures] == [
+        ("base", "int", "3", False),
+        ("factor", "int&", values["factor"].address, True),
+    ]
+    assert values["result"].value == "16"
+
+
 def test_debug_executor_parses_vector_elements_as_array_variable():
     """std::vector child snapshots should render like indexed array cells."""
     from app.core.debug_executor import DebugExecutor
@@ -2903,6 +2972,81 @@ __CXXMV_FRAMEV__0
     assert [state.stack[0].variables[-1].value for state in if_steps] == ["1", "2"]
 
 
+def test_debug_executor_parses_cdb_lambda_captures_as_function_object():
+    """CDB/PDB lambda closure children should become LambdaCapture rows."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int base = 3;\n"
+        "int factor = 4;\n"
+        "auto f = [base, &factor](int x) { return base + factor + x; };\n"
+        "factor = 7;\n"
+        "int result = f(6);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int base = 3
+000000aa`0000efc4 int factor = 4
+000000aa`0000efd0 main::<lambda_1> f = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    f : {{...}} [Type: main::<lambda_1>]
+        base : 3 [Type: int]
+        factor : 000000aa`0000efc4 [Type: int &]
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int base = 3
+000000aa`0000efc4 int factor = 7
+000000aa`0000efd0 main::<lambda_1> f = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    f : {{...}} [Type: main::<lambda_1>]
+        base : 3 [Type: int]
+        factor : 000000aa`0000efc4 [Type: int &]
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l5 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int base = 3
+000000aa`0000efc4 int factor = 7
+000000aa`0000efd0 main::<lambda_1> f = {{}}
+000000aa`0000efe0 int result = 16
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    f : {{...}} [Type: main::<lambda_1>]
+        base : 3 [Type: int]
+        factor : 000000aa`0000efc4 [Type: int &]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    final = trace.steps[-1]
+    values = {var.name: var for var in final.stack[0].variables}
+    fn = values["f"]
+
+    assert fn.type == "lambda"
+    assert fn.value == "<lambda>"
+    assert fn.is_function_object is True
+    assert fn.is_object is False
+    assert [(capture.name, capture.type, capture.value, capture.by_ref) for capture in fn.captures] == [
+        ("base", "int", "3", False),
+        ("factor", "int&", values["factor"].address, True),
+    ]
+    assert values["result"].value == "16"
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -4202,6 +4346,68 @@ def test_native_debug_smoke_requires_control_flow_loop_state():
     assert _validate_control_flow_loop(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_lambda_capture_state():
+    """Native smoke should prove lambda closures expose captures instead of plain members."""
+    from app.core.memory_model import ExecutionTrace, LambdaCapture, MemoryState, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_lambda_capture
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="int result = f(6);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="base", type="int", value="3", address="0xS001", is_pointer=False),
+                Variable(name="factor", type="int", value="7", address="0xS002", is_pointer=False),
+                Variable(
+                    name="f",
+                    type="(unnamed class)",
+                    value="{base=3, factor=0xS002}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="base", type="int", value="3"),
+                        StructMember(name="factor", type="int&", value="0xS002"),
+                    ],
+                ),
+                Variable(name="result", type="int", value="16", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="int result = f(6);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="base", type="int", value="3", address="0xS001", is_pointer=False),
+                Variable(name="factor", type="int", value="7", address="0xS002", is_pointer=False),
+                Variable(
+                    name="f",
+                    type="lambda",
+                    value="<lambda>",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_function_object=True,
+                    captures=[
+                        LambdaCapture(name="base", type="int", value="3", by_ref=False),
+                        LambdaCapture(name="factor", type="int&", value="0xS002", by_ref=True),
+                    ],
+                ),
+                Variable(name="result", type="int", value="16", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_lambda_capture(weak_trace)
+    assert "f should be marked as a function object" in weak_errors
+    assert "base capture should exist by value" in weak_errors
+    assert _validate_lambda_capture(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -4832,6 +5038,7 @@ if __name__ == "__main__":
         test_debug_executor_formats_std_string_summary_as_scalar,
         test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_lldb_script_expands_smart_pointers,
+        test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
@@ -4877,6 +5084,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
         test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap,
         test_debug_executor_parses_cdb_control_flow_loop_scope,
+        test_debug_executor_parses_cdb_lambda_captures_as_function_object,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -4908,6 +5116,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_unique_ptr_heap_state,
         test_native_debug_smoke_requires_shared_ptr_owner_state,
         test_native_debug_smoke_requires_control_flow_loop_state,
+        test_native_debug_smoke_requires_lambda_capture_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,

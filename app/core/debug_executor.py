@@ -12,6 +12,7 @@ from app.core.memory_model import (
     ArrayElement,
     ExecutionTrace,
     HeapBlock,
+    LambdaCapture,
     MemoryState,
     PointerEdge,
     StackFrame,
@@ -1034,6 +1035,7 @@ class DebugExecutor:
 
         for parsed_frame in parsed_frames:
             variables: list[Variable] = []
+            frame_vars_by_name = {var.name: var for var in parsed_frame.variables}
             for parsed in parsed_frame.variables:
                 stack_addr = stack_addr_map[parsed.actual_addr]
                 value = parsed.value
@@ -1049,12 +1051,28 @@ class DebugExecutor:
                     value = self._format_elements(parsed.elements)
                 elif parsed.members:
                     value = self._format_members(parsed.members)
+                is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
+                captures = [
+                    LambdaCapture(
+                        name=member.name,
+                        type=self._clean_type(member.type),
+                        value=(
+                            stack_addr_map[frame_vars_by_name[member.name].actual_addr]
+                            if "&" in member.type and member.name in frame_vars_by_name
+                            else self._target_sim_addr(member.value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+                            if "&" in member.type and self._is_hex_addr(member.value) and not self._is_null(member.value)
+                            else self._clean_value(member.value)
+                        ),
+                        by_ref="&" in member.type,
+                    )
+                    for member in parsed.members
+                ] if is_function_object else []
                 object_class = self._object_class_name(parsed.type)
                 object_info = class_info.get(object_class, _ClassInfo())
                 variables.append(Variable(
                     name=parsed.name,
-                    type=self._clean_type(parsed.type),
-                    value=value,
+                    type="lambda" if is_function_object else self._clean_type(parsed.type),
+                    value="<lambda>" if is_function_object else value,
                     address=stack_addr,
                     is_pointer=is_pointer,
                     is_array=bool(parsed.elements),
@@ -1063,7 +1081,7 @@ class DebugExecutor:
                         ArrayElement(index=element.index, value=self._clean_value(element.value))
                         for element in parsed.elements
                     ],
-                    members=[
+                    members=[] if is_function_object else [
                         StructMember(
                             name=member.name,
                             type=self._clean_type(member.type),
@@ -1071,10 +1089,12 @@ class DebugExecutor:
                         )
                         for member in parsed.members
                     ],
-                    is_object=bool(parsed.members),
-                    class_name=object_class if parsed.members else "",
-                    base_classes=object_info.base_classes if parsed.members else [],
-                    virtual_methods=object_info.virtual_methods if parsed.members else [],
+                    is_object=bool(parsed.members) and not is_function_object,
+                    class_name=object_class if parsed.members and not is_function_object else "",
+                    base_classes=object_info.base_classes if parsed.members and not is_function_object else [],
+                    virtual_methods=object_info.virtual_methods if parsed.members and not is_function_object else [],
+                    is_function_object=is_function_object,
+                    captures=captures,
                     is_reference=is_reference,
                 ))
             frame_variables.append((parsed_frame.name, variables))
@@ -2348,6 +2368,11 @@ class DebugExecutor:
         if "::" in name:
             name = name.rsplit("::", 1)[-1]
         return name or "main"
+
+    @staticmethod
+    def _is_lambda_type(type_text: str) -> bool:
+        cleaned = type_text.strip().lower()
+        return "lambda" in cleaned or cleaned in {"(unnamed class)", "unnamed class"}
 
     @staticmethod
     def _pointee_type(pointer_type: str) -> str:

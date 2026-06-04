@@ -82,6 +82,15 @@ def _variable_summary(var: Variable) -> dict[str, object]:
             {"name": member.name, "type": member.type, "value": member.value}
             for member in var.members[:8]
         ],
+        "captures": [
+            {
+                "name": capture.name,
+                "type": capture.type,
+                "value": capture.value,
+                "by_ref": capture.by_ref,
+            }
+            for capture in var.captures[:8]
+        ],
     }
 
 
@@ -541,6 +550,44 @@ def _validate_control_flow_loop(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_lambda_capture(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    fn = values.get("f")
+    factor = values.get("factor")
+    result = values.get("result")
+    if fn is None:
+        errors.append("missing lambda variable f")
+    else:
+        if not fn.is_function_object:
+            errors.append("f should be marked as a function object")
+        captures = {capture.name: capture for capture in fn.captures}
+        base_capture = captures.get("base")
+        factor_capture = captures.get("factor")
+        if base_capture is None or base_capture.by_ref:
+            errors.append("base capture should exist by value")
+        elif base_capture.value != "3":
+            errors.append(f"base capture expected 3, got {base_capture.value!r}")
+        if factor_capture is None:
+            errors.append("factor capture should exist")
+        elif not factor_capture.by_ref:
+            errors.append("factor capture should be by reference")
+        elif factor is not None and factor_capture.value != factor.address:
+            errors.append(f"factor capture should target factor address {factor.address}, got {factor_capture.value!r}")
+    if factor is None:
+        errors.append("missing factor variable")
+    elif factor.value != "7":
+        errors.append(f"factor expected 7 before lambda call, got {factor.value!r}")
+    if result is None:
+        errors.append("missing lambda call result")
+    elif result.value != "16":
+        errors.append(f"result expected 16, got {result.value!r}")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -927,6 +974,17 @@ CASES: dict[str, SmokeCase] = {
             "}\n"
         ),
         validate=_validate_control_flow_loop,
+    ),
+    "lambda_capture": SmokeCase(
+        name="lambda_capture",
+        code=(
+            "int base = 3;\n"
+            "int factor = 4;\n"
+            "auto f = [base, &factor](int x) { return base + factor + x; };\n"
+            "factor = 7;\n"
+            "int result = f(6);\n"
+        ),
+        validate=_validate_lambda_capture,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",
