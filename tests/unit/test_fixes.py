@@ -1997,6 +1997,40 @@ __CXXMV_FRAMEV__0
     ]
 
 
+def test_debug_executor_parses_cdb_updated_stack_array():
+    """CDB/PDB should keep stack array elements after an indexed assignment."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int nums[3] = {1, 2, 3};\n"
+        "nums[1] = 8;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[2]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x11 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x18 [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int [3] nums = {{1, 8, 3}}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    nums = trace.steps[0].stack[0].variables[0]
+
+    assert nums.name == "nums"
+    assert nums.is_array is True
+    assert nums.is_pointer is False
+    assert nums.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(element.index, element.value) for element in nums.elements] == [
+        (0, "1"),
+        (1, "8"),
+        (2, "3"),
+    ]
+
+
 def test_debug_executor_parses_cdb_heap_object_from_pointer_summary():
     """A PDB pointer summary with members should render as a heap object block."""
     from app.core.debug_executor import DebugExecutor
@@ -2814,6 +2848,63 @@ def test_native_debug_smoke_requires_heap_array_delete_state():
     assert _validate_heap_array_delete(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_stack_array_elements():
+    """Native smoke should prove stack arrays preserve updated element cells."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_stack_array
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="nums[1] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="nums",
+                    type="int[3]",
+                    value="{[0]=1, [1]=2, [2]=3}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="1"),
+                        ArrayElement(index=1, value="2"),
+                        ArrayElement(index=2, value="3"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="nums[1] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="nums",
+                    type="int[3]",
+                    value="{[0]=1, [1]=8, [2]=3}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="1"),
+                        ArrayElement(index=1, value="8"),
+                        ArrayElement(index=2, value="3"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_stack_array(weak_trace)
+    assert "nums elements expected ['1', '8', '3'], got ['1', '2', '3']" in weak_errors
+    assert _validate_stack_array(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -3193,6 +3284,7 @@ if __name__ == "__main__":
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
+        test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_delete_state,
@@ -3217,6 +3309,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
+        test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

@@ -188,6 +188,22 @@ def _validate_stack_object(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_stack_array(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "nums")
+    if match is None:
+        return ["missing stack array variable nums"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("nums should be marked as an array")
+    if var.is_pointer:
+        errors.append("nums should not be marked as a pointer")
+    values = [element.value for element in var.elements]
+    if values != ["1", "8", "3"]:
+        errors.append(f"nums elements expected ['1', '8', '3'], got {values!r}")
+    return errors
+
+
 def _validate_vector(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "v")
     if match is None:
@@ -444,6 +460,14 @@ CASES: dict[str, SmokeCase] = {
             "s.score = 99.0;\n"
         ),
         validate=_validate_stack_object,
+    ),
+    "stack_array": SmokeCase(
+        name="stack_array",
+        code=(
+            "int nums[3] = {1, 2, 3};\n"
+            "nums[1] = 8;\n"
+        ),
+        validate=_validate_stack_array,
     ),
     "heap_object": SmokeCase(
         name="heap_object",
