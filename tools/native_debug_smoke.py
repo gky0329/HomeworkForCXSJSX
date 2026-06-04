@@ -201,6 +201,24 @@ def _validate_vector(trace: ExecutionTrace) -> list[str]:
     return []
 
 
+def _validate_vector_object(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "nodes")
+    if match is None:
+        return ["missing vector object variable nodes"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("nodes should be marked as an array/container")
+    values = [element.value for element in var.elements]
+    if len(values) != 2:
+        errors.append(f"nodes expected 2 elements, got {values!r}")
+    if not any("id=1" in value and "weight=1.5" in value for value in values):
+        errors.append(f"nodes missing first object element: {values!r}")
+    if not any("id=2" in value and "weight=4.5" in value for value in values):
+        errors.append(f"nodes missing updated second object element: {values!r}")
+    return errors
+
+
 def _validate_map(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "m")
     if match is None:
@@ -505,6 +523,17 @@ CASES: dict[str, SmokeCase] = {
             "v[1] = 8;\n"
         ),
         validate=_validate_vector,
+    ),
+    "vector_object": SmokeCase(
+        name="vector_object",
+        code=(
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "struct Node { int id; double weight; };\n"
+            "vector<Node> nodes = {{1, 1.5}, {2, 2.5}};\n"
+            "nodes[1].weight = 4.5;\n"
+        ),
+        validate=_validate_vector_object,
     ),
     "map_string_int": SmokeCase(
         name="map_string_int",

@@ -2206,6 +2206,50 @@ __CXXMV_FRAMEDX__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_vector_object_children():
+    """CDB dx/NatVis vector object elements should keep nested member values."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "struct Node { int id; double weight; };\n"
+        "vector<Node> nodes = {{1, 1.5}, {2, 2.5}};\n"
+        "nodes[1].weight = 4.5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    nodes : {{ size=2 }} [Type: std::vector<Node>]
+        [0] : {{id=1, weight=1.5}} [Type: Node]
+            id : 1 [Type: int]
+            weight : 1.5 [Type: double]
+        [1] : {{id=2, weight=4.5}} [Type: Node]
+            id : 2 [Type: int]
+            weight : 4.5 [Type: double]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    nodes = trace.steps[0].stack[0].variables[0]
+
+    assert nodes.name == "nodes"
+    assert nodes.is_array is True
+    assert nodes.element_count == 2
+    assert [(element.index, element.value) for element in nodes.elements] == [
+        (0, "{id=1, weight=1.5}"),
+        (1, "{id=2, weight=4.5}"),
+    ]
+    assert nodes.value == "{[0]={id=1, weight=1.5}, [1]={id=2, weight=4.5}}"
+
+
 def test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries():
     """CDB dx/NatVis container children should merge into the dv local variable."""
     from app.core.debug_executor import DebugExecutor
@@ -2770,6 +2814,62 @@ def test_native_debug_smoke_requires_heap_array_delete_state():
     assert _validate_heap_array_delete(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_vector_object_elements():
+    """Native smoke should prove STL containers can preserve object element members."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_vector_object
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="nodes[1].weight = 4.5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="nodes",
+                    type="vector<Node>",
+                    value="{[0]=Node, [1]=Node}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="Node"),
+                        ArrayElement(index=1, value="Node"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="nodes[1].weight = 4.5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="nodes",
+                    type="vector<Node>",
+                    value="{[0]={id=1, weight=1.5}, [1]={id=2, weight=4.5}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="{id=1, weight=1.5}"),
+                        ArrayElement(index=1, value="{id=2, weight=4.5}"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_vector_object(weak_trace)
+    assert any("nodes missing first object element" in error for error in weak_errors)
+    assert any("nodes missing updated second object element" in error for error in weak_errors)
+    assert _validate_vector_object(strong_trace) == []
+
+
 def test_native_debug_smoke_forwards_stdin_to_debug_executor():
     """Native smoke should validate input-aware debugger runs, not only no-stdin code."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -3098,6 +3198,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_heap_array_delete_state,
         test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer,
         test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
+        test_debug_executor_parses_cdb_dx_vector_object_children,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
@@ -3116,6 +3217,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
+        test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
