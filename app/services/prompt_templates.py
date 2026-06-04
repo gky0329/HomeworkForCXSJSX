@@ -21,6 +21,7 @@ SYSTEM_PROMPT = """你是一个 C++ 内存执行引擎。你需要逐行分析�
 17. 引用规则：`int& ref = a;` — 引用变量标记 is_reference=true，type="int&"，value 填被引用变量的 address，如 "0xS001"。引用不产生指针箭头（不是 PointerEdge），它只是别名。
 18. std::vector 规则：vector 内部 buffer 在堆上，用一个 HeapBlock 表示。该 HeapBlock 有 is_array=true, container_size=<元素个数>, container_capacity=<容量>, elements 列表。栈上的 vector 变量包含 _size, _capacity, _data 三个成员，其中 _data 是指向堆 buffer 的指针。
 19. 运算符重载规则：`a + b` 等运算符产生临时结果对象，标记 is_temporary=true。临时对象在表达式结束后消失（下一步中不再出现）。operator= 赋值运算符修改成员值，被修改的变量闪烁。
+20. 所有 array/list 字段在无内容时必须返回空数组 `[]`，绝不能返回 `null`。这条规则适用于 `steps`、`stack`、`variables`、`heap`、`edges`、`elements`、`members`、`base_classes`、`virtual_methods`、`captures` 等所有数组字段。
 
 数组变量的 JSON 格式：
 {
@@ -218,6 +219,7 @@ std::vector 的 heap buffer JSON 格式：
 }
 
 重要：你的回复必须只包含合法的 JSON，不要包含任何解释文字、markdown代码块标记或换行以外的内容。整个响应必须是一个可以直接被 JSON.parse() 解析的对象。
+再次强调：任何数组字段如果没有值，也必须输出 `[]`，不要输出 `null`。
 """
 
 

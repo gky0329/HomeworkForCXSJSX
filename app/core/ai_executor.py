@@ -20,10 +20,15 @@ class AIExecutor:
             system_prompt=SYSTEM_PROMPT,
             user_message=user_msg,
         )
+        logger.info("===== AI RAW RESPONSE (CODE EXECUTION) START =====\n%s\n===== AI RAW RESPONSE (CODE EXECUTION) END =====", raw_response)
+        print("===== AI RAW RESPONSE (CODE EXECUTION) START =====")
+        print(raw_response)
+        print("===== AI RAW RESPONSE (CODE EXECUTION) END =====")
         try:
             data = json.loads(raw_response)
             trace = ExecutionTrace.model_validate(data)
         except (json.JSONDecodeError, ValidationError) as e:
+            logger.exception("LLM response validation failed")
             raise RuntimeError(
                 f"LLM returned invalid response: {e}\n\n---RAW RESPONSE---\n{raw_response[:2000]}"
             ) from e
