@@ -2705,6 +2705,89 @@ __CXXMV_FRAMEV__0
     assert final.edges == []
 
 
+def test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap():
+    """CDB/PDB shared_ptr summaries should keep multiple owner edges to one heap block."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "using namespace std;\n"
+        "std::shared_ptr<int> a = std::make_shared<int>(5);\n"
+        "std::shared_ptr<int> b = a;\n"
+        "*b = 9;\n"
+        "a.reset();\n"
+        "*b = 11;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    l6 = generated_lines[6]
+    l7 = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> a = 000001df`4e700000 {{5}}
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> a = 000001df`4e700000 {{5}}
+000000aa`0000efd0 std::shared_ptr<int> b = 000001df`4e700000 {{5}}
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l6}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> a = 000001df`4e700000 {{9}}
+000000aa`0000efd0 std::shared_ptr<int> b = 000001df`4e700000 {{9}}
+__CXXMV_BEFORE__3
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l6}]
+__CXXMV_AFTER__3
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> a = 00000000`00000000
+000000aa`0000efd0 std::shared_ptr<int> b = 000001df`4e700000 {{9}}
+__CXXMV_BEFORE__4
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_AFTER__4
+00 000000aa`0000f000 program!main+0x3a [C:\tmp\program.cpp @ {l7 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> a = 00000000`00000000
+000000aa`0000efd0 std::shared_ptr<int> b = 000001df`4e700000 {{11}}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    shared = trace.steps[1]
+    after_reset = trace.steps[3]
+    final = trace.steps[-1]
+    shared_values = {var.name: var for var in shared.stack[0].variables}
+    reset_values = {var.name: var for var in after_reset.stack[0].variables}
+
+    assert shared_values["a"].value == "0xH001"
+    assert shared_values["b"].value == "0xH001"
+    assert shared.heap[0].value == "5"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in shared.edges
+    } == {
+        (shared_values["a"].address, "0xH001", False),
+        (shared_values["b"].address, "0xH001", False),
+    }
+    assert reset_values["a"].value == "nullptr"
+    assert reset_values["b"].value == "0xH001"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in after_reset.edges
+    } == {(reset_values["b"].address, "0xH001", False)}
+    assert final.heap[0].value == "11"
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -3792,6 +3875,71 @@ def test_native_debug_smoke_requires_unique_ptr_heap_state():
     assert _validate_unique_ptr_heap(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_shared_ptr_owner_state():
+    """Native smoke should prove shared_ptr owners share one visible heap block."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_shared_ptr_owners
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="shared_ptr<int> b = a;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="b", type="std::shared_ptr<int>", value="0xH002", address="0xS002", is_pointer=True),
+            ])],
+            heap=[
+                HeapBlock(address="0xH001", type="int", value="5"),
+                HeapBlock(address="0xH002", type="int", value="5"),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001"),
+                PointerEdge(source_address="0xS002", target_address="0xH002"),
+            ],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="shared_ptr<int> b = a;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="b", type="std::shared_ptr<int>", value="0xH001", address="0xS002", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="5")],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001"),
+                PointerEdge(source_address="0xS002", target_address="0xH001"),
+            ],
+        ),
+        MemoryState(
+            line_number=6,
+            source_code="a.reset();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="std::shared_ptr<int>", value="nullptr", address="0xS001", is_pointer=True),
+                Variable(name="b", type="std::shared_ptr<int>", value="0xH001", address="0xS002", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="9")],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xH001")],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="*b = 11;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="std::shared_ptr<int>", value="nullptr", address="0xS001", is_pointer=True),
+                Variable(name="b", type="std::shared_ptr<int>", value="0xH001", address="0xS002", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="11")],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xH001")],
+        ),
+    ])
+
+    weak_errors = _validate_shared_ptr_owners(weak_trace)
+    assert any("same heap block" in error for error in weak_errors)
+    assert "missing a.reset() state" in weak_errors
+    assert _validate_shared_ptr_owners(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -4465,6 +4613,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,
         test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
+        test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -4494,6 +4643,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_heap_polymorphic_delete_state,
         test_native_debug_smoke_requires_heap_leak_overwrite_state,
         test_native_debug_smoke_requires_unique_ptr_heap_state,
+        test_native_debug_smoke_requires_shared_ptr_owner_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,

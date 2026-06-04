@@ -440,6 +440,70 @@ def _validate_unique_ptr_heap(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_shared_ptr_owners(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    shared_state = next(
+        (
+            state for state in trace.steps
+            if {"a", "b"}.issubset({var.name for var in _all_variables(state)})
+            and len([edge for edge in state.edges if not edge.is_dangling]) >= 2
+        ),
+        None,
+    )
+    if shared_state is None:
+        errors.append("missing shared_ptr state with two live owners")
+    else:
+        values = {var.name: var for var in _all_variables(shared_state)}
+        a = values.get("a")
+        b = values.get("b")
+        if a is None or b is None:
+            errors.append("missing shared_ptr variables a and b")
+        else:
+            if not a.is_pointer or not b.is_pointer:
+                errors.append("shared_ptr owners should be rendered as pointer-like variables")
+            if a.value != b.value:
+                errors.append(f"a and b should target the same heap block, got {a.value!r} and {b.value!r}")
+            owner_edges = [
+                edge for edge in shared_state.edges
+                if edge.target_address == a.value and edge.source_address in {a.address, b.address}
+            ]
+            if len(owner_edges) != 2:
+                errors.append(f"expected two owner edges to shared heap, got {len(owner_edges)}")
+
+    reset_state = next(
+        (
+            state for state in trace.steps
+            if state.source_code.strip() == "a.reset();"
+        ),
+        None,
+    )
+    if reset_state is None:
+        errors.append("missing a.reset() state")
+    else:
+        values = {var.name: var for var in _all_variables(reset_state)}
+        a = values.get("a")
+        b = values.get("b")
+        if a is None or b is None:
+            errors.append("missing shared_ptr variables after reset")
+        else:
+            if a.value != "nullptr":
+                errors.append(f"a expected nullptr after reset, got {a.value!r}")
+            if b.value == "nullptr":
+                errors.append("b should still own the heap after a.reset()")
+            if not any(edge.source_address == b.address and edge.target_address == b.value for edge in reset_state.edges):
+                errors.append("missing b -> heap edge after a.reset()")
+            if any(edge.source_address == a.address for edge in reset_state.edges):
+                errors.append("a should not keep an owner edge after reset")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    final_heap_values = {block.value for block in final_state.heap if not block.is_freed}
+    if "11" not in final_heap_values:
+        errors.append(f"final shared heap value expected 11, got {sorted(final_heap_values)!r}")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -799,6 +863,19 @@ CASES: dict[str, SmokeCase] = {
             "p.reset();\n"
         ),
         validate=_validate_unique_ptr_heap,
+    ),
+    "shared_ptr_owners": SmokeCase(
+        name="shared_ptr_owners",
+        code=(
+            "#include <memory>\n"
+            "using namespace std;\n"
+            "shared_ptr<int> a = make_shared<int>(5);\n"
+            "shared_ptr<int> b = a;\n"
+            "*b = 9;\n"
+            "a.reset();\n"
+            "*b = 11;\n"
+        ),
+        validate=_validate_shared_ptr_owners,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",
