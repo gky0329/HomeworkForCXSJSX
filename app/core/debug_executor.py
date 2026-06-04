@@ -1411,7 +1411,7 @@ class DebugExecutor:
                 element_type = self._array_element_type(clean_type)
                 elements = self._parse_structured_elements(payload, element_type)
                 members = [] if elements else self._parse_structured_members(payload)
-                if "*" in var.type and self._is_hex_addr(value) and not self._is_null(value):
+                if self._is_pointer_like_type(var.type) and self._is_hex_addr(value) and not self._is_null(value):
                     var.pointee_type = self._pointee_type(var.type)
                     var.pointee_elements = elements
                     var.pointee_members = members
@@ -1421,7 +1421,7 @@ class DebugExecutor:
                     var.elements = elements
                 elif members:
                     var.members = members
-            if "*" in var.type and self._is_hex_addr(value) and not self._is_null(value):
+            if self._is_pointer_like_type(var.type) and self._is_hex_addr(value) and not self._is_null(value):
                 var.pointee_addr = value
             variables.append(var)
         return variables
@@ -1525,7 +1525,7 @@ class DebugExecutor:
                 element_type = self._array_element_type(clean_type)
                 elements = self._parse_structured_elements(payload, element_type)
                 members = [] if elements else self._parse_structured_members(payload)
-            if "*" in var.type and self._is_hex_addr(clean_value) and not self._is_null(clean_value):
+            if self._is_pointer_like_type(var.type) and self._is_hex_addr(clean_value) and not self._is_null(clean_value):
                 var.pointee_addr = clean_value
                 var.pointee_type = self._pointee_type(var.type)
                 var.pointee_elements = elements
@@ -1617,7 +1617,7 @@ class DebugExecutor:
                 name=name,
                 value=value,
             )
-            if self._is_hex_addr(value) and ("*" in type_text or "&" in type_text):
+            if self._is_hex_addr(value) and ("*" in type_text or "&" in type_text or self._is_smart_pointer_type(type_text)):
                 var.pointee_addr = value
                 pending_pointer = var
             else:
@@ -1936,6 +1936,22 @@ class DebugExecutor:
             "    compact=typ.replace(' ', '')\n"
             "    tokens=('array<', 'deque<', 'list<', 'map<', 'multimap<', 'multiset<', 'pair<', 'set<', 'tuple<', 'unordered_map<', 'unordered_set<', 'vector<')\n"
             "    return any(token in compact for token in tokens)\n"
+            "def is_smart_pointer_type(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    tokens=('unique_ptr<', 'shared_ptr<', 'weak_ptr<', 'std::unique_ptr<', 'std::shared_ptr<', 'std::weak_ptr<', 'std::__1::unique_ptr<', 'std::__1::shared_ptr<', 'std::__1::weak_ptr<')\n"
+            "    return any(token in compact for token in tokens)\n"
+            "def smart_pointer_child(value):\n"
+            "    count=min(value.GetNumChildren(), 16)\n"
+            "    for child_idx in range(count):\n"
+            "        child=value.GetChildAtIndex(child_idx)\n"
+            "        child_typ=type_of(child)\n"
+            "        raw=child.GetValue() or ''\n"
+            "        if not raw and '*' in child_typ:\n"
+            "            raw_unsigned=child.GetValueAsUnsigned(0)\n"
+            "            raw='0x%x' % raw_unsigned if raw_unsigned else ''\n"
+            "        if '*' in child_typ and raw and raw not in ('0x0', '0x0000000000000000'):\n"
+            "            return child, raw\n"
+            "    return None, ''\n"
             "def flat_value(value, depth=0):\n"
             "    val=val_of(value)\n"
             "    typ=type_of(value)\n"
@@ -1976,6 +1992,22 @@ class DebugExecutor:
             "        return\n"
             "    if '&' in typ and val and val not in ('0x0', '0x0000000000000000'):\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
+            "        return\n"
+            "    if is_smart_pointer_type(typ):\n"
+            "        raw_child, raw_val=smart_pointer_child(value)\n"
+            "        if raw_val:\n"
+            "            print('%s: (%s) %s = %s {' % (addr, typ, name, raw_val))\n"
+            "            deref=raw_child.Dereference() if raw_child is not None else None\n"
+            "            if deref is not None and deref.IsValid():\n"
+            "                deref_child_count=min(deref.GetNumChildren(), 32)\n"
+            "                if deref_child_count > 0:\n"
+            "                    for child_idx in range(deref_child_count):\n"
+            "                        emit_child(deref.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
+            "                else:\n"
+            "                    emit_child(deref, '*' + name, frame_idx=frame_idx)\n"
+            "            print('}')\n"
+            "            return\n"
+            "        print('%s: (%s) %s = 0x0' % (addr, typ, name))\n"
             "        return\n"
             "    if '*' in typ and not val:\n"
             "        raw=value.GetValueAsUnsigned(0)\n"
@@ -2319,7 +2351,55 @@ class DebugExecutor:
 
     @staticmethod
     def _pointee_type(pointer_type: str) -> str:
+        smart_type = DebugExecutor._smart_pointee_type(pointer_type)
+        if smart_type:
+            return smart_type
         return pointer_type.replace("*", "").strip() or "unknown"
+
+    @staticmethod
+    def _is_pointer_like_type(type_text: str) -> bool:
+        return "*" in type_text or DebugExecutor._is_smart_pointer_type(type_text)
+
+    @staticmethod
+    def _is_smart_pointer_type(type_text: str) -> bool:
+        compact = type_text.replace(" ", "")
+        return any(
+            token in compact
+            for token in (
+                "unique_ptr<",
+                "shared_ptr<",
+                "weak_ptr<",
+                "std::unique_ptr<",
+                "std::shared_ptr<",
+                "std::weak_ptr<",
+                "std::__1::unique_ptr<",
+                "std::__1::shared_ptr<",
+                "std::__1::weak_ptr<",
+            )
+        )
+
+    @staticmethod
+    def _smart_pointee_type(type_text: str) -> str:
+        compact_start = type_text.find("<")
+        if compact_start < 0 or not DebugExecutor._is_smart_pointer_type(type_text):
+            return ""
+        depth = 0
+        arg: list[str] = []
+        for ch in type_text[compact_start + 1:]:
+            if ch == "<":
+                depth += 1
+                arg.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    break
+                depth -= 1
+                arg.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                break
+            arg.append(ch)
+        return DebugExecutor._clean_type("".join(arg).strip())
 
     @staticmethod
     def _array_index(name: str) -> int | None:

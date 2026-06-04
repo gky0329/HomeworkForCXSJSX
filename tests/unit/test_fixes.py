@@ -1001,6 +1001,18 @@ def test_debug_executor_lldb_script_expands_string_keyed_containers():
     assert "'string' in typ and 'vector' not in typ" not in script
 
 
+def test_debug_executor_lldb_script_expands_smart_pointers():
+    """LLDB snapshots should dereference smart pointers like heap owners."""
+    from app.core.debug_executor import DebugExecutor
+
+    script = DebugExecutor._lldb_stack_snapshot_command()
+
+    assert "def is_smart_pointer_type" in script
+    assert "def smart_pointer_child" in script
+    assert "if is_smart_pointer_type(typ):" in script
+    assert "emit_child(deref, '*' + name" in script
+
+
 def test_debug_executor_parses_vector_elements_as_array_variable():
     """std::vector child snapshots should render like indexed array cells."""
     from app.core.debug_executor import DebugExecutor
@@ -1368,6 +1380,69 @@ __CXXMV_FRAME__0__{l3 + 1}__main
     assert final.edges[0].target_address == current.address
     assert final.edges[0].is_dangling is False
     assert all(edge.target_address != leaked.address for edge in final.edges)
+
+
+def test_debug_executor_parses_unique_ptr_as_heap_pointer():
+    """Smart pointer snapshots should render as owner pointers to heap blocks."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "using namespace std;\n"
+        "unique_ptr<int> p = make_unique<int>(5);\n"
+        "*p = 8;\n"
+        "p.reset();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    smart_type = "std::__1::unique_ptr<int, std::__1::default_delete<int> >"
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l3}:21
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l4}:2
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe700: ({smart_type}) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *p = 5
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l4}:2
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l5}:2
+__CXXMV_FRAME__0__{l5}__main
+0x000000016fdfe700: ({smart_type}) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *p = 8
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l5}:2
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l5 + 1}:1
+__CXXMV_FRAME__0__{l5 + 1}__main
+0x000000016fdfe700: ({smart_type}) p = 0x0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    created = trace.steps[0]
+    updated = trace.steps[1]
+    final = trace.steps[2]
+    created_p = created.stack[0].variables[0]
+    updated_p = updated.stack[0].variables[0]
+    final_p = final.stack[0].variables[0]
+
+    assert created_p.is_pointer is True
+    assert created_p.value == "0xH001"
+    assert created.heap[0].type == "int"
+    assert created.heap[0].value == "5"
+    assert updated_p.value == "0xH001"
+    assert updated.heap[0].value == "8"
+    assert updated.edges[0].source_address == updated_p.address
+    assert updated.edges[0].target_address == "0xH001"
+    assert final_p.value == "nullptr"
+    assert final.heap == []
+    assert final.edges == []
 
 
 def test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete():
@@ -2577,6 +2652,59 @@ __CXXMV_FRAMEV__0
     assert all(edge.target_address != leaked.address for edge in final.edges)
 
 
+def test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer():
+    """CDB/PDB smart pointer summaries should become heap owner edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "using namespace std;\n"
+        "std::unique_ptr<int> p(new int(5));\n"
+        "*p = 8;\n"
+        "p.reset();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::unique_ptr<int> p = 000001df`4e700000 {{5}}
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::unique_ptr<int> p = 000001df`4e700000 {{8}}
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l5 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::unique_ptr<int> p = 00000000`00000000
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    updated = trace.steps[1]
+    final = trace.steps[2]
+    p = updated.stack[0].variables[0]
+
+    assert p.is_pointer is True
+    assert p.value == "0xH001"
+    assert updated.heap[0].type == "int"
+    assert updated.heap[0].value == "8"
+    assert updated.edges[0].source_address == p.address
+    assert updated.edges[0].target_address == "0xH001"
+    assert final.stack[0].variables[0].value == "nullptr"
+    assert final.heap == []
+    assert final.edges == []
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -3614,6 +3742,56 @@ def test_native_debug_smoke_requires_heap_leak_overwrite_state():
     assert _validate_heap_leak_overwrite(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_unique_ptr_heap_state():
+    """Native smoke should prove unique_ptr owns a visible heap block."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_unique_ptr_heap
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="*p = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="p",
+                    type="std::unique_ptr<int>",
+                    value="{pointer=0x00000001006446a0}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="pointer", type="int*", value="0x00000001006446a0")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="*p = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="std::unique_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+        MemoryState(
+            line_number=5,
+            source_code="p.reset();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="std::unique_ptr<int>", value="nullptr", address="0xS001", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_unique_ptr_heap(weak_trace)
+    assert "missing unique_ptr heap state with updated value 8" in weak_errors
+    assert _validate_unique_ptr_heap(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -4243,6 +4421,7 @@ if __name__ == "__main__":
         test_debug_executor_marks_expired_stack_pointer_dangling,
         test_debug_executor_formats_std_string_summary_as_scalar,
         test_debug_executor_lldb_script_expands_string_keyed_containers,
+        test_debug_executor_lldb_script_expands_smart_pointers,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
@@ -4250,6 +4429,7 @@ if __name__ == "__main__":
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
         test_debug_executor_preserves_overwritten_heap_as_leak,
+        test_debug_executor_parses_unique_ptr_as_heap_pointer,
         test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
@@ -4284,6 +4464,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,
+        test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -4312,6 +4493,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_inherited_virtual_object_state,
         test_native_debug_smoke_requires_heap_polymorphic_delete_state,
         test_native_debug_smoke_requires_heap_leak_overwrite_state,
+        test_native_debug_smoke_requires_unique_ptr_heap_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,

@@ -403,6 +403,43 @@ def _validate_heap_leak_overwrite(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_unique_ptr_heap(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    updated_state = next(
+        (state for state in trace.steps if any(block.value == "8" for block in state.heap)),
+        None,
+    )
+    if updated_state is None:
+        errors.append("missing unique_ptr heap state with updated value 8")
+    else:
+        values = {var.name: var for var in _all_variables(updated_state)}
+        ptr = values.get("p")
+        block = next((heap for heap in updated_state.heap if heap.value == "8"), None)
+        if ptr is None:
+            errors.append("missing unique_ptr variable p")
+        elif not ptr.is_pointer:
+            errors.append("unique_ptr p should be rendered as a pointer-like owner")
+        if block is None:
+            errors.append("missing heap block value 8")
+        elif ptr is not None:
+            if ptr.value != block.address:
+                errors.append(f"p should target heap block {block.address}, got {ptr.value!r}")
+            if not any(edge.source_address == ptr.address and edge.target_address == block.address for edge in updated_state.edges):
+                errors.append("missing p -> heap edge for unique_ptr")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    final_p = next((var for var in _all_variables(final_state) if var.name == "p"), None)
+    if final_p is None:
+        errors.append("missing final unique_ptr variable p")
+    elif final_p.value != "nullptr":
+        errors.append(f"p expected nullptr after reset, got {final_p.value!r}")
+    if final_state.edges:
+        errors.append(f"unique_ptr reset final state should have no edges, got {len(final_state.edges)}")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -751,6 +788,17 @@ CASES: dict[str, SmokeCase] = {
             "*p = 3;\n"
         ),
         validate=_validate_heap_leak_overwrite,
+    ),
+    "unique_ptr_heap": SmokeCase(
+        name="unique_ptr_heap",
+        code=(
+            "#include <memory>\n"
+            "using namespace std;\n"
+            "unique_ptr<int> p = make_unique<int>(5);\n"
+            "*p = 8;\n"
+            "p.reset();\n"
+        ),
+        validate=_validate_unique_ptr_heap,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",
