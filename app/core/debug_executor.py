@@ -531,11 +531,82 @@ class DebugExecutor:
             r"(?:(?:inline|static|virtual|explicit|constexpr|friend)\s+)*"
             r"(?:[A-Za-z_]\w*(?:::\w+)?|~?[A-Za-z_]\w*|operator\s*\S+)"
             r"(?:<[^;{}()]*>)?[\s*&]+"
-            r"(?P<name>~?[A-Za-z_]\w*)\s*\([^;{}]*\)\s*"
+            r"(?P<name>~?[A-Za-z_]\w*)\s*\((?P<params>[^;{}]*)\)\s*"
             r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^:{]+)?\s*$"
         )
         match = pattern.match(line)
-        return bool(match and match.group("name") not in {"if", "for", "while", "switch", "catch"})
+        return bool(
+            match
+            and match.group("name") not in {"if", "for", "while", "switch", "catch"}
+            and DebugExecutor._looks_like_parameter_list(match.group("params"))
+        )
+
+    @staticmethod
+    def _looks_like_parameter_list(params: str) -> bool:
+        text = params.strip()
+        if not text or text == "void":
+            return True
+        if any(token in text for token in ('"', "'", "{", "}", "+", "/", "%")):
+            return False
+        if re.search(r"(?<![A-Za-z_])\d", text):
+            return False
+
+        for part in DebugExecutor._split_parameter_list(text):
+            clean = part.strip()
+            if not clean or "=" in clean:
+                return False
+            clean = re.sub(r"\b(?:const|volatile|constexpr|typename|class)\b", "", clean).strip()
+            clean = clean.lstrip("*&").strip()
+            first = clean.split(None, 1)[0] if clean else ""
+            first = first.lstrip("*&")
+            first = first.rstrip("*&")
+            if not first:
+                return False
+            if "<" in first or "::" in first:
+                continue
+            if first in {
+                "auto",
+                "bool",
+                "char",
+                "double",
+                "float",
+                "int",
+                "long",
+                "short",
+                "signed",
+                "size_t",
+                "string",
+                "unsigned",
+                "wchar_t",
+            }:
+                continue
+            if first[:1].isupper():
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _split_parameter_list(params: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        angle_depth = 0
+        paren_depth = 0
+        for ch in params:
+            if ch == "<":
+                angle_depth += 1
+            elif ch == ">" and angle_depth > 0:
+                angle_depth -= 1
+            elif ch == "(":
+                paren_depth += 1
+            elif ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+            if ch == "," and angle_depth == 0 and paren_depth == 0:
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(ch)
+        parts.append("".join(current))
+        return parts
 
     def _compile(self, src: Path, binary: Path):
         compiler = self._compiler()
@@ -1594,10 +1665,17 @@ class DebugExecutor:
             "    return value.GetValue() or value.GetSummary() or ''\n"
             "def type_of(value):\n"
             "    return value.GetTypeName() or 'unknown'\n"
+            "def is_std_string_type(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    return compact in ('string', 'std::string', 'std::__1::string') or compact.startswith('std::basic_string<char') or compact.startswith('std::__1::basic_string<char')\n"
+            "def is_expandable_container_type(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    tokens=('array<', 'deque<', 'list<', 'map<', 'multimap<', 'multiset<', 'pair<', 'set<', 'tuple<', 'unordered_map<', 'unordered_set<', 'vector<')\n"
+            "    return any(token in compact for token in tokens)\n"
             "def flat_value(value, depth=0):\n"
             "    val=val_of(value)\n"
             "    typ=type_of(value)\n"
-            "    if val and 'vector' not in typ:\n"
+            "    if val and not is_expandable_container_type(typ):\n"
             "        return val\n"
             "    if depth >= 2:\n"
             "        return val\n"
@@ -1629,7 +1707,7 @@ class DebugExecutor:
             "    val=val_of(value)\n"
             "    addr=addr_of(value)\n"
             "    summary=value.GetSummary() or ''\n"
-            "    if 'string' in typ and 'vector' not in typ and val:\n"
+            "    if is_std_string_type(typ) and val:\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
             "        return\n"
             "    if '&' in typ and val and val not in ('0x0', '0x0000000000000000'):\n"

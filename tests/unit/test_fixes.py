@@ -811,6 +811,18 @@ __CXXMV_FRAME__0__6__main
     assert changed.value == "abcd"
 
 
+def test_debug_executor_lldb_script_expands_string_keyed_containers():
+    """A container type containing string should not be emitted as scalar text."""
+    from app.core.debug_executor import DebugExecutor
+
+    script = DebugExecutor._lldb_stack_snapshot_command()
+    assert "def is_std_string_type" in script
+    assert "def is_expandable_container_type" in script
+    assert "if is_std_string_type(typ) and val:" in script
+    assert "if val and not is_expandable_container_type(typ):" in script
+    assert "'string' in typ and 'vector' not in typ" not in script
+
+
 def test_debug_executor_parses_vector_elements_as_array_variable():
     """std::vector child snapshots should render like indexed array cells."""
     from app.core.debug_executor import DebugExecutor
@@ -923,6 +935,52 @@ __CXXMV_FRAME__0__7__main
         (0, "aa"),
         (1, "bb"),
         (2, "cc"),
+    ]
+
+
+def test_debug_executor_parses_map_children_as_key_value_entries():
+    """map<string, int> synthetic children should render as indexed key/value rows."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "int main() {\n"
+        "    map<string, int> m;\n"
+        '    m["a"] = 1;\n'
+        '    m["b"] = 2;\n'
+        '    int got = m["a"];\n'
+        "}\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l7 = generated_lines[7]
+    l8 = generated_lines[8]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l7}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l8}:5
+__CXXMV_FRAME__0__{l8}__main
+0x000000016fdfe700: (std::__1::map<std::__1::string, int, std::__1::less<std::__1::string>, std::__1::allocator<std::__1::pair<const std::__1::string, int> > >) m = {{
+0x000000010065c6a0:   (std::__1::pair<const std::__1::string, int>) [0] = {{first="a", second=1}}
+0x000000010065c6d0:   (std::__1::pair<const std::__1::string, int>) [1] = {{first="b", second=2}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    state = trace.steps[0]
+    m = state.stack[0].variables[0]
+
+    assert state.line_number == 7
+    assert m.name == "m"
+    assert m.is_array is True
+    assert m.element_count == 2
+    assert m.value == '{[0]={first="a", second=1}, [1]={first="b", second=2}}'
+    assert [(element.index, element.value) for element in m.elements] == [
+        (0, '{first="a", second=1}'),
+        (1, '{first="b", second=2}'),
     ]
 
 
@@ -1373,6 +1431,32 @@ def test_debug_executor_wraps_helper_function_outside_main_and_steps_in():
     assert prepared.line_map[function_line + 1] == 2
     assert prepared.line_map[call_line] == 5
     assert call_line in prepared.step_in_lines
+
+
+def test_debug_executor_wraps_object_construction_inside_main():
+    """Constructor calls with value arguments are statements, not function prototypes."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <string>\n"
+        "using namespace std;\n"
+        "class Student { public: int id; double score; string name; Student(int i, double s, string n): id(i), score(s), name(n) {} };\n"
+        'Student s(7, 98.5, "Ada");\n'
+        "s.score = 99.0;\n"
+    )
+
+    source_lines = prepared.source.splitlines()
+    main_line = source_lines.index("int main() {") + 1
+    construction_line = source_lines.index('  Student s(7, 98.5, "Ada");') + 1
+    mutation_line = source_lines.index("  s.score = 99.0;") + 1
+
+    assert DebugExecutor._looks_like_function_signature("int square(int x)") is True
+    assert DebugExecutor._looks_like_function_signature('Student s(7, 98.5, "Ada")') is False
+    assert construction_line > main_line
+    assert mutation_line > construction_line
+    assert prepared.line_map[construction_line] == 4
+    assert prepared.line_map[mutation_line] == 5
 
 
 def test_debug_executor_msvc_compile_args_enable_pdb_symbols():
@@ -2197,8 +2281,10 @@ if __name__ == "__main__":
         test_debug_executor_keeps_locals_on_wrapped_snippet_last_line,
         test_debug_executor_parses_reference_target_address,
         test_debug_executor_formats_std_string_summary_as_scalar,
+        test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
+        test_debug_executor_parses_map_children_as_key_value_entries,
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
@@ -2214,6 +2300,7 @@ if __name__ == "__main__":
         test_debug_executor_lldb_script_sets_stdin_input_path,
         test_debug_executor_wraps_snippet_includes_outside_main,
         test_debug_executor_wraps_helper_function_outside_main_and_steps_in,
+        test_debug_executor_wraps_object_construction_inside_main,
         test_debug_executor_msvc_compile_args_enable_pdb_symbols,
         test_debug_executor_cdb_script_uses_source_lines_and_local_vars,
         test_debug_executor_steps_into_user_function_calls,
