@@ -1765,6 +1765,48 @@ __CXXMV_FRAMEV__0
     assert step.edges == []
 
 
+def test_debug_executor_parses_cdb_recursive_stack_frames():
+    """CDB/PDB snapshots should preserve repeated recursive frames with stable names."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int fact(int n) {\n"
+        "    if (n <= 1) return 1;\n"
+        "    int sub = fact(n - 1);\n"
+        "    return n * sub;\n"
+        "}\n"
+        "int result = fact(3);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    recursive_line = generated_lines[3]
+    call_line = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!fact+0x11 [C:\tmp\program.cpp @ {recursive_line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!fact+0x15 [C:\tmp\program.cpp @ {recursive_line}]
+01 000000aa`0000f040 program!fact+0x25 [C:\tmp\program.cpp @ {recursive_line}]
+02 000000aa`0000f080 program!fact+0x25 [C:\tmp\program.cpp @ {recursive_line}]
+03 000000aa`0000f0c0 program!main+0x31 [C:\tmp\program.cpp @ {call_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000ef90 int n = 1
+__CXXMV_FRAMEV__1
+000000aa`0000efa0 int n = 2
+__CXXMV_FRAMEV__2
+000000aa`0000efb0 int n = 3
+__CXXMV_FRAMEV__3
+000000aa`0000efc0 int result = -1
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+
+    assert step.line_number == 3
+    assert [frame.frame_name for frame in step.stack] == ["fact", "fact(2)", "fact(3)", "main"]
+    assert [frame.variables[0].value for frame in step.stack[:3]] == ["1", "2", "3"]
+
+
 def test_debug_executor_cdb_skips_step_in_transition_snapshots():
     """CDB should not label callee variables as the caller source line."""
     from app.core.debug_executor import DebugExecutor
@@ -2697,6 +2739,57 @@ def test_native_debug_smoke_requires_reference_and_stack_pointer_state():
     assert _validate_reference_stack_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_recursive_call_stack_state():
+    """Native smoke should prove recursion exposes nested stack frames."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_recursive_call_stack
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="int result = fact(3);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="result", type="int", value="6", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=3,
+            source_code="int sub = fact(n - 1);",
+            stack=[
+                StackFrame(frame_name="fact", variables=[
+                    Variable(name="n", type="int", value="1", address="0xS001", is_pointer=False),
+                ]),
+                StackFrame(frame_name="fact(2)", variables=[
+                    Variable(name="n", type="int", value="2", address="0xS002", is_pointer=False),
+                ]),
+                StackFrame(frame_name="fact(3)", variables=[
+                    Variable(name="n", type="int", value="3", address="0xS003", is_pointer=False),
+                ]),
+                StackFrame(frame_name="main", variables=[]),
+            ],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=6,
+            source_code="int result = fact(3);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="result", type="int", value="6", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_recursive_call_stack(weak_trace)
+    assert "missing observed recursive fact -> fact -> fact -> main call stack" in weak_errors
+    assert _validate_recursive_call_stack(strong_trace) == []
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2756,6 +2849,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
+        test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
@@ -2783,6 +2877,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
+        test_native_debug_smoke_requires_recursive_call_stack_state,
     ]
 
     passed = 0

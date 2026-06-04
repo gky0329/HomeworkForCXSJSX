@@ -308,6 +308,34 @@ def _validate_reference_stack_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_recursive_call_stack(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    recursive_state = None
+    for state in trace.steps:
+        frame_names = [frame.frame_name for frame in state.stack]
+        fact_frames = [name for name in frame_names if name.startswith("fact")]
+        if len(fact_frames) >= 3 and "main" in frame_names:
+            recursive_state = state
+            break
+
+    if recursive_state is None:
+        errors.append("missing observed recursive fact -> fact -> fact -> main call stack")
+    else:
+        top_values = {
+            var.name: var.value
+            for var in recursive_state.stack[0].variables
+        }
+        if top_values.get("n") != "1":
+            errors.append(f"deepest fact::n expected 1, got {top_values.get('n')!r}")
+
+    result = _last_var(trace, "result")
+    if result is None:
+        errors.append("missing final recursive result variable")
+    elif result[1].value != "6":
+        errors.append(f"recursive result expected 6, got {result[1].value!r}")
+    return errors
+
+
 CASES: dict[str, SmokeCase] = {
     "basic_double": SmokeCase(
         name="basic_double",
@@ -357,6 +385,18 @@ CASES: dict[str, SmokeCase] = {
             "*p = 11;\n"
         ),
         validate=_validate_reference_stack_pointer,
+    ),
+    "recursive_factorial": SmokeCase(
+        name="recursive_factorial",
+        code=(
+            "int fact(int n) {\n"
+            "    if (n <= 1) return 1;\n"
+            "    int sub = fact(n - 1);\n"
+            "    return n * sub;\n"
+            "}\n"
+            "int result = fact(3);\n"
+        ),
+        validate=_validate_recursive_call_stack,
     ),
     "vector_int": SmokeCase(
         name="vector_int",
