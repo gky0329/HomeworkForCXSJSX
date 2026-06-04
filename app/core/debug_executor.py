@@ -63,6 +63,7 @@ class _ParsedElement:
     pointee_addr: str = ""
     pointee_type: str = ""
     pointee_value: str = ""
+    pointee_members: list["_ParsedMember"] = field(default_factory=list)
 
 
 @dataclass
@@ -900,6 +901,7 @@ class DebugExecutor:
             self._record_element_pointee_values(
                 parsed_vars,
                 heap_values,
+                heap_object_values,
                 freed_heap,
                 prepared.class_info,
             )
@@ -1000,6 +1002,7 @@ class DebugExecutor:
             self._record_element_pointee_values(
                 parsed_vars,
                 heap_values,
+                heap_object_values,
                 freed_heap,
                 prepared.class_info,
             )
@@ -1257,6 +1260,7 @@ class DebugExecutor:
         self,
         parsed_vars: list[_ParsedVar],
         heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
         freed_heap: set[str],
         class_info: dict[str, _ClassInfo],
     ):
@@ -1272,19 +1276,32 @@ class DebugExecutor:
                     not element.pointee_addr
                     or self._is_null(element.pointee_addr)
                     or element.pointee_addr in freed_heap
-                    or not element.pointee_value
                 ):
                     continue
-                heap_values[element.pointee_addr] = (
-                    element.pointee_type or self._pointee_type(element.type),
-                    element.pointee_value,
-                )
-            self._record_structured_element_pointee_values(all_elements, heap_values, freed_heap, class_info)
+                pointee_type = element.pointee_type or self._pointee_type(element.type)
+                if element.pointee_members:
+                    heap_object_values[element.pointee_addr] = (
+                        pointee_type,
+                        self._typed_members_for_owner(element.pointee_members, pointee_type, class_info),
+                    )
+                elif element.pointee_value:
+                    heap_values[element.pointee_addr] = (
+                        pointee_type,
+                        element.pointee_value,
+                    )
+            self._record_structured_element_pointee_values(
+                all_elements,
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                class_info,
+            )
 
     def _record_structured_element_pointee_values(
         self,
         elements: list[_ParsedElement],
         heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
         freed_heap: set[str],
         class_info: dict[str, _ClassInfo],
     ):
@@ -1310,13 +1327,40 @@ class DebugExecutor:
                     value = self._normalize_actual_addr(value)
                 if not value or self._is_null(value) or value in freed_heap:
                     continue
-                pointee_value = self._clean_value(self._structured_payload(raw_value))
-                if not pointee_value:
+                pointee_type = self._pointee_type(member_type)
+                pointee_payload = self._structured_payload(raw_value)
+                if not pointee_payload:
                     continue
-                heap_values[value] = (
-                    self._pointee_type(member_type),
-                    pointee_value,
-                )
+                pointee_members = self._parse_structured_members(pointee_payload)
+                if pointee_members:
+                    heap_object_values[value] = (
+                        pointee_type,
+                        self._typed_members_for_owner(pointee_members, pointee_type, class_info),
+                    )
+                else:
+                    heap_values[value] = (
+                        pointee_type,
+                        self._clean_value(pointee_payload),
+                    )
+
+    @staticmethod
+    def _typed_members_for_owner(
+        members: list[_ParsedMember],
+        owner_type: str,
+        class_info: dict[str, _ClassInfo],
+    ) -> list[_ParsedMember]:
+        object_class = DebugExecutor._object_class_name(owner_type)
+        declared_types = class_info.get(object_class, _ClassInfo()).member_types
+        typed_members: list[_ParsedMember] = []
+        for member in members:
+            member_name = DebugExecutor._semantic_member_name(owner_type, member)
+            typed_members.append(_ParsedMember(
+                name=member.name,
+                type=member.type or declared_types.get(member_name, "") or declared_types.get(member.name, ""),
+                value=member.value,
+                actual_addr=member.actual_addr,
+            ))
+        return typed_members
 
     def _apply_std_array_expression_elements(
         self,
@@ -1714,7 +1758,11 @@ class DebugExecutor:
                         if member_payload:
                             pending_element.pointee_addr = member_value
                             pending_element.pointee_type = self._pointee_type(clean_type)
-                            pending_element.pointee_value = self._clean_value(member_payload)
+                            nested_members = self._parse_structured_members(member_payload)
+                            if nested_members:
+                                pending_element.pointee_members = nested_members
+                            else:
+                                pending_element.pointee_value = self._clean_value(member_payload)
                     pending_element_members.append(_ParsedMember(
                         name=name,
                         type=clean_type,
@@ -3029,7 +3077,9 @@ class DebugExecutor:
                     DebugExecutor._array_element_type(element.pointee_type),
                 )
                 nested_members = [] if nested_elements else DebugExecutor._parse_structured_members(payload)
-                if not nested_elements and not nested_members:
+                if nested_members:
+                    element.pointee_members = nested_members
+                elif not nested_elements:
                     element.pointee_value = DebugExecutor._clean_value(payload)
         return element
 

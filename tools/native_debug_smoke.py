@@ -562,6 +562,53 @@ def _validate_map_unique_ptr(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_map_unique_ptr_object(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    first = values.get("first")
+    match = _last_var(trace, "m")
+    if match is None:
+        return ["missing map unique_ptr object variable m"]
+    _, var = match
+    errors: list[str] = []
+    if first is None:
+        errors.append("missing stack object first")
+    elif _member_map(first).get("value") != "6":
+        errors.append(f"first.value expected 6 after m[\"n\"]->next write, got {_member_map(first).get('value')!r}")
+    if not var.is_array:
+        errors.append("m should be marked as an array/container")
+    elements = list(var.elements)
+    if len(elements) != 1:
+        errors.append(f"m expected one key/value entry, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    if "first=n" not in element.value or "second=0xH" not in element.value:
+        errors.append(f"m missing unique_ptr object entry target: {element.value!r}")
+        return errors
+    target = next((edge.target_address for edge in state.edges if edge.source_address == element.address), "")
+    if not target:
+        errors.append("missing m entry -> unique_ptr object heap edge")
+        return errors
+    heap = next((block for block in state.heap if block.address == target), None)
+    if heap is None:
+        errors.append(f"missing heap object for map unique_ptr target {target!r}")
+        return errors
+    if not heap.is_object or heap.class_name != "Node":
+        errors.append(f"map unique_ptr target should be Node object, got class={heap.class_name!r} object={heap.is_object}")
+    members = {member.name: member for member in heap.members}
+    if members.get("value") is None or members["value"].value != "2":
+        errors.append(f"heap Node.value expected 2, got {members.get('value').value if members.get('value') else None!r}")
+    next_member = members.get("next")
+    if first is not None:
+        if next_member is None or next_member.value != first.address:
+            errors.append(f"heap Node.next should target first {first.address!r}, got {next_member.value if next_member else None!r}")
+        elif not any(edge.source_address == next_member.address and edge.target_address == first.address for edge in state.edges):
+            errors.append("missing heap Node.next -> first pointer edge")
+    return errors
+
+
 def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     live_blocks = [block for step in trace.steps for block in step.heap if block.is_object]
@@ -842,6 +889,53 @@ def _validate_vector_unique_ptr(trace: ExecutionTrace) -> list[str]:
         errors.append(f"unique_ptr heap value expected 8 after *xs[0] write, got {target_heap.value!r}")
     if not any(edge.source_address == element.address and edge.target_address == element.value for edge in state.edges):
         errors.append("missing xs[0] -> unique_ptr heap edge")
+    return errors
+
+
+def _validate_vector_unique_ptr_object(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    first = values.get("first")
+    nodes = values.get("nodes")
+    errors: list[str] = []
+    if first is None:
+        errors.append("missing stack object first")
+    elif _member_map(first).get("value") != "6":
+        errors.append(f"first.value expected 6 after nodes[0]->next write, got {_member_map(first).get('value')!r}")
+    if nodes is None:
+        return errors + ["missing vector<unique_ptr<Node>> variable nodes"]
+    if not nodes.is_array:
+        errors.append("nodes should be marked as an array/container")
+    elements = list(nodes.elements)
+    if len(elements) != 1:
+        errors.append(f"nodes expected one unique_ptr element, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    if "unique_ptr" not in element.type:
+        errors.append(f"nodes[0] type should be unique_ptr, got {element.type!r}")
+    target = element.value
+    if not target.startswith("0xH"):
+        errors.append(f"nodes[0] should target object heap, got {target!r}")
+        return errors
+    heap = next((block for block in state.heap if block.address == target), None)
+    if heap is None:
+        errors.append(f"missing heap object for vector unique_ptr target {target!r}")
+        return errors
+    if not heap.is_object or heap.class_name != "Node":
+        errors.append(f"unique_ptr target should be Node object, got class={heap.class_name!r} object={heap.is_object}")
+    members = {member.name: member for member in heap.members}
+    if members.get("value") is None or members["value"].value != "2":
+        errors.append(f"heap Node.value expected 2, got {members.get('value').value if members.get('value') else None!r}")
+    next_member = members.get("next")
+    if first is not None:
+        if next_member is None or next_member.value != first.address:
+            errors.append(f"heap Node.next should target first {first.address!r}, got {next_member.value if next_member else None!r}")
+        elif not any(edge.source_address == next_member.address and edge.target_address == first.address for edge in state.edges):
+            errors.append("missing heap Node.next -> first pointer edge")
+    if not any(edge.source_address == element.address and edge.target_address == target for edge in state.edges):
+        errors.append("missing nodes[0] -> object heap edge")
     return errors
 
 
@@ -1533,6 +1627,20 @@ CASES: dict[str, SmokeCase] = {
         ),
         validate=_validate_vector_unique_ptr,
     ),
+    "vector_unique_ptr_object": SmokeCase(
+        name="vector_unique_ptr_object",
+        code=(
+            "#include <memory>\n"
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "struct Node { int value; Node* next; };\n"
+            "Node first{1,nullptr};\n"
+            "vector<unique_ptr<Node>> nodes;\n"
+            "nodes.push_back(make_unique<Node>(Node{2,&first}));\n"
+            "nodes[0]->next->value = 6;\n"
+        ),
+        validate=_validate_vector_unique_ptr_object,
+    ),
     "std_array_shared_ptr": SmokeCase(
         name="std_array_shared_ptr",
         code=(
@@ -1779,6 +1887,21 @@ CASES: dict[str, SmokeCase] = {
             '*m["a"] = 8;\n'
         ),
         validate=_validate_map_unique_ptr,
+    ),
+    "map_string_unique_ptr_object": SmokeCase(
+        name="map_string_unique_ptr_object",
+        code=(
+            "#include <map>\n"
+            "#include <memory>\n"
+            "#include <string>\n"
+            "using namespace std;\n"
+            "struct Node { int value; Node* next; };\n"
+            "Node first{1,nullptr};\n"
+            "map<string, unique_ptr<Node>> m;\n"
+            'm["n"] = make_unique<Node>(Node{2,&first});\n'
+            'm["n"]->next->value = 6;\n'
+        ),
+        validate=_validate_map_unique_ptr_object,
     ),
     "stdin_sum": SmokeCase(
         name="stdin_sum",

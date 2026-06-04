@@ -1821,6 +1821,64 @@ __CXXMV_FRAME__0__{line + 1}__main
     assert step.heap == []
 
 
+def test_debug_executor_parses_lldb_vector_unique_ptr_object_heap_members():
+    """vector<unique_ptr<Object>> elements should create object heap blocks with member edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1,nullptr};\n"
+        "vector<unique_ptr<Node>> nodes;\n"
+        "nodes.push_back(make_unique<Node>(Node{2,&first}));\n"
+        "nodes[0]->next->value = 6;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[8]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (Node) first = {{
+0x000000016fdfe6b0:   (int) value = 6
+0x000000016fdfe6b8:   (Node*) next = 0x0
+}}
+0x000000016fdfe6c0: (std::__1::vector<std::__1::unique_ptr<Node, std::__1::default_delete<Node> >, std::__1::allocator<std::__1::unique_ptr<Node, std::__1::default_delete<Node> > > >) nodes = {{
+0x000000010065c6a0:   (std::__1::unique_ptr<Node, std::__1::default_delete<Node> >) [0] = 0x000000010065d000 {{value=2, next=0x000000016fdfe6b0}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    nodes = values["nodes"]
+    heap = step.heap[0]
+
+    assert nodes.is_array is True
+    assert nodes.elements[0].value == "0xH001"
+    assert heap.address == "0xH001"
+    assert heap.type == "Node"
+    assert heap.is_object is True
+    assert heap.class_name == "Node"
+    assert [(member.name, member.type, member.value, member.address) for member in heap.members] == [
+        ("value", "int", "2", "0xH001.value"),
+        ("next", "Node*", first.address, "0xH001.next"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {
+        (nodes.elements[0].address, heap.address, False),
+        ("0xH001.next", first.address, False),
+    }
+
+
 def test_debug_executor_preserves_nested_array_child_values():
     """Nested array child values should not be stripped to empty strings."""
     from app.core.debug_executor import DebugExecutor
@@ -4595,6 +4653,70 @@ __CXXMV_FRAMEDX__0
     } == {(m.elements[0].address, "0xH001", False)}
 
 
+def test_debug_executor_parses_cdb_dx_map_unique_ptr_object_heap_members():
+    """CDB/PDB map<string, unique_ptr<Object>> entries should create object heap blocks."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <memory>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1,nullptr};\n"
+        "map<string, unique_ptr<Node>> m;\n"
+        'm["n"] = make_unique<Node>(Node{2,&first});\n'
+        'm["n"]->next->value = 6;\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[9]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 Node first = {{value=6, next=0x0000000000000000}}
+000000aa`0000efe0 std::map<std::string,std::unique_ptr<Node>> m = size=1
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    first : {{value=6, next=0x0000000000000000}} [Type: Node]
+        value : 6 [Type: int]
+        next : 0x0000000000000000 [Type: Node *]
+    m : {{ size=1 }} [Type: std::map<std::string,std::unique_ptr<Node>>]
+        [0] : {{first="n", second=000001df`4e700000 {{value=2, next=000000aa`0000efd0}}}} [Type: std::pair<const std::string,std::unique_ptr<Node>>]
+            first : "n" [Type: std::string]
+            second : 000001df`4e700000 {{value=2, next=000000aa`0000efd0}} [Type: std::unique_ptr<Node>]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    m = values["m"]
+    heap = step.heap[0]
+
+    assert first.value == "{value=6, next=nullptr}"
+    assert m.is_array is True
+    assert m.elements[0].value == "{first=n, second=0xH001}"
+    assert heap.address == "0xH001"
+    assert heap.type == "Node"
+    assert heap.is_object is True
+    assert heap.class_name == "Node"
+    assert [(member.name, member.type, member.value, member.address) for member in heap.members] == [
+        ("value", "int", "2", "0xH001.value"),
+        ("next", "Node*", first.address, "0xH001.next"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {
+        (m.elements[0].address, heap.address, False),
+        ("0xH001.next", first.address, False),
+    }
+
+
 def test_debug_executor_parses_cdb_dx_nested_map_pair_children():
     """Nested CDB dx pair rows should be folded into map array element values."""
     from app.core.debug_executor import DebugExecutor
@@ -5506,6 +5628,95 @@ def test_native_debug_smoke_requires_vector_unique_ptr_heap_state():
     weak_errors = _validate_vector_unique_ptr(weak_trace)
     assert "missing heap block for vector unique_ptr target '0xH001'" in weak_errors
     assert _validate_vector_unique_ptr(strong_trace) == []
+
+
+def test_native_debug_smoke_requires_vector_unique_ptr_object_heap_state():
+    """Native smoke should prove vector<unique_ptr<Object>> keeps object heap members."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_vector_unique_ptr_object
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="nodes[0]->next->value = 6;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="nodes",
+                    type="std::vector<std::unique_ptr<Node>>",
+                    value="{[0]=0xH001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<Node>", value="0xH001", address="0xS002[0]")],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="Node", value="{value=2, next=0xS001}")],
+            edges=[PointerEdge(source_address="0xS002[0]", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="nodes[0]->next->value = 6;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="nodes",
+                    type="std::vector<std::unique_ptr<Node>>",
+                    value="{[0]=0xH001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<Node>", value="0xH001", address="0xS002[0]")],
+                ),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Node",
+                value="{value=2, next=0xS001}",
+                is_object=True,
+                class_name="Node",
+                members=[
+                    StructMember(name="value", type="int", value="2", address="0xH001.value"),
+                    StructMember(name="next", type="Node*", value="0xS001", address="0xH001.next"),
+                ],
+            )],
+            edges=[
+                PointerEdge(source_address="0xS002[0]", target_address="0xH001"),
+                PointerEdge(source_address="0xH001.next", target_address="0xS001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_vector_unique_ptr_object(weak_trace)
+    assert any("unique_ptr target should be Node object" in error for error in weak_errors)
+    assert any("heap Node.next should target first" in error for error in weak_errors)
+    assert _validate_vector_unique_ptr_object(strong_trace) == []
 
 
 def test_native_debug_smoke_requires_std_array_shared_ptr_edges():
@@ -6453,6 +6664,109 @@ def test_native_debug_smoke_requires_map_unique_ptr_heap_entry():
     assert _validate_map_unique_ptr(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry():
+    """Native smoke should prove map<string, unique_ptr<Object>> entries render object heap blocks."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_map_unique_ptr_object
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code='m["n"]->next->value = 6;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="m",
+                    type="std::map<string,unique_ptr<Node>>",
+                    value="{[0]={first=n, second=0xH001}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(
+                            index=0,
+                            type="std::pair<string,unique_ptr<Node>>",
+                            value="{first=n, second=0xH001}",
+                            address="0xS002[0]",
+                        ),
+                    ],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="Node", value="{value=2, next=0xS001}")],
+            edges=[PointerEdge(source_address="0xS002[0]", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code='m["n"]->next->value = 6;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="m",
+                    type="std::map<string,unique_ptr<Node>>",
+                    value="{[0]={first=n, second=0xH001}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(
+                            index=0,
+                            type="std::pair<string,unique_ptr<Node>>",
+                            value="{first=n, second=0xH001}",
+                            address="0xS002[0]",
+                        ),
+                    ],
+                ),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Node",
+                value="{value=2, next=0xS001}",
+                is_object=True,
+                class_name="Node",
+                members=[
+                    StructMember(name="value", type="int", value="2", address="0xH001.value"),
+                    StructMember(name="next", type="Node*", value="0xS001", address="0xH001.next"),
+                ],
+            )],
+            edges=[
+                PointerEdge(source_address="0xS002[0]", target_address="0xH001"),
+                PointerEdge(source_address="0xH001.next", target_address="0xS001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_map_unique_ptr_object(weak_trace)
+    assert any("map unique_ptr target should be Node object" in error for error in weak_errors)
+    assert any("heap Node.next should target first" in error for error in weak_errors)
+    assert _validate_map_unique_ptr_object(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -7065,6 +7379,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
         test_debug_executor_parses_lldb_map_pointer_values_as_entry_edges,
+        test_debug_executor_parses_lldb_vector_unique_ptr_object_heap_members,
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
@@ -7128,6 +7443,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
         test_debug_executor_parses_cdb_dx_map_pointer_values_as_entry_edges,
         test_debug_executor_parses_cdb_dx_map_unique_ptr_values_as_heap_entries,
+        test_debug_executor_parses_cdb_dx_map_unique_ptr_object_heap_members,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
@@ -7152,6 +7468,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_weak_ptr_expired_state,
         test_native_debug_smoke_requires_vector_shared_ptr_container_state,
         test_native_debug_smoke_requires_vector_unique_ptr_heap_state,
+        test_native_debug_smoke_requires_vector_unique_ptr_object_heap_state,
         test_native_debug_smoke_requires_std_array_shared_ptr_edges,
         test_native_debug_smoke_requires_control_flow_loop_state,
         test_native_debug_smoke_requires_lambda_capture_state,
@@ -7166,6 +7483,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_optional_pointer_member_edge,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
+        test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
