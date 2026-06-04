@@ -3821,6 +3821,53 @@ __CXXMV_FRAMEV__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_object_string_member_children():
+    """CDB/PDB string member children should stay under their parent object."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <string>\n"
+        "using namespace std;\n"
+        "class Student { public: int id; double score; string name; "
+        "Student(int i, double s, string n): id(i), score(s), name(n) {} };\n"
+        'Student s(7, 98.5, "Ada");\n'
+        "s.score = 99.0;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Student s = {{id=7, score=99, name={{ size=3 }}}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    s : {{ id=7, score=99, name={{ size=3 }} }} [Type: Student]
+        id : 7 [Type: int]
+        score : 99 [Type: double]
+        name : {{ size=3 }} [Type: std::string]
+            [0] : 65 'A' [Type: char]
+            [1] : 100 'd' [Type: char]
+            [2] : 97 'a' [Type: char]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    s = trace.steps[0].stack[0].variables[0]
+    members = {member.name: member for member in s.members}
+
+    assert s.is_object is True
+    assert s.is_array is False
+    assert s.class_name == "Student"
+    assert s.value == "{id=7, score=99, name=Ada}"
+    assert members["id"].value == "7"
+    assert members["score"].value == "99"
+    assert members["name"].type == "std::string"
+    assert members["name"].value == "Ada"
+
+
 def test_debug_executor_parses_cdb_inherited_virtual_object_metadata():
     """CDB/PDB object snapshots should carry base classes and virtual methods."""
     from app.core.debug_executor import DebugExecutor
@@ -8754,6 +8801,7 @@ if __name__ == "__main__":
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
+        test_debug_executor_parses_cdb_dx_object_string_member_children,
         test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,

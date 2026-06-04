@@ -1874,6 +1874,7 @@ class DebugExecutor:
         pending_element_members: list[_ParsedMember] = []
         pending_member: _ParsedMember | None = None
         pending_member_indent = 0
+        pending_member_elements: list[_ParsedElement] = []
         pending_member_members: list[_ParsedMember] = []
         pattern = re.compile(
             r"^(?P<indent>\s+)"
@@ -1891,12 +1892,20 @@ class DebugExecutor:
             pending_element_members = []
 
         def flush_pending_member():
-            nonlocal pending_member, pending_member_members
-            if pending_member is not None and pending_member_members:
-                base_value = self._clean_value(pending_member.value)
-                payload = self._format_members(pending_member_members)
-                pending_member.value = f"{base_value} {payload}".strip()
+            nonlocal pending_member, pending_member_elements, pending_member_members
+            if pending_member is not None:
+                if pending_member_elements and self._is_std_string_type(pending_member.type):
+                    string_value = self._string_from_char_elements(pending_member_elements)
+                    if string_value:
+                        pending_member.value = string_value
+                elif pending_member_elements:
+                    pending_member.value = self._format_elements(pending_member_elements)
+                elif pending_member_members:
+                    base_value = self._clean_value(pending_member.value)
+                    payload = self._format_members(pending_member_members)
+                    pending_member.value = f"{base_value} {payload}".strip()
             pending_member = None
+            pending_member_elements = []
             pending_member_members = []
 
         def member_points_to_live_object(member_type: str, raw_member_value: str) -> bool:
@@ -1933,14 +1942,19 @@ class DebugExecutor:
                 clean_value = self._normalize_cdb_addr(clean_value)
 
             if pending_member is not None and indent > pending_member_indent:
-                if self._array_index(name) is None:
-                    pending_member_members.append(_ParsedMember(
-                        name=name,
-                        type=clean_type,
-                        value=self._clean_value_preserving_payload(raw_value),
-                        actual_addr=f"{pending_member.actual_addr}:{name}",
-                    ))
+                element_index = self._array_index(name)
+                if element_index is not None:
+                    pending_member_elements.append(
+                        self._parsed_element_from_raw(element_index, clean_type, raw_value)
+                    )
                     continue
+                pending_member_members.append(_ParsedMember(
+                    name=name,
+                    type=clean_type,
+                    value=self._clean_value_preserving_payload(raw_value),
+                    actual_addr=f"{pending_member.actual_addr}:{name}",
+                ))
+                continue
 
             if pending_member is not None and indent <= pending_member_indent:
                 flush_pending_member()
@@ -1975,6 +1989,12 @@ class DebugExecutor:
                     if member_points_to_live_object(clean_type, raw_value):
                         pending_member = pending_element_members[-1]
                         pending_member_indent = indent
+                        pending_member_elements = []
+                        pending_member_members = []
+                    elif self._is_expandable_cdb_member_type(clean_type):
+                        pending_member = pending_element_members[-1]
+                        pending_member_indent = indent
+                        pending_member_elements = []
                         pending_member_members = []
                     pending_element.value = self._format_members(pending_element_members)
                     continue
@@ -2010,6 +2030,12 @@ class DebugExecutor:
                     if member_points_to_live_object(clean_type, raw_value):
                         pending_member = target_members[-1]
                         pending_member_indent = indent
+                        pending_member_elements = []
+                        pending_member_members = []
+                    elif self._is_expandable_cdb_member_type(clean_type):
+                        pending_member = target_members[-1]
+                        pending_member_indent = indent
+                        pending_member_elements = []
                         pending_member_members = []
                 continue
 
@@ -3752,6 +3778,77 @@ class DebugExecutor:
     def _array_index(name: str) -> int | None:
         match = re.fullmatch(r"\[(\d+)\]", name)
         return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _is_std_string_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        cleaned = re.sub(r"\b(?:class|struct|const|volatile)\b", "", cleaned).strip()
+        compact = re.sub(r"\s+", "", cleaned)
+        if compact.startswith("std::__1::"):
+            compact = "std::" + compact[len("std::__1::"):]
+        return (
+            compact in {"string", "std::string"}
+            or compact.startswith("std::basic_string<char")
+        )
+
+    @staticmethod
+    def _is_expandable_cdb_member_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        compact = re.sub(r"\s+", "", cleaned)
+        if DebugExecutor._is_std_string_type(compact):
+            return True
+        return any(
+            token in compact
+            for token in (
+                "array<",
+                "deque<",
+                "list<",
+                "map<",
+                "multimap<",
+                "multiset<",
+                "optional<",
+                "pair<",
+                "set<",
+                "tuple<",
+                "unordered_map<",
+                "unordered_set<",
+                "variant<",
+                "vector<",
+            )
+        )
+
+    @staticmethod
+    def _string_from_char_elements(elements: list[_ParsedElement]) -> str:
+        chars: list[str] = []
+        for element in sorted(elements, key=lambda item: item.index):
+            value = DebugExecutor._clean_value(element.value)
+            match = re.search(r"'(?P<char>(?:\\.|[^'])*)'", value)
+            if match is None:
+                return ""
+            char = DebugExecutor._decode_cdb_char_literal(match.group("char"))
+            if char == "\0":
+                break
+            chars.append(char)
+        return "".join(chars)
+
+    @staticmethod
+    def _decode_cdb_char_literal(value: str) -> str:
+        if not value.startswith("\\"):
+            return value
+        if len(value) == 2:
+            return {
+                "0": "\0",
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+                "\\": "\\",
+                "'": "'",
+                '"': '"',
+            }.get(value[1], value)
+        hex_match = re.fullmatch(r"\\x([0-9a-fA-F]{1,2})", value)
+        if hex_match:
+            return chr(int(hex_match.group(1), 16))
+        return value
 
     @staticmethod
     def _format_elements(elements: list[_ParsedElement]) -> str:
