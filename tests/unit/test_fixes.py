@@ -2788,6 +2788,121 @@ __CXXMV_FRAMEV__0
     assert final.heap[0].value == "11"
 
 
+def test_debug_executor_parses_cdb_control_flow_loop_scope():
+    """CDB/PDB loop snapshots should follow branch path and drop loop locals after scope exit."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int sum = 0;\n"
+        "int parity = 0;\n"
+        "for (int i = 1; i <= 4; ++i) {\n"
+        "    if (i % 2 == 0) {\n"
+        "        parity += i;\n"
+        "    }\n"
+        "    sum += i;\n"
+        "}\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    l7 = generated_lines[7]
+    l8 = generated_lines[8]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l1}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 0
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 0
+000000aa`0000efc4 int parity = 0
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 0
+000000aa`0000efc4 int parity = 0
+000000aa`0000efc8 int i = 1
+__CXXMV_BEFORE__3
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__3
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 0
+000000aa`0000efc4 int parity = 0
+000000aa`0000efc8 int i = 1
+__CXXMV_BEFORE__4
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_AFTER__4
+00 000000aa`0000f000 program!main+0x3a [C:\tmp\program.cpp @ {l8}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 1
+000000aa`0000efc4 int parity = 0
+000000aa`0000efc8 int i = 1
+__CXXMV_BEFORE__5
+00 000000aa`0000f000 program!main+0x3a [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__5
+00 000000aa`0000f000 program!main+0x42 [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 1
+000000aa`0000efc4 int parity = 0
+000000aa`0000efc8 int i = 2
+__CXXMV_BEFORE__6
+00 000000aa`0000f000 program!main+0x42 [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__6
+00 000000aa`0000f000 program!main+0x4a [C:\tmp\program.cpp @ {l5}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 1
+000000aa`0000efc4 int parity = 0
+000000aa`0000efc8 int i = 2
+__CXXMV_BEFORE__7
+00 000000aa`0000f000 program!main+0x4a [C:\tmp\program.cpp @ {l5}]
+__CXXMV_AFTER__7
+00 000000aa`0000f000 program!main+0x52 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 1
+000000aa`0000efc4 int parity = 2
+000000aa`0000efc8 int i = 2
+__CXXMV_BEFORE__8
+00 000000aa`0000f000 program!main+0x52 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_AFTER__8
+00 000000aa`0000f000 program!main+0x5a [C:\tmp\program.cpp @ {l8}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 3
+000000aa`0000efc4 int parity = 2
+000000aa`0000efc8 int i = 2
+__CXXMV_BEFORE__9
+00 000000aa`0000f000 program!main+0x5a [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__9
+00 000000aa`0000f000 program!main+0x62 [C:\tmp\program.cpp @ {l3 + 6}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int sum = 10
+000000aa`0000efc4 int parity = 6
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    final = trace.steps[-1]
+    final_values = {var.name: var.value for var in final.stack[0].variables}
+    if_steps = [
+        state for state in trace.steps
+        if state.source_code.strip().startswith("if ")
+    ]
+
+    assert final_values == {"sum": "10", "parity": "6"}
+    assert "i" not in final_values
+    assert [state.stack[0].variables[-1].value for state in if_steps] == ["1", "2"]
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -3940,6 +4055,153 @@ def test_native_debug_smoke_requires_shared_ptr_owner_state():
     assert _validate_shared_ptr_owners(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_control_flow_loop_state():
+    """Native smoke should prove real debugger execution follows loop/branch paths."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_control_flow_loop
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="sum += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="10", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="6", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="4", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="if (i % 2 == 0) {",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="0", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="0", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="1", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="sum += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="0", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="1", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=4,
+            source_code="if (i % 2 == 0) {",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="0", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="2", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=5,
+            source_code="parity += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="2", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="sum += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="3", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="2", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=4,
+            source_code="if (i % 2 == 0) {",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="3", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="3", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="sum += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="6", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="3", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=4,
+            source_code="if (i % 2 == 0) {",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="6", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="4", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=5,
+            source_code="parity += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="6", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="6", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="4", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="sum += i;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="10", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="6", address="0xS002", is_pointer=False),
+                Variable(name="i", type="int", value="4", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=3,
+            source_code="for (int i = 1; i <= 4; ++i) {",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="sum", type="int", value="10", address="0xS001", is_pointer=False),
+                Variable(name="parity", type="int", value="6", address="0xS002", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_control_flow_loop(weak_trace)
+    assert any("if branch should observe" in error for error in weak_errors)
+    assert any("loop variable i should be out of scope" in error for error in weak_errors)
+    assert _validate_control_flow_loop(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -4614,6 +4876,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,
         test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
         test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap,
+        test_debug_executor_parses_cdb_control_flow_loop_scope,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -4644,6 +4907,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_heap_leak_overwrite_state,
         test_native_debug_smoke_requires_unique_ptr_heap_state,
         test_native_debug_smoke_requires_shared_ptr_owner_state,
+        test_native_debug_smoke_requires_control_flow_loop_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,

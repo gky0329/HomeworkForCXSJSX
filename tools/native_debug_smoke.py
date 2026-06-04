@@ -504,6 +504,43 @@ def _validate_shared_ptr_owners(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_control_flow_loop(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    if_state_values: list[int] = []
+    body_count = 0
+    parity_updates: list[str] = []
+    for state in trace.steps:
+        values = {var.name: var.value for var in _all_variables(state)}
+        if state.source_code.strip().startswith("if ") and "i" in values:
+            try:
+                if_state_values.append(int(values["i"]))
+            except ValueError:
+                errors.append(f"loop i should be numeric, got {values['i']!r}")
+        if state.source_code.strip() == "sum += i;":
+            body_count += 1
+        if state.source_code.strip() == "parity += i;":
+            parity_updates.append(values.get("parity", ""))
+
+    if if_state_values != [1, 2, 3, 4]:
+        errors.append(f"if branch should observe i values [1, 2, 3, 4], got {if_state_values!r}")
+    if body_count != 4:
+        errors.append(f"sum loop body should execute 4 times, got {body_count}")
+    if parity_updates != ["2", "6"]:
+        errors.append(f"parity updates expected ['2', '6'], got {parity_updates!r}")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    values = {var.name: var.value for var in _all_variables(final_state)}
+    if values.get("sum") != "10":
+        errors.append(f"final sum expected 10, got {values.get('sum')!r}")
+    if values.get("parity") != "6":
+        errors.append(f"final parity expected 6, got {values.get('parity')!r}")
+    if "i" in values:
+        errors.append("loop variable i should be out of scope in final state")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -876,6 +913,20 @@ CASES: dict[str, SmokeCase] = {
             "*b = 11;\n"
         ),
         validate=_validate_shared_ptr_owners,
+    ),
+    "control_flow_loop": SmokeCase(
+        name="control_flow_loop",
+        code=(
+            "int sum = 0;\n"
+            "int parity = 0;\n"
+            "for (int i = 1; i <= 4; ++i) {\n"
+            "    if (i % 2 == 0) {\n"
+            "        parity += i;\n"
+            "    }\n"
+            "    sum += i;\n"
+            "}\n"
+        ),
+        validate=_validate_control_flow_loop,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",
