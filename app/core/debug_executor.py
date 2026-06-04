@@ -1102,6 +1102,7 @@ class DebugExecutor:
                     actual_stack_lookup=actual_stack_lookup,
                     stack_addr_map=stack_addr_map,
                     heap_addr_map=heap_addr_map,
+                    class_info=class_info,
                 )
                 if is_pointer and self._is_hex_addr(value) and not self._is_null(value):
                     value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
@@ -1237,7 +1238,7 @@ class DebugExecutor:
         edge_keys = {(edge.source_address, edge.target_address) for edge in pointer_edges}
         for _, variables in frame_variables:
             for var in variables:
-                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs)
+                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs, class_info)
                 self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
         self._ensure_heap_blocks_for_edge_targets(
             pointer_edges,
@@ -1255,7 +1256,7 @@ class DebugExecutor:
             before_blocks = len(heap_blocks_by_actual)
             before_edges = len(pointer_edges)
             for block in list(heap_blocks_by_actual.values()):
-                self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
+                self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs, class_info)
                 self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
             added_blocks = self._ensure_heap_blocks_for_edge_targets(
                 pointer_edges,
@@ -2841,6 +2842,7 @@ class DebugExecutor:
                 actual_stack_lookup=actual_stack_lookup,
                 stack_addr_map=stack_addr_map,
                 heap_addr_map=heap_addr_map,
+                class_info=class_info,
             )
             return HeapBlock(
                 address=target_addr,
@@ -2978,7 +2980,9 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo] | None = None,
     ) -> list[StructMember]:
+        class_info = class_info or {}
         member_models: list[StructMember] = []
         seen: set[tuple[str, str, str]] = set()
         index_by_name: dict[str, int] = {}
@@ -2991,6 +2995,7 @@ class DebugExecutor:
                 actual_stack_lookup,
                 stack_addr_map,
                 heap_addr_map,
+                class_info,
             )
             key = (name, member_type, value)
             if key in seen:
@@ -3031,6 +3036,7 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
     ) -> str:
         value = self._clean_value(member.value)
         member_type = self._semantic_member_type(owner_type, member)
@@ -3043,7 +3049,52 @@ class DebugExecutor:
         ):
             value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
             return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+        formatted_structured = self._structured_member_display_value(
+            member,
+            owner_type,
+            actual_stack_lookup,
+            stack_addr_map,
+            heap_addr_map,
+            class_info,
+        )
+        if formatted_structured:
+            return formatted_structured
         return value
+
+    def _structured_member_display_value(
+        self,
+        member: _ParsedMember,
+        owner_type: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        member_type = self._semantic_member_type(owner_type, member)
+        member_types = self._structured_array_element_member_types(member_type, class_info)
+        if not any(self._is_pointer_like_type(nested_type) for nested_type in member_types.values()):
+            return ""
+        payload = self._structured_payload(member.value)
+        if not payload:
+            return ""
+        nested_members = self._parse_structured_members(payload)
+        if not nested_members:
+            return ""
+        parts: list[str] = []
+        for nested in nested_members:
+            nested_type = member_types.get(nested.name, "")
+            value = self._clean_value(nested.value)
+            if (
+                self._is_pointer_like_type(nested_type)
+                and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+                and not self._is_null(value)
+            ):
+                actual = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+                value = self._target_sim_addr(actual, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            elif self._is_pointer_like_type(nested_type) and self._is_null(value):
+                value = "nullptr"
+            parts.append(f"{nested.name}={value}")
+        return "{" + ", ".join(parts) + "}"
 
     @staticmethod
     def _semantic_member_name(owner_type: str, member: _ParsedMember) -> str:
@@ -3073,22 +3124,50 @@ class DebugExecutor:
         pointer_edges: list[PointerEdge],
         edge_keys: set[tuple[str, str]],
         freed_target_addrs: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
     ):
+        class_info = class_info or {}
         for member in members:
-            if not member.address or not self._is_pointer_like_type(member.type):
+            if not member.address:
                 continue
-            target_addr = member.value
-            if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+            if not self._is_pointer_like_type(member.type):
+                target_addrs = []
+            else:
+                target_addrs = [member.value]
+            target_addrs.extend(self._structured_member_pointer_targets(member, class_info))
+            for target_addr in target_addrs:
+                if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                    continue
+                key = (member.address, target_addr)
+                if key in edge_keys:
+                    continue
+                pointer_edges.append(PointerEdge(
+                    source_address=member.address,
+                    target_address=target_addr,
+                    is_dangling=target_addr in freed_target_addrs,
+                ))
+                edge_keys.add(key)
+
+    def _structured_member_pointer_targets(
+        self,
+        member: StructMember,
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[str]:
+        member_types = self._structured_array_element_member_types(member.type, class_info or {})
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+            return []
+        payload = self._structured_payload(member.value)
+        if not payload:
+            return []
+        targets: list[str] = []
+        for nested in self._parse_structured_members(payload):
+            nested_type = member_types.get(nested.name, "")
+            if not self._is_pointer_like_type(nested_type):
                 continue
-            key = (member.address, target_addr)
-            if key in edge_keys:
-                continue
-            pointer_edges.append(PointerEdge(
-                source_address=member.address,
-                target_address=target_addr,
-                is_dangling=target_addr in freed_target_addrs,
-            ))
-            edge_keys.add(key)
+            value = self._clean_value(nested.value)
+            if value.startswith("0xS") or value.startswith("0xH"):
+                targets.append(value)
+        return targets
 
     def _append_array_pointer_edges(
         self,

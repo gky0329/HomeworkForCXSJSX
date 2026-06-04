@@ -1634,6 +1634,68 @@ __CXXMV_FRAME__0__{line + 1}__main
     assert step.heap == []
 
 
+def test_debug_executor_parses_lldb_optional_variant_nested_object_member_edges():
+    """optional/variant object value members should map nested pointer fields."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <optional>\n"
+        "#include <variant>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node first{6,nullptr};\n"
+        "optional<Node> maybe = Node{2,&first};\n"
+        "variant<int, Node> either = Node{3,&first};\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[7]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (Node) first = {{
+0x000000016fdfe6b0:   (int) value = 6
+0x000000016fdfe6b8:   (Node*) next = 0x0
+}}
+0x000000016fdfe6c0: (std::__1::optional<Node>) maybe = {{
+0x000000016fdfe6c0:   (Node) Value = {{value=2, next=0x000000016fdfe6b0 {{value=6, next=0x0000000000000000}}}}
+}}
+0x000000016fdfe6d0: (std::__1::variant<int, Node>) either = {{
+0x000000016fdfe6d0:   (Node) Value = {{value=3, next=0x000000016fdfe6b0 {{value=6, next=0x0000000000000000}}}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    maybe_value = values["maybe"].members[0]
+    either_value = values["either"].members[0]
+
+    assert values["maybe"].value == "{value={value=2, next=" + first.address + "}}"
+    assert values["either"].value == "{value={value=3, next=" + first.address + "}}"
+    assert (maybe_value.name, maybe_value.type, maybe_value.value) == (
+        "value",
+        "Node",
+        "{value=2, next=" + first.address + "}",
+    )
+    assert (either_value.name, either_value.type, either_value.value) == (
+        "value",
+        "Node",
+        "{value=3, next=" + first.address + "}",
+    )
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (maybe_value.address, first.address),
+        (either_value.address, first.address),
+    }
+
+
 def test_debug_executor_formats_lldb_optional_empty_state():
     """Disengaged optional values should show empty instead of raw debugger text."""
     from app.core.debug_executor import DebugExecutor
@@ -6846,6 +6908,105 @@ def test_native_debug_smoke_requires_optional_pointer_member_edge():
     assert _validate_optional_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_optional_variant_object_member_edges():
+    """Native smoke should prove optional/variant object values expose nested pointer edges."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_optional_variant_object_member_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="int done = first.value + maybe->value + get<Node>(either).value;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="maybe",
+                    type="std::optional<Node>",
+                    value="{value={value=2, next=0x000000016fdfe6b0}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=2, next=0x000000016fdfe6b0}", address="0xS002.Value")],
+                ),
+                Variable(
+                    name="either",
+                    type="std::variant<int,Node>",
+                    value="{value={value=3, next=0x000000016fdfe6b0}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=3, next=0x000000016fdfe6b0}", address="0xS003.Value")],
+                ),
+                Variable(name="done", type="int", value="11", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="int done = first.value + maybe->value + get<Node>(either).value;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=6, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="6", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="maybe",
+                    type="std::optional<Node>",
+                    value="{value={value=2, next=0xS001}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=2, next=0xS001}", address="0xS002.Value")],
+                ),
+                Variable(
+                    name="either",
+                    type="std::variant<int,Node>",
+                    value="{value={value=3, next=0xS001}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=3, next=0xS001}", address="0xS003.Value")],
+                ),
+                Variable(name="done", type="int", value="11", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS002.Value", target_address="0xS001"),
+                PointerEdge(source_address="0xS003.Value", target_address="0xS001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_optional_variant_object_member_pointer(weak_trace)
+    assert "maybe.value should not expose raw debugger addresses" in weak_errors
+    assert "either.value should not expose raw debugger addresses" in weak_errors
+    assert "missing maybe.value -> first pointer edge" in weak_errors
+    assert "missing either.value -> first pointer edge" in weak_errors
+    assert _validate_optional_variant_object_member_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_map_pointer_entry_edges():
     """Native smoke should prove map<string, int*> entries render pointer edges."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
@@ -7973,6 +8134,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_lldb_vector_of_pointers_as_array_not_pointer,
         test_debug_executor_parses_lldb_optional_pointer_member_edge,
+        test_debug_executor_parses_lldb_optional_variant_nested_object_member_edges,
         test_debug_executor_formats_lldb_optional_empty_state,
         test_debug_executor_preserves_template_pointer_in_object_class_name,
         test_debug_executor_parses_vector_string_elements_from_summaries,
@@ -8085,6 +8247,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_container_adapter_elements,
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_optional_pointer_member_edge,
+        test_native_debug_smoke_requires_optional_variant_object_member_edges,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,

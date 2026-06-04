@@ -113,6 +113,18 @@ bool gone = wp.expired();
 ```
 预期: `sp` 显示 `nullptr`，`wp` 指向历史 heap block；该 heap block 标记为 freed，`wp -> heap` 为 dangling edge，`gone = true`。
 
+## 2.2 optional / variant 对象值
+
+`std::optional<Node>` 和 `std::variant<int, Node>` 这类包装对象会把当前 engaged value 渲染成 `value` 成员。若该成员本身是对象并包含指针字段，例如 `Node.next` 指向栈对象，显示值会转换为模拟地址并从 `value` 成员行画出指针边：
+
+```cpp
+Node first{1, nullptr};
+optional<Node> maybe = Node{2, &first};
+variant<int, Node> either = Node{3, &first};
+```
+
+预期: `maybe.value = {value=2, next=0xS001}`、`either.value = {value=3, next=0xS001}`，并分别有 `value -> first` 的指针边。
+
 ## 3. struct / class (members)
 
 ```json

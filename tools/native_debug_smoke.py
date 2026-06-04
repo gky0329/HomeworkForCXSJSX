@@ -425,6 +425,52 @@ def _validate_optional_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_optional_variant_object_member_pointer(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    errors: list[str] = []
+    first = values.get("first")
+    maybe = values.get("maybe")
+    either = values.get("either")
+    done = values.get("done")
+    if first is None:
+        errors.append("missing first object")
+        return errors
+    if first.value != "{value=6, next=nullptr}":
+        errors.append(f"first expected value 6 after nested writes, got {first.value!r}")
+    if done is None or done.value != "11":
+        errors.append(f"done expected 11, got {done.value if done else None!r}")
+
+    for name, var, expected_value in (
+        ("maybe", maybe, "2"),
+        ("either", either, "3"),
+    ):
+        if var is None:
+            errors.append(f"missing {name} object")
+            continue
+        if not var.is_object:
+            errors.append(f"{name} should be marked as object")
+        if len(var.members) != 1:
+            errors.append(f"{name} expected one value member, got {[(m.name, m.type, m.value) for m in var.members]!r}")
+            continue
+        value_member = var.members[0]
+        if value_member.name != "value" or value_member.type != "Node":
+            errors.append(f"{name}.value should be Node, got {(value_member.name, value_member.type)!r}")
+        expected_display = f"{{value={expected_value}, next={first.address}}}"
+        if value_member.value != expected_display:
+            errors.append(f"{name}.value expected {expected_display}, got {value_member.value!r}")
+        if "0000" in value_member.value:
+            errors.append(f"{name}.value should not expose raw debugger addresses")
+        if not any(
+            edge.source_address == value_member.address and edge.target_address == first.address
+            for edge in state.edges
+        ):
+            errors.append(f"missing {name}.value -> first pointer edge")
+    return errors
+
+
 def _validate_stack_adapter(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "s")
     if match is None:
@@ -2034,6 +2080,22 @@ CASES: dict[str, SmokeCase] = {
             "*op.value() = 5;\n"
         ),
         validate=_validate_optional_pointer,
+    ),
+    "optional_variant_object_member_pointer": SmokeCase(
+        name="optional_variant_object_member_pointer",
+        code=(
+            "#include <optional>\n"
+            "#include <variant>\n"
+            "using namespace std;\n"
+            "struct Node { int value; Node* next; };\n"
+            "Node first{1,nullptr};\n"
+            "optional<Node> maybe = Node{2,&first};\n"
+            "variant<int, Node> either = Node{3,&first};\n"
+            "maybe->next->value = 5;\n"
+            "get<Node>(either).next->value = 6;\n"
+            "int done = first.value + maybe->value + get<Node>(either).value;\n"
+        ),
+        validate=_validate_optional_variant_object_member_pointer,
     ),
     "vector_object": SmokeCase(
         name="vector_object",
