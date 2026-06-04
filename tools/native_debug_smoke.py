@@ -318,6 +318,61 @@ def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_heap_polymorphic_delete(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    states_with_a = [
+        (state, var)
+        for state in trace.steps
+        for var in _all_variables(state)
+        if var.name == "a"
+    ]
+    if not states_with_a:
+        errors.append("missing base pointer a")
+    else:
+        addresses = {var.address for _, var in states_with_a}
+        if len(addresses) != 1:
+            errors.append(f"a pointer variable address should remain stable, got {sorted(addresses)!r}")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(final_state)}
+    ptr = values.get("a")
+    sound = values.get("sound")
+    blocks = [block for block in final_state.heap if block.is_object]
+    if ptr is None:
+        errors.append("missing base pointer a in final state")
+    elif not ptr.is_pointer:
+        errors.append("a should be marked as a pointer")
+    if sound is None:
+        errors.append("missing virtual call result sound")
+    elif sound.value != "7":
+        errors.append(f"sound expected 7 from virtual call, got {sound.value!r}")
+    if not blocks:
+        errors.append("missing polymorphic heap object block")
+    else:
+        block = blocks[0]
+        if block.class_name != "Dog":
+            errors.append(f"heap object class_name expected Dog, got {block.class_name!r}")
+        if "Animal" not in block.base_classes:
+            errors.append(f"heap object should list Animal as a base class, got {block.base_classes!r}")
+        if block.virtual_methods != ["speak()"]:
+            errors.append(f"heap object virtual_methods expected ['speak()'], got {block.virtual_methods!r}")
+        members = {member.name: member.value for member in block.members}
+        if members.get("Animal") is None or "age=3" not in members.get("Animal", ""):
+            errors.append(f"heap base Animal member should include age=3, got {members.get('Animal')!r}")
+        if members.get("bones") != "4":
+            errors.append(f"heap Dog.bones expected 4, got {members.get('bones')!r}")
+        if not block.is_freed:
+            errors.append("polymorphic heap object should remain visible as freed after delete")
+        if ptr is not None and ptr.value != block.address:
+            errors.append(f"a should target heap object {block.address}, got {ptr.value!r}")
+
+    if not any(edge.is_dangling for edge in final_state.edges):
+        errors.append("final state is missing dangling pointer edge after polymorphic delete")
+    return errors
+
+
 def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     final_state = _last_observed_state(trace)
@@ -614,6 +669,19 @@ CASES: dict[str, SmokeCase] = {
             "delete hp;\n"
         ),
         validate=_validate_heap_object,
+    ),
+    "heap_polymorphic_delete": SmokeCase(
+        name="heap_polymorphic_delete",
+        code=(
+            "class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };\n"
+            "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+            "Animal* a = new Dog();\n"
+            "a->age = 3;\n"
+            "static_cast<Dog*>(a)->bones = 4;\n"
+            "int sound = a->speak();\n"
+            "delete a;\n"
+        ),
+        validate=_validate_heap_polymorphic_delete,
     ),
     "heap_array_delete": SmokeCase(
         name="heap_array_delete",

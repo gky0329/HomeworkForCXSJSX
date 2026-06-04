@@ -1254,6 +1254,65 @@ frame #0: 0x4 program`main at program.cpp:{l4 + 1}:1
     assert trace.steps[2].edges[0].is_dangling is True
 
 
+def test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete():
+    """A base pointer to a derived heap object should keep a stable stack address."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "Animal* a = new Dog();\n"
+        "a->age = 3;\n"
+        "static_cast<Dog*>(a)->bones = 4;\n"
+        "int sound = a->speak();\n"
+        "delete a;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l6 = generated_lines[6]
+    l7 = generated_lines[7]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l6}:13
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l7}:8
+__CXXMV_FRAME__0__{l7}__main
+0xf000000000000001: (Dog *) a = 0x0000000100aa0000 {{
+0x0000000100aa0000:   (Animal) Animal = {{age=3}}
+0x0000000100aa0008:   (int) bones = 4
+}}
+0x000000016fdfe6fc: (int) sound = 7
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l7}:8
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l7 + 1}:3
+__CXXMV_FRAME__0__{l7 + 1}__main
+0x000000016fdfe710: (Animal *) a = 0x0000000100aa0000
+0x000000016fdfe6fc: (int) sound = 7
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    first = trace.steps[0]
+    final = trace.steps[-1]
+    first_a = next(var for var in first.stack[0].variables if var.name == "a")
+    final_a = next(var for var in final.stack[0].variables if var.name == "a")
+    heap = final.heap[0]
+
+    assert final_a.address == first_a.address
+    assert final_a.value == heap.address
+    assert heap.is_freed is True
+    assert heap.class_name == "Dog"
+    assert heap.base_classes == ["Animal"]
+    assert heap.virtual_methods == ["speak()"]
+    assert [(member.name, member.value) for member in heap.members] == [
+        ("Animal", "{age=3}"),
+        ("bones", "4"),
+    ]
+    assert final.edges[0].source_address == final_a.address
+    assert final.edges[0].target_address == heap.address
+    assert final.edges[0].is_dangling is True
+
+
 def test_debug_executor_parses_heap_array_expression_snapshots():
     """LLDB expression probes should populate heap arrays and keep delete[] state."""
     from app.core.debug_executor import DebugExecutor
@@ -2236,6 +2295,63 @@ __CXXMV_FRAMEV__0
     assert values["sound"].value == "7"
 
 
+def test_debug_executor_parses_cdb_polymorphic_heap_delete_state():
+    """CDB/PDB should preserve derived heap metadata and stable base-pointer address."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };\n"
+        "class Dog : public Animal { public: int bones; int speak() override { return age + bones; } };\n"
+        "Animal* a = new Dog();\n"
+        "a->age = 3;\n"
+        "static_cast<Dog*>(a)->bones = 4;\n"
+        "int sound = a->speak();\n"
+        "delete a;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l6 = generated_lines[6]
+    l7 = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x30 [C:\tmp\program.cpp @ {l6}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x38 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Dog * a = 000001df`4e700000 {{Animal={{age=3}}, bones=4}}
+000000aa`0000efd0 int sound = 7
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x38 [C:\tmp\program.cpp @ {l7}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x40 [C:\tmp\program.cpp @ {l7 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efe0 Animal * a = 000001df`4e700000
+000000aa`0000efd0 int sound = 7
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    first = trace.steps[0]
+    final = trace.steps[-1]
+    first_a = next(var for var in first.stack[0].variables if var.name == "a")
+    final_a = next(var for var in final.stack[0].variables if var.name == "a")
+    heap = final.heap[0]
+
+    assert final_a.address == first_a.address
+    assert final_a.value == heap.address
+    assert heap.is_freed is True
+    assert heap.class_name == "Dog"
+    assert heap.base_classes == ["Animal"]
+    assert heap.virtual_methods == ["speak()"]
+    assert [(member.name, member.value) for member in heap.members] == [
+        ("Animal", "{age=3}"),
+        ("bones", "4"),
+    ]
+    assert final.edges[0].source_address == final_a.address
+    assert final.edges[0].target_address == heap.address
+    assert final.edges[0].is_dangling is True
+    assert next(var for var in final.stack[0].variables if var.name == "sound").value == "7"
+
+
 def test_debug_executor_parses_cdb_updated_stack_array():
     """CDB/PDB should keep stack array elements after an indexed assignment."""
     from app.core.debug_executor import DebugExecutor
@@ -3150,6 +3266,92 @@ def test_native_debug_smoke_requires_inherited_virtual_object_state():
     assert _validate_inherited_virtual_object(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_heap_polymorphic_delete_state():
+    """Native smoke should prove polymorphic heap objects survive as freed blocks."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_heap_polymorphic_delete
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="int sound = a->speak();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="Animal*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="sound", type="int", value="6", address="0xS002", is_pointer=False),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Dog",
+                value="{Animal={age=3}, bones=4}",
+                is_object=True,
+                class_name="Dog",
+                base_classes=["Animal"],
+                virtual_methods=["speak()", "Animal()"],
+                members=[
+                    StructMember(name="Animal", type="Animal", value="{age=3}"),
+                    StructMember(name="bones", type="int", value="4"),
+                ],
+            )],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+        MemoryState(
+            line_number=7,
+            source_code="delete a;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="Animal*", value="0xH001", address="0xS003", is_pointer=True),
+                Variable(name="sound", type="int", value="6", address="0xS002", is_pointer=False),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Dog",
+                value="{Animal={age=3}, bones=4}",
+                is_object=True,
+                class_name="Dog",
+                base_classes=["Animal"],
+                virtual_methods=["speak()", "Animal()"],
+                members=[
+                    StructMember(name="Animal", type="Animal", value="{age=3}"),
+                    StructMember(name="bones", type="int", value="4"),
+                ],
+            )],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="delete a;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="Animal*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="sound", type="int", value="7", address="0xS002", is_pointer=False),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Dog",
+                value="{Animal={age=3}, bones=4}",
+                is_object=True,
+                class_name="Dog",
+                base_classes=["Animal"],
+                virtual_methods=["speak()"],
+                is_freed=True,
+                members=[
+                    StructMember(name="Animal", type="Animal", value="{age=3}"),
+                    StructMember(name="bones", type="int", value="4"),
+                ],
+            )],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001", is_dangling=True)],
+        ),
+    ])
+
+    weak_errors = _validate_heap_polymorphic_delete(weak_trace)
+    assert any("address should remain stable" in error for error in weak_errors)
+    assert any("virtual_methods expected" in error for error in weak_errors)
+    assert any("should remain visible as freed" in error for error in weak_errors)
+    assert "final state is missing dangling pointer edge after polymorphic delete" in weak_errors
+    assert any("sound expected 7" in error for error in weak_errors)
+    assert _validate_heap_polymorphic_delete(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_heap_array_delete_state():
     """Native smoke should prove delete[] leaves array values and dangling state visible."""
     from app.core.memory_model import (
@@ -3747,6 +3949,7 @@ if __name__ == "__main__":
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
+        test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
         test_debug_executor_msvc_pdb_backend_is_experimental_by_default,
@@ -3777,6 +3980,7 @@ if __name__ == "__main__":
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
+        test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_updated_stack_array,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
@@ -3803,6 +4007,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_requires_inherited_virtual_object_state,
+        test_native_debug_smoke_requires_heap_polymorphic_delete_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_array_elements,

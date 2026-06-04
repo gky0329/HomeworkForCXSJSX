@@ -819,6 +819,7 @@ class DebugExecutor:
         matches = list(marker_re.finditer(output))
         states: list[MemoryState] = []
         stack_addr_map: dict[str, str] = {}
+        stack_name_addr_map: dict[str, str] = {}
         heap_addr_map: dict[str, str] = {}
         pointer_targets: dict[str, str] = {}
         heap_values: dict[str, tuple[str, str]] = {}
@@ -887,6 +888,7 @@ class DebugExecutor:
                 source_code=source_code,
                 parsed_frames=parsed_frames,
                 stack_addr_map=stack_addr_map,
+                stack_name_addr_map=stack_name_addr_map,
                 heap_addr_map=heap_addr_map,
                 heap_values=heap_values,
                 heap_array_values=heap_array_values,
@@ -902,6 +904,7 @@ class DebugExecutor:
         matches = list(marker_re.finditer(output))
         states: list[MemoryState] = []
         stack_addr_map: dict[str, str] = {}
+        stack_name_addr_map: dict[str, str] = {}
         heap_addr_map: dict[str, str] = {}
         pointer_targets: dict[str, str] = {}
         heap_values: dict[str, tuple[str, str]] = {}
@@ -972,6 +975,7 @@ class DebugExecutor:
                 source_code=source_code,
                 parsed_frames=parsed_frames,
                 stack_addr_map=stack_addr_map,
+                stack_name_addr_map=stack_name_addr_map,
                 heap_addr_map=heap_addr_map,
                 heap_values=heap_values,
                 heap_array_values=heap_array_values,
@@ -989,6 +993,7 @@ class DebugExecutor:
         source_code: str,
         parsed_frames: list[_ParsedFrame],
         stack_addr_map: dict[str, str],
+        stack_name_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
         heap_values: dict[str, tuple[str, str]],
         heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
@@ -1004,7 +1009,16 @@ class DebugExecutor:
 
         for parsed_frame in parsed_frames:
             for parsed in parsed_frame.variables:
-                self._sim_addr(stack_addr_map, parsed.actual_addr, "S")
+                logical_key = f"{parsed_frame.name}:{parsed.name}"
+                if parsed.actual_addr not in stack_addr_map:
+                    if logical_key in stack_name_addr_map:
+                        stack_addr_map[parsed.actual_addr] = stack_name_addr_map[logical_key]
+                    else:
+                        stack_name_addr_map[logical_key] = self._sim_addr(
+                            stack_addr_map,
+                            parsed.actual_addr,
+                            "S",
+                        )
                 actual_stack_lookup[parsed.actual_addr] = stack_addr_map[parsed.actual_addr]
 
         for parsed_frame in parsed_frames:
@@ -1700,7 +1714,7 @@ class DebugExecutor:
         for match in class_re.finditer(source):
             name = match.group("name")
             bases = DebugExecutor._parse_base_classes(match.group("bases") or "")
-            virtuals = DebugExecutor._parse_virtual_methods(match.group("body") or "")
+            virtuals = DebugExecutor._parse_virtual_methods(match.group("body") or "", name)
             info[name] = _ClassInfo(base_classes=bases, virtual_methods=virtuals)
 
         def inherited_virtuals(class_name: str, seen: set[str] | None = None) -> list[str]:
@@ -1739,7 +1753,7 @@ class DebugExecutor:
         return bases
 
     @staticmethod
-    def _parse_virtual_methods(body: str) -> list[str]:
+    def _parse_virtual_methods(body: str, class_name: str = "") -> list[str]:
         methods: list[str] = []
         patterns = (
             r"\bvirtual\b[^;{}]*?\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)",
@@ -1748,7 +1762,12 @@ class DebugExecutor:
         for pattern in patterns:
             for match in re.finditer(pattern, body):
                 name = match.group("name")
-                if name not in {"if", "for", "while", "switch", "return"}:
+                previous = body[match.start("name") - 1] if match.start("name") > 0 else ""
+                if (
+                    name not in {"if", "for", "while", "switch", "return"}
+                    and name != class_name
+                    and previous != "~"
+                ):
                     method = f"{name}()"
                     if method not in methods:
                         methods.append(method)
