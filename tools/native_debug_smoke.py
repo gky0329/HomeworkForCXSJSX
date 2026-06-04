@@ -735,6 +735,53 @@ def _validate_shared_ptr_owners(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_vector_shared_ptr(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    alias = values.get("alias")
+    xs = values.get("xs")
+    errors: list[str] = []
+    if alias is None:
+        errors.append("missing shared_ptr alias variable")
+    elif not alias.is_pointer:
+        errors.append("alias should be rendered as a pointer-like owner")
+    if xs is None:
+        errors.append("missing vector<shared_ptr<int>> variable xs")
+        return errors
+    if not xs.is_array:
+        errors.append("xs should be marked as an array/container")
+    if xs.is_pointer:
+        errors.append("xs should not be marked as a pointer")
+    if xs.is_object:
+        errors.append("xs should not be marked as an object after element expansion")
+    if xs.members:
+        errors.append("xs should show shared_ptr elements instead of implementation members")
+    elements = list(xs.elements)
+    if len(elements) != 1:
+        errors.append(f"xs expected one shared_ptr element, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    if "shared_ptr" not in element.type:
+        errors.append(f"xs[0] type should be shared_ptr, got {element.type!r}")
+    if alias is not None:
+        if element.value != alias.value:
+            errors.append(f"xs[0] should target alias heap {alias.value!r}, got {element.value!r}")
+        if any(edge.source_address == xs.address for edge in state.edges):
+            errors.append("xs container itself should not own a pointer edge")
+        if not any(edge.source_address == element.address and edge.target_address == alias.value for edge in state.edges):
+            errors.append("missing xs[0] -> alias heap edge")
+        if not any(edge.source_address == alias.address and edge.target_address == alias.value for edge in state.edges):
+            errors.append("missing alias -> heap edge")
+        target_heap = next((block for block in state.heap if block.address == alias.value), None)
+        if target_heap is None:
+            errors.append(f"missing heap block for vector shared_ptr target {alias.value!r}")
+        elif target_heap.value != "8":
+            errors.append(f"shared heap value expected 8 after *xs[0] write, got {target_heap.value!r}")
+    return errors
+
+
 def _validate_weak_ptr_expired(trace: ExecutionTrace) -> list[str]:
     final_state = _last_observed_state(trace)
     if final_state is None:
@@ -1359,6 +1406,18 @@ CASES: dict[str, SmokeCase] = {
             "*b = 11;\n"
         ),
         validate=_validate_shared_ptr_owners,
+    ),
+    "vector_shared_ptr": SmokeCase(
+        name="vector_shared_ptr",
+        code=(
+            "#include <memory>\n"
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "shared_ptr<int> alias = make_shared<int>(5);\n"
+            "vector<shared_ptr<int>> xs = {alias};\n"
+            "*xs[0] = 8;\n"
+        ),
+        validate=_validate_vector_shared_ptr,
     ),
     "weak_ptr_expired": SmokeCase(
         name="weak_ptr_expired",

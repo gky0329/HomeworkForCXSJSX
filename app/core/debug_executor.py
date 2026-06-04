@@ -2102,10 +2102,22 @@ class DebugExecutor:
             "    compact=typ.replace(' ', '')\n"
             "    tokens=('array<', 'deque<', 'list<', 'map<', 'multimap<', 'multiset<', 'pair<', 'set<', 'tuple<', 'unordered_map<', 'unordered_set<', 'vector<')\n"
             "    return any(token in compact for token in tokens)\n"
-            "def is_smart_pointer_type(typ):\n"
+            "def top_level_template_type_key(typ):\n"
             "    compact=typ.replace(' ', '')\n"
-            "    tokens=('unique_ptr<', 'shared_ptr<', 'weak_ptr<', 'std::unique_ptr<', 'std::shared_ptr<', 'std::weak_ptr<', 'std::__1::unique_ptr<', 'std::__1::shared_ptr<', 'std::__1::weak_ptr<')\n"
-            "    return any(token in compact for token in tokens)\n"
+            "    changed=True\n"
+            "    while changed:\n"
+            "        changed=False\n"
+            "        for prefix in ('class', 'struct', 'const', 'volatile'):\n"
+            "            if compact.startswith(prefix):\n"
+            "                compact=compact[len(prefix):]\n"
+            "                changed=True\n"
+            "    for prefix in ('std::__1::', 'std::'):\n"
+            "        if compact.startswith(prefix):\n"
+            "            compact=compact[len(prefix):]\n"
+            "            break\n"
+            "    return compact\n"
+            "def is_smart_pointer_type(typ):\n"
+            "    return top_level_template_type_key(typ).startswith(('unique_ptr<', 'shared_ptr<', 'weak_ptr<'))\n"
             "def smart_pointer_child(value):\n"
             "    count=min(value.GetNumChildren(), 16)\n"
             "    for child_idx in range(count):\n"
@@ -2121,6 +2133,9 @@ class DebugExecutor:
             "def flat_value(value, depth=0):\n"
             "    val=val_of(value)\n"
             "    typ=type_of(value)\n"
+            "    if is_smart_pointer_type(typ):\n"
+            "        raw_child, raw_val=smart_pointer_child(value)\n"
+            "        return raw_val if raw_val else '0x0'\n"
             "    if val and not is_expandable_container_type(typ):\n"
             "        return val\n"
             "    if depth >= 2:\n"
@@ -3023,45 +3038,39 @@ class DebugExecutor:
 
     @staticmethod
     def _is_smart_pointer_type(type_text: str) -> bool:
-        compact = type_text.replace(" ", "")
-        return any(
-            token in compact
-            for token in (
-                "unique_ptr<",
-                "shared_ptr<",
-                "weak_ptr<",
-                "std::unique_ptr<",
-                "std::shared_ptr<",
-                "std::weak_ptr<",
-                "std::__1::unique_ptr<",
-                "std::__1::shared_ptr<",
-                "std::__1::weak_ptr<",
-            )
+        return DebugExecutor._is_top_level_template_type(
+            type_text,
+            ("unique_ptr", "shared_ptr", "weak_ptr"),
         )
 
     @staticmethod
     def _is_shared_pointer_type(type_text: str) -> bool:
-        compact = type_text.replace(" ", "")
-        return any(
-            token in compact
-            for token in (
-                "shared_ptr<",
-                "std::shared_ptr<",
-                "std::__1::shared_ptr<",
-            )
-        )
+        return DebugExecutor._is_top_level_template_type(type_text, ("shared_ptr",))
 
     @staticmethod
     def _is_weak_pointer_type(type_text: str) -> bool:
-        compact = type_text.replace(" ", "")
-        return any(
-            token in compact
-            for token in (
-                "weak_ptr<",
-                "std::weak_ptr<",
-                "std::__1::weak_ptr<",
-            )
-        )
+        return DebugExecutor._is_top_level_template_type(type_text, ("weak_ptr",))
+
+    @staticmethod
+    def _is_top_level_template_type(type_text: str, names: tuple[str, ...]) -> bool:
+        key = DebugExecutor._top_level_template_type_key(type_text)
+        return any(key.startswith(f"{name}<") for name in names)
+
+    @staticmethod
+    def _top_level_template_type_key(type_text: str) -> str:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        changed = True
+        while changed:
+            changed = False
+            for prefix in ("class", "struct", "const", "volatile"):
+                if compact.startswith(prefix):
+                    compact = compact[len(prefix):]
+                    changed = True
+        for prefix in ("std::__1::", "std::"):
+            if compact.startswith(prefix):
+                compact = compact[len(prefix):]
+                break
+        return compact
 
     @staticmethod
     def _smart_pointee_type(type_text: str) -> str:

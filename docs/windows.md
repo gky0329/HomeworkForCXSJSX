@@ -86,6 +86,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case heap_polymorphic_de
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_leak_overwrite
 python tools/native_debug_smoke.py --backend msvc-pdb --case unique_ptr_heap
 python tools/native_debug_smoke.py --backend msvc-pdb --case shared_ptr_owners
+python tools/native_debug_smoke.py --backend msvc-pdb --case vector_shared_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case weak_ptr_expired
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_array_delete
 python tools/native_debug_smoke.py --backend msvc-pdb --case pointer_reset_null

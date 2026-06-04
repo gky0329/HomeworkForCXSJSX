@@ -1164,8 +1164,10 @@ def test_debug_executor_lldb_script_expands_smart_pointers():
     script = DebugExecutor._lldb_stack_snapshot_command()
 
     assert "def is_smart_pointer_type" in script
+    assert "def top_level_template_type_key" in script
     assert "def smart_pointer_child" in script
     assert "if is_smart_pointer_type(typ):" in script
+    assert "return raw_val if raw_val else '0x0'" in script
     assert "emit_child(deref, '*' + name" in script
 
 
@@ -1182,6 +1184,18 @@ def test_debug_executor_lldb_script_uses_top_level_pointer_checks():
     assert "if '*' in typ and not val:" not in script
     assert "loc == 'scalar' and '*' in typ" not in script
     assert "'*' in child_typ" not in script
+
+
+def test_debug_executor_smart_pointer_checks_are_top_level_only():
+    """Container template args should not make the container itself pointer-like."""
+    from app.core.debug_executor import DebugExecutor
+
+    assert DebugExecutor._is_smart_pointer_type("std::__1::shared_ptr<int>") is True
+    assert DebugExecutor._is_smart_pointer_type("const std::unique_ptr<int> &") is True
+    assert DebugExecutor._is_weak_pointer_type("std::weak_ptr<int>") is True
+    assert DebugExecutor._is_smart_pointer_type("std::__1::vector<std::__1::shared_ptr<int> >") is False
+    assert DebugExecutor._is_shared_pointer_type("std::map<std::string, std::shared_ptr<int> >") is False
+    assert DebugExecutor._is_weak_pointer_type("std::array<std::weak_ptr<int>, 2>") is False
 
 
 def test_debug_executor_parses_lambda_captures_as_function_object():
@@ -3837,6 +3851,58 @@ __CXXMV_FRAMEV__0
     assert final.heap[0].value == "11"
 
 
+def test_debug_executor_parses_cdb_dx_vector_shared_ptr_as_container_edges():
+    """CDB/PDB vector<shared_ptr<T>> should stay a container with element edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <memory>\n"
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "shared_ptr<int> alias = make_shared<int>(5);\n"
+        "vector<shared_ptr<int>> xs = {alias};\n"
+        "*xs[0] = 8;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::shared_ptr<int> alias = 000001df`4e700000 {{8}}
+000000aa`0000efe0 std::vector<std::shared_ptr<int>> xs = size=1
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    xs : {{ size=1 }} [Type: std::vector<std::shared_ptr<int>>]
+        [0] : 000001df`4e700000 {{8}} [Type: std::shared_ptr<int>]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    alias = values["alias"]
+    xs = values["xs"]
+
+    assert alias.is_pointer is True
+    assert alias.value == "0xH001"
+    assert xs.is_pointer is False
+    assert xs.is_array is True
+    assert xs.element_count == 1
+    assert xs.elements[0].type == "std::shared_ptr<int>"
+    assert xs.elements[0].value == alias.value
+    assert step.heap[0].value == "8"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {
+        (alias.address, alias.value, False),
+        (xs.elements[0].address, alias.value, False),
+    }
+
+
 def test_debug_executor_parses_cdb_control_flow_loop_scope():
     """CDB/PDB loop snapshots should follow branch path and drop loop locals after scope exit."""
     from app.core.debug_executor import DebugExecutor
@@ -5276,6 +5342,60 @@ def test_native_debug_smoke_requires_weak_ptr_expired_state():
     assert _validate_weak_ptr_expired(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_vector_shared_ptr_container_state():
+    """Native smoke should prove vector<shared_ptr<T>> stays a container."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_vector_shared_ptr
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="alias", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="xs", type="std::vector<std::shared_ptr<int>>", value="nullptr", address="0xS002", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="alias", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(
+                    name="xs",
+                    type="std::vector<std::shared_ptr<int>>",
+                    value="{[0]=0xH001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(
+                            index=0,
+                            type="std::shared_ptr<int>",
+                            value="0xH001",
+                            address="0xS002[0]",
+                        ),
+                    ],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001"),
+                PointerEdge(source_address="0xS002[0]", target_address="0xH001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_vector_shared_ptr(weak_trace)
+    assert "xs should be marked as an array/container" in weak_errors
+    assert "xs should not be marked as a pointer" in weak_errors
+    assert _validate_vector_shared_ptr(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_control_flow_loop_state():
     """Native smoke should prove real debugger execution follows loop/branch paths."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -6705,6 +6825,7 @@ if __name__ == "__main__":
         test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_lldb_script_expands_smart_pointers,
         test_debug_executor_lldb_script_uses_top_level_pointer_checks,
+        test_debug_executor_smart_pointer_checks_are_top_level_only,
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_lldb_std_array_as_array_variable,
@@ -6767,6 +6888,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_unique_ptr_as_heap_pointer,
         test_debug_executor_marks_expired_cdb_weak_ptr_as_dangling,
         test_debug_executor_parses_cdb_shared_ptr_owners_to_same_heap,
+        test_debug_executor_parses_cdb_dx_vector_shared_ptr_as_container_edges,
         test_debug_executor_parses_cdb_control_flow_loop_scope,
         test_debug_executor_parses_cdb_lambda_captures_as_function_object,
         test_debug_executor_parses_cdb_updated_stack_array,
@@ -6801,6 +6923,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_unique_ptr_heap_state,
         test_native_debug_smoke_requires_shared_ptr_owner_state,
         test_native_debug_smoke_requires_weak_ptr_expired_state,
+        test_native_debug_smoke_requires_vector_shared_ptr_container_state,
         test_native_debug_smoke_requires_control_flow_loop_state,
         test_native_debug_smoke_requires_lambda_capture_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
