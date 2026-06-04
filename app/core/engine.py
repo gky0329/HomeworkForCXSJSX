@@ -145,8 +145,7 @@ class Engine:
             self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
-            if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
-                QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
+            self._queue_canvas_fit()
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
             self._window.statusBar().showMessage(
@@ -202,7 +201,7 @@ class Engine:
         self._window.tracker_panel.set_state(curr_state)
         self._animator.animate_diff(diff)
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
-            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
+            self._queue_canvas_fit()
         self._update_controls()
         self._highlight_current_line()
 
@@ -216,9 +215,12 @@ class Engine:
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
-            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
+            self._queue_canvas_fit()
         self._update_controls()
         self._highlight_current_line()
+
+    def _queue_canvas_fit(self):
+        QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
 
     def _on_reset(self):
         self._auto_play_timer.stop()

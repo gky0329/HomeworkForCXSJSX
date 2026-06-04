@@ -366,8 +366,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_zoom_fit)
 
         self.auto_fit_check = QCheckBox(tr("Auto Fit"))
-        self.auto_fit_check.setChecked(True)
-        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
+        self.auto_fit_check.setChecked(False)
+        self.auto_fit_check.setToolTip(tr("Keep fitting canvas content on every step"))
         header.addWidget(self.auto_fit_check)
 
         self.step_label = QLabel(tr("Ready"))
