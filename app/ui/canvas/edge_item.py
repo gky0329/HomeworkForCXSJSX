@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsTextItem
+from PySide6.QtWidgets import QGraphicsPathItem
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QPainterPath, QPen, QColor, QPolygonF, QPainter
 from math import atan2, pi, sin, cos

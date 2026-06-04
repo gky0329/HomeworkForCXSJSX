@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QTextEdit, QDialog, QLineEdit,
