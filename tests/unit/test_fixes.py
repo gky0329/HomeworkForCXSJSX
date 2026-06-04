@@ -2565,6 +2565,51 @@ def test_native_debug_smoke_forwards_stdin_to_debug_executor():
     assert "cin >> x >> y" in captured["code"]
 
 
+def test_native_debug_smoke_requires_call_stack_state():
+    """Native smoke should prove user-function frames are visible, not only final result."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_call_stack
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="int result = square(3);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="result", type="int", value="9", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="int y = x * x;",
+            stack=[
+                StackFrame(frame_name="square", variables=[
+                    Variable(name="x", type="int", value="3", address="0xS001", is_pointer=False),
+                    Variable(name="y", type="int", value="9", address="0xS002", is_pointer=False),
+                ]),
+                StackFrame(frame_name="main", variables=[]),
+            ],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=5,
+            source_code="int result = square(3);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="result", type="int", value="9", address="0xS003", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    assert "missing observed square -> main call stack" in _validate_call_stack(weak_trace)
+    assert _validate_call_stack(strong_trace) == []
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2648,6 +2693,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
+        test_native_debug_smoke_requires_call_stack_state,
     ]
 
     passed = 0

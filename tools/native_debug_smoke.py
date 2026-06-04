@@ -247,6 +247,33 @@ def _validate_stdin_sum(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_call_stack(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    callee_state = None
+    for state in trace.steps:
+        frame_names = [frame.frame_name for frame in state.stack]
+        if len(frame_names) >= 2 and frame_names[0] == "square" and "main" in frame_names[1:]:
+            callee_state = state
+            break
+    if callee_state is None:
+        errors.append("missing observed square -> main call stack")
+    else:
+        top_values = {
+            var.name: var.value
+            for var in callee_state.stack[0].variables
+        }
+        for name, expected in {"x": "3", "y": "9"}.items():
+            if top_values.get(name) != expected:
+                errors.append(f"square::{name} expected {expected}, got {top_values.get(name)!r}")
+
+    result = _last_var(trace, "result")
+    if result is None:
+        errors.append("missing caller result variable")
+    elif result[1].value != "9":
+        errors.append(f"result expected 9, got {result[1].value!r}")
+    return errors
+
+
 CASES: dict[str, SmokeCase] = {
     "basic_double": SmokeCase(
         name="basic_double",
@@ -274,6 +301,17 @@ CASES: dict[str, SmokeCase] = {
             "delete hp;\n"
         ),
         validate=_validate_heap_object,
+    ),
+    "call_stack": SmokeCase(
+        name="call_stack",
+        code=(
+            "int square(int x) {\n"
+            "    int y = x * x;\n"
+            "    return y;\n"
+            "}\n"
+            "int result = square(3);\n"
+        ),
+        validate=_validate_call_stack,
     ),
     "vector_int": SmokeCase(
         name="vector_int",
