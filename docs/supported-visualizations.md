@@ -85,6 +85,8 @@
 - cell 宽度根据“元素值文本宽度”和“索引文本宽度”二者较大值自动计算
 - 整个 HeapItem 宽度取“标题行宽度”和“所有 cell 总宽度”中的较大值，避免标题溢出
 
+`std::array<T, N>` 会解包其调试器实现字段（如 `__elems_` / `_Elems`），按普通数组的 `elements` cell 渲染，而不是显示为单个对象成员。
+
 ---
 
 ## 3. struct / class (members)

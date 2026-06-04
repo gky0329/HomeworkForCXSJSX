@@ -1191,6 +1191,42 @@ __CXXMV_FRAME__0__{l5 + 1}__main
     assert step.heap == []
 
 
+def test_debug_executor_parses_lldb_std_array_as_array_variable():
+    """LLDB std::array implementation storage should unwrap to elements."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <array>\n"
+        "using namespace std;\n"
+        "array<int,3> a = {1, 2, 3};\n"
+        "a[1] = 8;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l4 = generated_lines[4]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l4}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l4 + 1}:1
+__CXXMV_FRAME__0__{l4 + 1}__main
+0x000000016fdfe6b0: (std::__1::array<int, 3>) a = {{
+0x000000016fdfe6b0:   (int[3]) __elems_ = {{[0]=1, [1]=8, [2]=3}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    var = trace.steps[0].stack[0].variables[0]
+
+    assert var.name == "a"
+    assert var.is_array is True
+    assert var.is_object is False
+    assert var.element_count == 3
+    assert var.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(element.index, element.value) for element in var.elements] == [(0, "1"), (1, "8"), (2, "3")]
+    assert var.members == []
+
+
 def test_debug_executor_parses_vector_elements_as_array_variable():
     """std::vector child snapshots should render like indexed array cells."""
     from app.core.debug_executor import DebugExecutor
@@ -2460,6 +2496,44 @@ __CXXMV_FRAMEDX__0
         (next_member.address, first.address),
     }
     assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_std_array_as_array_variable():
+    """CDB/PDB std::array implementation storage should unwrap to elements."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <array>\n"
+        "using namespace std;\n"
+        "array<int,3> a = {1, 2, 3};\n"
+        "a[1] = 8;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l4 = generated_lines[4]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l4 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::array<int,3> a = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    a : {{...}} [Type: std::array<int,3>]
+        _Elems : {{[0]=1, [1]=8, [2]=3}} [Type: int [3]]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    var = trace.steps[0].stack[0].variables[0]
+
+    assert var.name == "a"
+    assert var.is_array is True
+    assert var.is_object is False
+    assert var.element_count == 3
+    assert var.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(element.index, element.value) for element in var.elements] == [(0, "1"), (1, "8"), (2, "3")]
+    assert var.members == []
 
 
 def test_debug_executor_parses_cdb_reference_as_non_pointer():
@@ -4784,6 +4858,62 @@ def test_native_debug_smoke_requires_stack_array_elements():
     assert _validate_stack_array(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_std_array_elements():
+    """Native smoke should prove std::array unwraps into element cells."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_std_array
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="a[1] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="a",
+                    type="std::array<int,3>",
+                    value="{__elems_={[0]=1, [1]=8, [2]=3}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="__elems_", type="int[3]", value="{[0]=1, [1]=8, [2]=3}"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="a[1] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="a",
+                    type="std::array<int,3>",
+                    value="{[0]=1, [1]=8, [2]=3}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="1"),
+                        ArrayElement(index=1, value="8"),
+                        ArrayElement(index=2, value="3"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_std_array(weak_trace)
+    assert "std::array a should be marked as an array/container" in weak_errors
+    assert "std::array should unwrap implementation storage instead of showing __elems_ as members" in weak_errors
+    assert _validate_std_array(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -5380,6 +5510,7 @@ if __name__ == "__main__":
         test_debug_executor_lldb_script_expands_smart_pointers,
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
+        test_debug_executor_parses_lldb_std_array_as_array_variable,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
@@ -5414,6 +5545,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_expired_stack_pointer_as_dangling,
         test_debug_executor_parses_cdb_double_pointer_stack_edges,
         test_debug_executor_parses_cdb_member_pointer_edges,
+        test_debug_executor_parses_cdb_std_array_as_array_variable,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -5463,6 +5595,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_dangling_pointer_state,
         test_native_debug_smoke_requires_stack_array_elements,
+        test_native_debug_smoke_requires_std_array_elements,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

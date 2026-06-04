@@ -272,6 +272,24 @@ def _validate_stack_array(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_std_array(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "a")
+    if match is None:
+        return ["missing std::array variable a"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("std::array a should be marked as an array/container")
+    if var.is_object:
+        errors.append("std::array a should not be marked as an object after unwrapping elements")
+    values = [element.value for element in var.elements]
+    if values != ["1", "8", "3"]:
+        errors.append(f"std::array elements expected ['1', '8', '3'], got {values!r}")
+    if var.members:
+        errors.append("std::array should unwrap implementation storage instead of showing __elems_ as members")
+    return errors
+
+
 def _validate_vector(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "v")
     if match is None:
@@ -1002,6 +1020,16 @@ CASES: dict[str, SmokeCase] = {
             "nums[1] = 8;\n"
         ),
         validate=_validate_stack_array,
+    ),
+    "std_array": SmokeCase(
+        name="std_array",
+        code=(
+            "#include <array>\n"
+            "using namespace std;\n"
+            "array<int,3> a = {1, 2, 3};\n"
+            "a[1] = 8;\n"
+        ),
+        validate=_validate_std_array,
     ),
     "heap_object": SmokeCase(
         name="heap_object",

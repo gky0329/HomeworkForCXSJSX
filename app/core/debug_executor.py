@@ -1045,7 +1045,8 @@ class DebugExecutor:
                 is_reference = "&" in parsed.type and "*" not in parsed.type
                 is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
                 is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
-                member_models = [] if is_function_object else self._struct_members_from_parsed(
+                elements = parsed.elements or self._wrapped_std_array_elements(parsed)
+                member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
                     parsed.members,
                     owner_address=stack_addr,
                     actual_stack_lookup=actual_stack_lookup,
@@ -1058,8 +1059,8 @@ class DebugExecutor:
                     value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif (is_pointer or is_reference) and self._is_null(value):
                     value = "nullptr"
-                elif parsed.elements:
-                    value = self._format_elements(parsed.elements)
+                elif elements:
+                    value = self._format_elements(elements)
                 elif member_models:
                     value = self._format_struct_members(member_models)
                 captures = [
@@ -1085,17 +1086,17 @@ class DebugExecutor:
                     value="<lambda>" if is_function_object else value,
                     address=stack_addr,
                     is_pointer=is_pointer,
-                    is_array=bool(parsed.elements),
-                    element_count=len(parsed.elements) or None,
+                    is_array=bool(elements),
+                    element_count=len(elements) or None,
                     elements=[
                         ArrayElement(index=element.index, value=self._clean_value(element.value))
-                        for element in parsed.elements
+                        for element in elements
                     ],
                     members=member_models,
-                    is_object=bool(parsed.members) and not is_function_object,
-                    class_name=object_class if parsed.members and not is_function_object else "",
-                    base_classes=object_info.base_classes if parsed.members and not is_function_object else [],
-                    virtual_methods=object_info.virtual_methods if parsed.members and not is_function_object else [],
+                    is_object=bool(member_models),
+                    class_name=object_class if member_models else "",
+                    base_classes=object_info.base_classes if member_models else [],
+                    virtual_methods=object_info.virtual_methods if member_models else [],
                     is_function_object=is_function_object,
                     captures=captures,
                     is_reference=is_reference,
@@ -2403,11 +2404,32 @@ class DebugExecutor:
         return members
 
     @staticmethod
+    def _wrapped_std_array_elements(var: _ParsedVar) -> list[_ParsedElement]:
+        if not DebugExecutor._is_std_array_type(var.type):
+            return []
+        for member in var.members:
+            payload = DebugExecutor._structured_payload(member.value)
+            if not payload:
+                continue
+            elements = DebugExecutor._parse_structured_elements(
+                payload,
+                DebugExecutor._array_element_type(member.type),
+            )
+            if elements:
+                return elements
+        return []
+
+    @staticmethod
     def _array_element_type(type_text: str) -> str:
         cleaned = DebugExecutor._clean_type(type_text)
         if "[" in cleaned:
             return re.sub(r"\s*\[[^\]]*\]", "", cleaned).strip()
         return cleaned
+
+    @staticmethod
+    def _is_std_array_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("array<", "std::array<", "std::__1::array<"))
 
     @staticmethod
     def _is_null(value: str) -> bool:
