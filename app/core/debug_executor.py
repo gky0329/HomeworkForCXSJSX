@@ -97,6 +97,7 @@ class DebugExecutor:
     COMPILE_TIMEOUT_SECONDS = 30
     LLDB_TIMEOUT_SECONDS = 20
     CDB_TIMEOUT_SECONDS = 25
+    VSWHERE_TIMEOUT_SECONDS = 5
 
     def __init__(self, preferred_backend: str | None = None):
         self._preferred_backend = preferred_backend
@@ -120,6 +121,7 @@ class DebugExecutor:
 
     @staticmethod
     def backend_status() -> list[DebugBackendStatus]:
+        is_windows = platform.system() == "Windows"
         compiler = DebugExecutor._compiler()
         lldb = shutil.which("lldb")
         lldb_available = bool(lldb and compiler)
@@ -133,11 +135,16 @@ class DebugExecutor:
                 missing.append("clang++/g++")
             lldb_detail = "Missing " + ", ".join(missing)
 
-        msvc = DebugExecutor._msvc_tools()
-        msvc_tools_available = platform.system() == "Windows" and bool(msvc["compiler"] and msvc["debugger"])
+        msvc = DebugExecutor._msvc_tools() if is_windows else {
+            "compiler": None,
+            "debugger": None,
+            "vswhere": None,
+            "vcvarsall": None,
+        }
+        msvc_tools_available = is_windows and bool(msvc["compiler"] and msvc["debugger"])
         msvc_enabled = os.environ.get("CXXMV_ENABLE_EXPERIMENTAL_PDB") == "1"
         msvc_available = msvc_tools_available and msvc_enabled
-        if platform.system() != "Windows":
+        if not is_windows:
             msvc_detail = "MSVC/PDB backend is Windows-only and not active on this platform"
         elif not msvc_tools_available:
             missing = []
@@ -171,7 +178,7 @@ class DebugExecutor:
             implemented=True,
             detail=msvc_detail,
         )
-        if platform.system() == "Windows":
+        if is_windows:
             return [msvc_status, lldb_status]
         return [lldb_status, msvc_status]
 
@@ -181,11 +188,118 @@ class DebugExecutor:
 
     @staticmethod
     def _msvc_tools() -> dict[str, str | None]:
+        compiler = shutil.which("cl") or shutil.which("cl.exe")
+        debugger = shutil.which("cdb") or shutil.which("cdb.exe")
+        vswhere = shutil.which("vswhere") or shutil.which("vswhere.exe")
+        vcvarsall = None
+
+        if platform.system() == "Windows":
+            vswhere = vswhere or DebugExecutor._default_vswhere()
+            install_dir = DebugExecutor._vs_installation_path(vswhere) if vswhere else None
+            if install_dir:
+                compiler = compiler or DebugExecutor._find_msvc_compiler(install_dir)
+                vcvarsall = DebugExecutor._existing_file(
+                    Path(install_dir) / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
+                )
+            debugger = debugger or DebugExecutor._find_windows_cdb()
+
         return {
-            "compiler": shutil.which("cl") or shutil.which("cl.exe"),
-            "debugger": shutil.which("cdb") or shutil.which("cdb.exe"),
-            "vswhere": shutil.which("vswhere") or shutil.which("vswhere.exe"),
+            "compiler": compiler,
+            "debugger": debugger,
+            "vswhere": vswhere,
+            "vcvarsall": vcvarsall,
         }
+
+    @staticmethod
+    def _existing_file(path: Path | str) -> str | None:
+        candidate = Path(path)
+        try:
+            return str(candidate) if candidate.is_file() else None
+        except OSError:
+            return None
+
+    @staticmethod
+    def _default_vswhere() -> str | None:
+        roots = [
+            os.environ.get("ProgramFiles(x86)", ""),
+            os.environ.get("ProgramFiles", ""),
+        ]
+        for root in roots:
+            if not root:
+                continue
+            found = DebugExecutor._existing_file(
+                Path(root) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+            )
+            if found:
+                return found
+        return None
+
+    @staticmethod
+    def _vs_installation_path(vswhere: str) -> str | None:
+        try:
+            proc = subprocess.run(
+                [
+                    vswhere,
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationPath",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=DebugExecutor.VSWHERE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        path = (proc.stdout or "").strip().splitlines()
+        return path[0].strip() if path and path[0].strip() else None
+
+    @staticmethod
+    def _find_msvc_compiler(install_dir: str) -> str | None:
+        tools_root = Path(install_dir) / "VC" / "Tools" / "MSVC"
+        try:
+            versions = sorted(tools_root.iterdir(), key=lambda path: path.name, reverse=True)
+        except OSError:
+            return None
+        for version_dir in versions:
+            for rel in (
+                Path("bin") / "Hostx64" / "x64" / "cl.exe",
+                Path("bin") / "Hostx86" / "x64" / "cl.exe",
+                Path("bin") / "Hostx64" / "x86" / "cl.exe",
+            ):
+                found = DebugExecutor._existing_file(version_dir / rel)
+                if found:
+                    return found
+        return None
+
+    @staticmethod
+    def _find_windows_cdb() -> str | None:
+        roots = [
+            os.environ.get("WindowsSdkDir", ""),
+            os.environ.get("ProgramFiles(x86)", ""),
+            os.environ.get("ProgramFiles", ""),
+        ]
+        candidates: list[Path] = []
+        for root in roots:
+            if not root:
+                continue
+            base = Path(root)
+            if base.name.lower() == "10":
+                candidates.append(base / "Debuggers" / "x64" / "cdb.exe")
+            candidates.extend([
+                base / "Windows Kits" / "10" / "Debuggers" / "x64" / "cdb.exe",
+                base / "Windows Kits" / "10" / "Debuggers" / "x86" / "cdb.exe",
+            ])
+        for candidate in candidates:
+            found = DebugExecutor._existing_file(candidate)
+            if found:
+                return found
+        return None
 
     def run_code(self, code: str, stdin_text: str = "") -> ExecutionTrace:
         if self.requires_stdin(code) and not stdin_text.strip():
@@ -348,14 +462,16 @@ class DebugExecutor:
             raise DebugExecutionError(f"Compile failed:\n{proc.stderr.strip()}")
 
     def _compile_msvc(self, src: Path, binary: Path, pdb: Path):
-        compiler = self._msvc_tools()["compiler"]
+        tools = self._msvc_tools()
+        compiler = tools["compiler"]
         if compiler is None:
             raise DebugExecutionError("cl.exe not found. Run from a Visual Studio Developer Command Prompt.")
 
         cmd = self._msvc_compile_args(compiler, src, binary, pdb)
+        run_cmd = self._msvc_shell_command(cmd, tools.get("vcvarsall"))
         try:
             proc = subprocess.run(
-                cmd,
+                run_cmd,
                 capture_output=True,
                 text=True,
                 timeout=self.COMPILE_TIMEOUT_SECONDS,
@@ -381,6 +497,17 @@ class DebugExecutor:
             f"/Fe:{binary}",
             f"/Fd:{pdb}",
             str(src),
+        ]
+
+    @staticmethod
+    def _msvc_shell_command(cmd: list[str], vcvarsall: str | None = None) -> list[str]:
+        if platform.system() != "Windows" or not vcvarsall:
+            return cmd
+        return [
+            "cmd",
+            "/s",
+            "/c",
+            f'call "{vcvarsall}" x64 >nul && {subprocess.list2cmdline(cmd)}',
         ]
 
     def _lldb_script(self, prepared: _PreparedSource, input_path: Path | None = None) -> str:

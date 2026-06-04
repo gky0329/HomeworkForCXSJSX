@@ -1228,6 +1228,67 @@ def test_debug_executor_msvc_pdb_backend_requires_cdb():
     assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
 
 
+def test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits():
+    """Normal PowerShell can find VS Build Tools and CDB without PATH entries."""
+    from types import SimpleNamespace
+
+    from app.core.debug_executor import DebugExecutor
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        vswhere = root / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+        install = root / "VS" / "BuildTools"
+        cl = install / "VC" / "Tools" / "MSVC" / "14.40.33807" / "bin" / "Hostx64" / "x64" / "cl.exe"
+        vcvarsall = install / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
+        cdb = root / "Windows Kits" / "10" / "Debuggers" / "x64" / "cdb.exe"
+        for file_path in (vswhere, cl, vcvarsall, cdb):
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("", encoding="utf-8")
+
+        def fake_which(name):
+            return None
+
+        def fake_run(cmd, **kwargs):
+            assert str(vswhere) == cmd[0]
+            assert "-property" in cmd
+            return SimpleNamespace(returncode=0, stdout=str(install) + "\n")
+
+        with patch.dict(os.environ, {
+            "ProgramFiles(x86)": str(root),
+            "ProgramFiles": "",
+            "WindowsSdkDir": str(root / "Windows Kits" / "10"),
+        }, clear=False):
+            with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+                with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+                    with patch("app.core.debug_executor.subprocess.run", side_effect=fake_run):
+                        tools = DebugExecutor._msvc_tools()
+
+    assert tools["compiler"] == str(cl)
+    assert tools["debugger"] == str(cdb)
+    assert tools["vswhere"] == str(vswhere)
+    assert tools["vcvarsall"] == str(vcvarsall)
+
+
+def test_debug_executor_msvc_shell_command_loads_vcvarsall():
+    """Auto-discovered cl.exe should run through vcvarsall.bat on Windows."""
+    from app.core.debug_executor import DebugExecutor
+
+    cmd = [
+        "C:/VS/VC/Tools/MSVC/bin/Hostx64/x64/cl.exe",
+        "/nologo",
+        "program.cpp",
+    ]
+    with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+        wrapped = DebugExecutor._msvc_shell_command(
+            cmd,
+            "C:/VS/VC/Auxiliary/Build/vcvarsall.bat",
+        )
+
+    assert wrapped[:3] == ["cmd", "/s", "/c"]
+    assert 'call "C:/VS/VC/Auxiliary/Build/vcvarsall.bat" x64' in wrapped[3]
+    assert "cl.exe" in wrapped[3]
+
+
 def test_debug_executor_skips_stdin_programs_before_lldb_run():
     """Programs that read stdin should not enter LLDB batch stepping and hang."""
     from app.core.debug_executor import DebugExecutionError, DebugExecutor
@@ -1951,6 +2012,8 @@ if __name__ == "__main__":
         test_debug_executor_msvc_pdb_backend_is_experimental_by_default,
         test_debug_executor_selects_msvc_pdb_backend_when_enabled_on_windows,
         test_debug_executor_msvc_pdb_backend_requires_cdb,
+        test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits,
+        test_debug_executor_msvc_shell_command_loads_vcvarsall,
         test_debug_executor_skips_stdin_programs_before_lldb_run,
         test_debug_executor_local_capability_rejects_stdin_code,
         test_debug_executor_lldb_script_sets_stdin_input_path,

@@ -25,7 +25,7 @@ python main.py
 | Backend | Platforms | Status | Notes |
 | --- | --- | --- | --- |
 | LLDB / DWARF | macOS, Linux | In local development | Preferred local debugger path when `lldb` and `clang++`/`g++` are available. |
-| MSVC / PDB | Windows | Experimental | Disabled by default. Requires `cl.exe`, `cdb.exe`, and `CXXMV_ENABLE_EXPERIMENTAL_PDB=1`. |
+| MSVC / PDB | Windows | Experimental | Disabled by default. Requires Visual Studio C++ Build Tools, Windows Debugging Tools, and `CXXMV_ENABLE_EXPERIMENTAL_PDB=1`. |
 | AI provider | All | Stable fallback | Used when native debugging is unavailable or unsafe. |
 
 Do not advertise the MSVC/PDB backend as stable until the smoke tests below pass on a Windows machine.
@@ -38,7 +38,9 @@ Install:
 - Windows Debugging Tools (`cdb.exe`)
 - Python 3.11+
 
-Run from a Developer PowerShell or Developer Command Prompt:
+The app first checks `PATH`, then tries to discover Visual Studio Build Tools with `vswhere.exe` and `cdb.exe` from Windows Kits. A Developer PowerShell or Developer Command Prompt is still the safest validation shell, but normal PowerShell may work if both toolchains are installed.
+
+Run:
 
 ```powershell
 $env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"
