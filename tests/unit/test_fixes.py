@@ -7107,6 +7107,164 @@ def test_native_debug_smoke_requires_optional_variant_object_member_edges():
     assert _validate_optional_variant_object_member_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_roadshow_native_demo_state():
+    """Roadshow demo smoke should prove the real demo covers native debugger strengths."""
+    from app.core.demo_examples import ROADSHOW_DEMO_CODE
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import CASES, _validate_roadshow_native_demo
+
+    assert CASES["roadshow_native_demo"].code == ROADSHOW_DEMO_CODE
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=23,
+            source_code="int done = first.value + second.value + sound;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="total", type="int", value="52", address="0xS001", is_pointer=False),
+                Variable(name="focus", type="int*", value="0xS001", address="0xS002", is_pointer=True),
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=9, next=nullptr}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="9", address="0xS003.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS003.next"),
+                    ],
+                ),
+                Variable(
+                    name="second",
+                    type="Node",
+                    value="{value=2, next=0xS003}",
+                    address="0xS004",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xS004.value"),
+                        StructMember(name="next", type="Node*", value="0xS003", address="0xS004.next"),
+                    ],
+                ),
+                Variable(name="nodes", type="vector<unique_ptr<Node>>", value="{[0]=0xH001}", address="0xS005", is_pointer=False, is_array=True),
+                Variable(name="pet", type="unique_ptr<Animal>", value="0xH002", address="0xS006", is_pointer=True),
+                Variable(name="sound", type="int", value="10", address="0xS007", is_pointer=False),
+                Variable(name="done", type="int", value="21", address="0xS008", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xS001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=23,
+            source_code="int done = first.value + second.value + sound;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="total", type="int", value="52", address="0xS001", is_pointer=False),
+                Variable(name="focus", type="int*", value="0xS001", address="0xS002", is_pointer=True),
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=9, next=nullptr}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="9", address="0xS003.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS003.next"),
+                    ],
+                ),
+                Variable(
+                    name="second",
+                    type="Node",
+                    value="{value=2, next=0xS003}",
+                    address="0xS004",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xS004.value"),
+                        StructMember(name="next", type="Node*", value="0xS003", address="0xS004.next"),
+                    ],
+                ),
+                Variable(
+                    name="nodes",
+                    type="vector<unique_ptr<Node>>",
+                    value="{[0]=0xH001}",
+                    address="0xS005",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="unique_ptr<Node>", value="0xH001", address="0xS005[0]"),
+                    ],
+                ),
+                Variable(name="pet", type="unique_ptr<Animal>", value="0xH002", address="0xS006", is_pointer=True),
+                Variable(name="sound", type="int", value="10", address="0xS007", is_pointer=False),
+                Variable(
+                    name="maybe",
+                    type="optional<Node>",
+                    value="{value={value=7, next=0xS003}}",
+                    address="0xS008",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=7, next=0xS003}", address="0xS008.Value")],
+                ),
+                Variable(
+                    name="either",
+                    type="variant<int, Node>",
+                    value="{value={value=10, next=0xS004}}",
+                    address="0xS009",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="value", type="Node", value="{value=10, next=0xS004}", address="0xS009.Value")],
+                ),
+                Variable(name="done", type="int", value="21", address="0xS010", is_pointer=False),
+            ])],
+            heap=[
+                HeapBlock(
+                    address="0xH001",
+                    type="Node",
+                    value="{value=3, next=0xS004}",
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="3", address="0xH001.value"),
+                        StructMember(name="next", type="Node*", value="0xS004", address="0xH001.next"),
+                    ],
+                ),
+                HeapBlock(
+                    address="0xH002",
+                    type="Dog",
+                    value="{Animal={age=4}, bones=6}",
+                    is_object=True,
+                    class_name="Dog",
+                    base_classes=["Animal"],
+                    virtual_methods=["speak()"],
+                    members=[
+                        StructMember(name="Animal", type="Animal", value="{age=4}", address="0xH002.Animal"),
+                        StructMember(name="bones", type="int", value="6", address="0xH002.bones"),
+                    ],
+                ),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS002", target_address="0xS001"),
+                PointerEdge(source_address="0xS004.next", target_address="0xS003"),
+                PointerEdge(source_address="0xS005[0]", target_address="0xH001"),
+                PointerEdge(source_address="0xS006", target_address="0xH002"),
+                PointerEdge(source_address="0xS008.Value", target_address="0xS003"),
+                PointerEdge(source_address="0xS009.Value", target_address="0xS004"),
+                PointerEdge(source_address="0xH001.next", target_address="0xS004"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_roadshow_native_demo(weak_trace)
+    assert any("nodes should expose one unique_ptr heap target" in error for error in weak_errors)
+    assert "missing heap Dog for pet target 0xH002" in weak_errors
+    assert "missing maybe object" in weak_errors
+    assert "missing either object" in weak_errors
+    assert _validate_roadshow_native_demo(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_map_pointer_entry_edges():
     """Native smoke should prove map<string, int*> entries render pointer edges."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
@@ -8351,6 +8509,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_optional_pointer_member_edge,
         test_native_debug_smoke_requires_optional_variant_object_member_edges,
+        test_native_debug_smoke_requires_roadshow_native_demo_state,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,

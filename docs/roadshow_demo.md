@@ -4,45 +4,49 @@ Use the `Roadshow Demo` option in the Code Editor example dropdown. It is a real
 
 ## What It Demonstrates
 
-- Basic scalar variables: `total`, `average`
-- Array visualization: `scores[3]`
+- Basic scalar variables: `total`, `sound`, `done`
 - Stack pointer edge: `focus -> total`
-- Stack object state: `alice`
-- Heap object state: `mentor`
-- Heap scalar allocation: `reward`
-- Freed/dangling memory state after `delete`
+- Stack object member pointers: `second.next -> first`
+- Heap object state from `vector<unique_ptr<Node>>`
+- Heap member pointer edge: `nodes[0]->next -> second`
+- Polymorphism through `unique_ptr<Animal>` holding a runtime `Dog`
+- `std::optional<Node>` and `std::variant<int, Node>` nested object values
 - Stable canvas auto-fit across steps
 
 ## Suggested Talk Track
 
 1. Click `Roadshow Demo`, then `Run`.
-2. Step through the scalar and array setup: point out that stack values update line by line.
+2. Step through the scalar setup: point out that stack values update line by line.
 3. Stop at `int* focus = &total;`: explain stack-to-stack pointer visualization.
-4. Step through `Student alice`: show object member rows and the object summary line.
-5. Step through `new Student()` and `new int(...)`: show heap blocks and pointer edges.
-6. Step through both `delete` lines: show freed/dangling memory, which is one of the most teachable C++ concepts.
+4. Step through `Node first` and `Node second`: show object member rows and the `second.next -> first` edge.
+5. Step through `vector<unique_ptr<Node>>`: show a smart pointer element cell pointing to a heap `Node` block.
+6. Step through `unique_ptr<Animal> pet = make_unique<Dog>(...)`: show the heap block resolves to runtime `Dog`, including base `Animal` metadata.
+7. Step through `optional<Node>` and `variant<int, Node>`: show nested object values with member pointer edges.
 
 ## Demo Code
 
 ```cpp
-class Student {
-public:
-  int score;
-  double progress;
-};
-int scores[3] = {72, 85, 91};
-int total = scores[0] + scores[1] + scores[2];
-double average = total / 3.0;
+#include <memory>
+#include <optional>
+#include <variant>
+#include <vector>
+using namespace std;
+struct Node { int value; Node* next; };
+class Animal { public: int age; virtual int speak() { return age; } virtual ~Animal() {} };
+class Dog : public Animal { public: int bones; Dog(int a, int b) { age = a; bones = b; } int speak() override { return age + bones; } };
+int total = 42;
 int* focus = &total;
-*focus = total + 5;
-Student alice;
-alice.score = 88;
-alice.progress = 0.75;
-Student* mentor = new Student();
-mentor->score = alice.score + 7;
-mentor->progress = 0.95;
-int* reward = new int(mentor->score);
-*reward = *reward + 2;
-delete reward;
-delete mentor;
+*focus = 52;
+Node first{1, nullptr};
+Node second{2, &first};
+second.next->value = 5;
+vector<unique_ptr<Node>> nodes;
+nodes.push_back(make_unique<Node>(Node{3, &second}));
+nodes[0]->next->next->value = 8;
+unique_ptr<Animal> pet = make_unique<Dog>(4, 6);
+int sound = pet->speak();
+optional<Node> maybe = Node{7, &first};
+maybe->next->value = 9;
+variant<int, Node> either = Node{10, &second};
+int done = first.value + second.value + sound;
 ```

@@ -22,6 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.core.debug_executor import DebugExecutionError, DebugExecutor  # noqa: E402
+from app.core.demo_examples import ROADSHOW_DEMO_CODE  # noqa: E402
 from app.core.memory_model import ExecutionTrace, MemoryState, Variable  # noqa: E402
 
 
@@ -468,6 +469,117 @@ def _validate_optional_variant_object_member_pointer(trace: ExecutionTrace) -> l
             for edge in state.edges
         ):
             errors.append(f"missing {name}.value -> first pointer edge")
+    return errors
+
+
+def _validate_roadshow_native_demo(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    errors: list[str] = []
+
+    total = values.get("total")
+    focus = values.get("focus")
+    first = values.get("first")
+    second = values.get("second")
+    nodes = values.get("nodes")
+    pet = values.get("pet")
+    sound = values.get("sound")
+    maybe = values.get("maybe")
+    either = values.get("either")
+    done = values.get("done")
+
+    if total is None or total.value != "52":
+        errors.append(f"total expected 52, got {total.value if total else None!r}")
+    if focus is None:
+        errors.append("missing focus pointer")
+    elif total is not None:
+        if focus.value != total.address:
+            errors.append(f"focus should point to total {total.address}, got {focus.value!r}")
+        if not any(edge.source_address == focus.address and edge.target_address == total.address for edge in state.edges):
+            errors.append("missing focus -> total stack edge")
+
+    if first is None:
+        errors.append("missing first Node")
+    elif _member_map(first).get("value") != "9":
+        errors.append(f"first.value expected 9 after nested writes, got {_member_map(first).get('value')!r}")
+    if second is None:
+        errors.append("missing second Node")
+    elif first is not None:
+        second_members = {member.name: member for member in second.members}
+        next_member = second_members.get("next")
+        if next_member is None or next_member.value != first.address:
+            errors.append(f"second.next should target first {first.address}, got {next_member.value if next_member else None!r}")
+        elif not any(edge.source_address == next_member.address and edge.target_address == first.address for edge in state.edges):
+            errors.append("missing second.next -> first edge")
+
+    if nodes is None:
+        errors.append("missing nodes vector")
+    else:
+        if not nodes.is_array:
+            errors.append("nodes should render as an array/container")
+        if len(nodes.elements) != 1 or not nodes.elements[0].value.startswith("0xH"):
+            errors.append(f"nodes should expose one unique_ptr heap target, got {[e.value for e in nodes.elements]!r}")
+        elif second is not None:
+            heap = next((block for block in state.heap if block.address == nodes.elements[0].value), None)
+            if heap is None:
+                errors.append(f"missing heap Node for nodes[0] target {nodes.elements[0].value}")
+            else:
+                if not heap.is_object or heap.class_name != "Node":
+                    errors.append(f"nodes[0] heap should be Node object, got class={heap.class_name!r} object={heap.is_object}")
+                heap_members = {member.name: member for member in heap.members}
+                next_member = heap_members.get("next")
+                if next_member is None or next_member.value != second.address:
+                    errors.append(f"nodes[0].next should target second {second.address}, got {next_member.value if next_member else None!r}")
+                elif not any(edge.source_address == next_member.address and edge.target_address == second.address for edge in state.edges):
+                    errors.append("missing heap nodes[0].next -> second edge")
+
+    if pet is None:
+        errors.append("missing polymorphic pet pointer")
+    elif not pet.value.startswith("0xH"):
+        errors.append(f"pet should point to heap Dog, got {pet.value!r}")
+    else:
+        pet_heap = next((block for block in state.heap if block.address == pet.value), None)
+        if pet_heap is None:
+            errors.append(f"missing heap Dog for pet target {pet.value}")
+        else:
+            if not pet_heap.is_object or pet_heap.class_name != "Dog":
+                errors.append(f"pet heap should be runtime Dog, got class={pet_heap.class_name!r} object={pet_heap.is_object}")
+            if "Animal" not in pet_heap.base_classes:
+                errors.append(f"pet Dog heap should list Animal base, got {pet_heap.base_classes!r}")
+            if "speak()" not in pet_heap.virtual_methods:
+                errors.append(f"pet Dog heap should list speak(), got {pet_heap.virtual_methods!r}")
+            members = {member.name: member.value for member in pet_heap.members}
+            if members.get("Animal") is None or "age=4" not in members.get("Animal", ""):
+                errors.append(f"pet Dog base Animal should include age=4, got {members.get('Animal')!r}")
+            if members.get("bones") != "6":
+                errors.append(f"pet Dog bones expected 6, got {members.get('bones')!r}")
+    if sound is None or sound.value != "10":
+        errors.append(f"sound expected 10, got {sound.value if sound else None!r}")
+
+    for name, var, target in (
+        ("maybe", maybe, first),
+        ("either", either, second),
+    ):
+        if target is None:
+            continue
+        if var is None:
+            errors.append(f"missing {name} object")
+            continue
+        if not var.is_object:
+            errors.append(f"{name} should render as object")
+        value_member = next((member for member in var.members if member.name == "value"), None)
+        if value_member is None:
+            errors.append(f"{name} missing value member")
+            continue
+        if target.address not in value_member.value:
+            errors.append(f"{name}.value should include target {target.address}, got {value_member.value!r}")
+        if not any(edge.source_address == value_member.address and edge.target_address == target.address for edge in state.edges):
+            errors.append(f"missing {name}.value -> target edge")
+
+    if done is None or done.value != "21":
+        errors.append(f"done expected 21, got {done.value if done else None!r}")
     return errors
 
 
@@ -1672,6 +1784,11 @@ CASES: dict[str, SmokeCase] = {
         name="basic_double",
         code="int a = 42;\nint b = a + 10;\ndouble pi = 3.14;\n",
         validate=_validate_basic_double,
+    ),
+    "roadshow_native_demo": SmokeCase(
+        name="roadshow_native_demo",
+        code=ROADSHOW_DEMO_CODE,
+        validate=_validate_roadshow_native_demo,
     ),
     "stack_object": SmokeCase(
         name="stack_object",

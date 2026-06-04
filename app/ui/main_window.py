@@ -22,6 +22,7 @@ from app.ui.pages.knowledge_page import KnowledgePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
 from app.services.i18n import load_language, tr
+from app.core.demo_examples import ROADSHOW_DEMO_CODE
 
 
 ZOOM_FACTOR = 1.15
@@ -50,7 +51,8 @@ TAB_STYLE = (
 )
 
 EXAMPLE_CODES = {
-    "Roadshow Demo": (
+    "Roadshow Demo": ROADSHOW_DEMO_CODE,
+    "Teaching Basics": (
         "class Student {\n"
         "public:\n"
         "  int score;\n"

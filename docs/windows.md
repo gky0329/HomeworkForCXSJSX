@@ -73,6 +73,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --json
 python tools/native_debug_smoke.py --backend msvc-pdb --verbose --dump-traces .\pdb-smoke-traces
 
 # Narrow a failure to one case.
+python tools/native_debug_smoke.py --backend msvc-pdb --case roadshow_native_demo
 python tools/native_debug_smoke.py --backend msvc-pdb --case basic_double
 python tools/native_debug_smoke.py --backend msvc-pdb --case call_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case recursive_factorial
