@@ -274,6 +274,40 @@ def _validate_call_stack(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_reference_stack_pointer(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    a = values.get("a")
+    ref = values.get("r")
+    ptr = values.get("p")
+    if a is None:
+        errors.append("missing int variable a")
+    elif a.value != "11":
+        errors.append(f"a expected 11 after reference and pointer writes, got {a.value!r}")
+    if ref is None:
+        errors.append("missing reference variable r")
+    elif a is not None:
+        if not ref.is_reference:
+            errors.append("r should be marked as a reference")
+        if ref.is_pointer:
+            errors.append("r should not be marked as a pointer")
+        if ref.value != a.address:
+            errors.append(f"r should target a address {a.address}, got {ref.value!r}")
+    if ptr is None:
+        errors.append("missing pointer variable p")
+    elif a is not None:
+        if not ptr.is_pointer:
+            errors.append("p should be marked as a pointer")
+        if ptr.value != a.address:
+            errors.append(f"p should target a address {a.address}, got {ptr.value!r}")
+    if ptr is not None and not any(edge.source_address == ptr.address and edge.target_address == ptr.value for edge in state.edges):
+        errors.append("missing p -> a stack pointer edge")
+    return errors
+
+
 CASES: dict[str, SmokeCase] = {
     "basic_double": SmokeCase(
         name="basic_double",
@@ -312,6 +346,17 @@ CASES: dict[str, SmokeCase] = {
             "int result = square(3);\n"
         ),
         validate=_validate_call_stack,
+    ),
+    "reference_stack_pointer": SmokeCase(
+        name="reference_stack_pointer",
+        code=(
+            "int a = 4;\n"
+            "int& r = a;\n"
+            "r = 9;\n"
+            "int* p = &a;\n"
+            "*p = 11;\n"
+        ),
+        validate=_validate_reference_stack_pointer,
     ),
     "vector_int": SmokeCase(
         name="vector_int",

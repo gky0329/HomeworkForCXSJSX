@@ -998,10 +998,13 @@ class DebugExecutor:
             for parsed in parsed_frame.variables:
                 stack_addr = stack_addr_map[parsed.actual_addr]
                 value = parsed.value
-                is_pointer = "*" in parsed.type or self._is_hex_addr(value)
+                is_reference = "&" in parsed.type and "*" not in parsed.type
+                is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
                 if is_pointer and self._is_hex_addr(value) and not self._is_null(value):
                     value = self._target_sim_addr(value, actual_stack_lookup, heap_addr_map)
-                elif is_pointer and self._is_null(value):
+                elif is_reference and self._is_hex_addr(value) and not self._is_null(value):
+                    value = self._target_sim_addr(value, actual_stack_lookup, heap_addr_map)
+                elif (is_pointer or is_reference) and self._is_null(value):
                     value = "nullptr"
                 elif parsed.elements:
                     value = self._format_elements(parsed.elements)
@@ -1029,7 +1032,7 @@ class DebugExecutor:
                     ],
                     is_object=bool(parsed.members),
                     class_name=self._clean_type(parsed.type) if parsed.members else "",
-                    is_reference="&" in parsed.type,
+                    is_reference=is_reference,
                 ))
             frame_variables.append((parsed_frame.name, variables))
 

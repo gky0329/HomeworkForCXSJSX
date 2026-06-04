@@ -766,6 +766,7 @@ __CXXMV_FRAME__0__{l3 + 1}__main
     changed_a = changed_step.stack[0].variables[0]
     changed_ref = changed_step.stack[0].variables[1]
     assert ref.is_reference is True
+    assert ref.is_pointer is False
     assert ref.is_object is False
     assert ref.value == a.address
     assert ref_step.edges == []
@@ -1730,6 +1731,40 @@ __CXXMV_FRAMEV__1
     assert step.heap == []
 
 
+def test_debug_executor_parses_cdb_reference_as_non_pointer():
+    """CDB/PDB references should keep reference semantics without pointer styling."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 5;\n"
+        "int& r = a;\n"
+        "r = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    ref_line = generated_lines[2]
+    write_line = generated_lines[3]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x11 [C:\tmp\program.cpp @ {ref_line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x15 [C:\tmp\program.cpp @ {write_line}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int a = 5
+000000aa`0000efd8 int & r = 000000aa`0000efd0
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    a = step.stack[0].variables[0]
+    ref = step.stack[0].variables[1]
+
+    assert ref.is_reference is True
+    assert ref.is_pointer is False
+    assert ref.value == a.address
+    assert step.edges == []
+
+
 def test_debug_executor_cdb_skips_step_in_transition_snapshots():
     """CDB should not label callee variables as the caller source line."""
     from app.core.debug_executor import DebugExecutor
@@ -2610,6 +2645,58 @@ def test_native_debug_smoke_requires_call_stack_state():
     assert _validate_call_stack(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_reference_and_stack_pointer_state():
+    """Native smoke should distinguish references from pointers and prove stack edges."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_reference_stack_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="*p = 11;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="11", address="0xS001", is_pointer=False),
+                Variable(
+                    name="r",
+                    type="int&",
+                    value="0xS001",
+                    address="0xS002",
+                    is_pointer=True,
+                    is_reference=True,
+                ),
+                Variable(name="p", type="int*", value="0xS001", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="*p = 11;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="11", address="0xS001", is_pointer=False),
+                Variable(
+                    name="r",
+                    type="int&",
+                    value="0xS001",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_reference=True,
+                ),
+                Variable(name="p", type="int*", value="0xS001", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS003", target_address="0xS001")],
+        ),
+    ])
+
+    weak_errors = _validate_reference_stack_pointer(weak_trace)
+    assert "r should not be marked as a pointer" in weak_errors
+    assert "missing p -> a stack pointer edge" in weak_errors
+    assert _validate_reference_stack_pointer(strong_trace) == []
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2668,6 +2755,7 @@ if __name__ == "__main__":
         test_debug_executor_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
+        test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_cdb_skips_step_in_transition_snapshots,
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
@@ -2694,6 +2782,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
+        test_native_debug_smoke_requires_reference_and_stack_pointer_state,
     ]
 
     passed = 0
