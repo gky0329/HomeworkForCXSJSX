@@ -91,6 +91,8 @@
 
 STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包底层容器字段 `c`，按 `elements` cell 渲染当前存储内容，避免把实现细节当成业务成员展示。
 
+常见顺序/关联/哈希容器（如 `std::deque<T>`、`std::list<T>`、`std::set<T>`、`std::unordered_map<K, V>`）在原生调试器路径下会按逻辑元素渲染为 `elements` cell。若元素或 entry value 是指针类型，例如 `list<int*>`、`set<int*>`、`unordered_map<string, int*>`，元素 cell 会作为箭头起点指向对应栈/堆目标。
+
 ---
 
 ## 2.1 智能指针

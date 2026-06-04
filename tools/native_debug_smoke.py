@@ -615,6 +615,84 @@ def _validate_priority_queue_adapter(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_deque(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "xs")
+    if match is None:
+        return ["missing deque variable xs"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("deque xs should be marked as an array/container")
+    values = [element.value for element in var.elements]
+    if values != ["0", "1", "8"]:
+        errors.append(f"deque elements expected ['0', '1', '8'], got {values!r}")
+    if var.members:
+        errors.append("deque should expose logical elements instead of implementation members")
+    return errors
+
+
+def _validate_list_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "xs")
+    if match is None:
+        return ["missing list pointer variable xs"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("list xs should be marked as an array/container")
+    a_match = _last_var(trace, "a")
+    b_match = _last_var(trace, "b")
+    if a_match is None or b_match is None:
+        errors.append("missing a or b variable after list pointer write")
+        return errors
+    a = a_match[1]
+    b = b_match[1]
+    if b.value != "9":
+        errors.append(f"b expected 9 after list iterator write, got {b.value!r}")
+    elements = list(var.elements)
+    if len(elements) != 2:
+        errors.append(f"list xs expected 2 pointer elements, got {[element.value for element in elements]!r}")
+        return errors
+    expected_values = [a.address, b.address]
+    values = [element.value for element in elements]
+    if values != expected_values:
+        errors.append(f"list pointer elements expected {expected_values!r}, got {values!r}")
+    expected_edges = {
+        (elements[0].address, a.address),
+        (elements[1].address, b.address),
+    }
+    actual_edges = {(edge.source_address, edge.target_address) for edge in state.edges}
+    missing = expected_edges - actual_edges
+    if missing:
+        errors.append(f"missing list pointer element edges: {sorted(missing)!r}")
+    return errors
+
+
+def _validate_set_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "xs")
+    if match is None:
+        return ["missing set pointer variable xs"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("set xs should be marked as an array/container")
+    a_match = _last_var(trace, "a")
+    b_match = _last_var(trace, "b")
+    if a_match is None or b_match is None:
+        errors.append("missing a or b variable for set pointer entries")
+        return errors
+    targets = {a_match[1].address, b_match[1].address}
+    elements = list(var.elements)
+    values = {element.value for element in elements}
+    if len(elements) != 2 or values != targets:
+        errors.append(f"set pointer elements expected {sorted(targets)!r}, got {sorted(values)!r}")
+        return errors
+    actual_edges = {(edge.source_address, edge.target_address) for edge in state.edges}
+    for element in elements:
+        if (element.address, element.value) not in actual_edges:
+            errors.append(f"missing set pointer edge {element.address!r} -> {element.value!r}")
+    return errors
+
+
 def _validate_vector_object(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "nodes")
     if match is None:
@@ -687,6 +765,45 @@ def _validate_map_pointer(trace: ExecutionTrace) -> list[str]:
     missing = expected_edges - actual_edges
     if missing:
         errors.append(f"missing map entry pointer edges: {sorted(missing)!r}")
+    return errors
+
+
+def _validate_unordered_map_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "m")
+    if match is None:
+        return ["missing unordered_map pointer variable m"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("unordered_map m should be marked as an array/container")
+    elements = list(var.elements)
+    if len(elements) != 2:
+        errors.append(f"unordered_map m expected 2 key/value entries, got {[element.value for element in elements]!r}")
+        return errors
+    a_match = _last_var(trace, "a")
+    b_match = _last_var(trace, "b")
+    if a_match is None or b_match is None:
+        errors.append("missing a or b variable after unordered_map pointer write")
+        return errors
+    a = a_match[1]
+    b = b_match[1]
+    if b.value != "9":
+        errors.append(f"b expected 9 after *m[\"b\"] write, got {b.value!r}")
+    expected = {"a": a.address, "b": b.address}
+    actual_edges = {(edge.source_address, edge.target_address) for edge in state.edges}
+    for key, target in expected.items():
+        element = next(
+            (
+                element for element in elements
+                if f"first={key}" in element.value and f"second={target}" in element.value
+            ),
+            None,
+        )
+        if element is None:
+            errors.append(f"unordered_map missing {key} pointer entry targeting {target}: {[e.value for e in elements]!r}")
+            continue
+        if (element.address, target) not in actual_edges:
+            errors.append(f"missing unordered_map entry edge {element.address!r} -> {target!r}")
     return errors
 
 
@@ -1870,6 +1987,49 @@ CASES: dict[str, SmokeCase] = {
         ),
         validate=_validate_priority_queue_adapter,
     ),
+    "deque_int": SmokeCase(
+        name="deque_int",
+        code=(
+            "#include <deque>\n"
+            "using namespace std;\n"
+            "deque<int> xs;\n"
+            "xs.push_back(1);\n"
+            "xs.push_back(2);\n"
+            "xs.push_front(0);\n"
+            "xs[2] = 8;\n"
+        ),
+        validate=_validate_deque,
+    ),
+    "list_pointer_stack": SmokeCase(
+        name="list_pointer_stack",
+        code=(
+            "#include <list>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "list<int*> xs;\n"
+            "xs.push_back(&a);\n"
+            "xs.push_back(&b);\n"
+            "auto it = xs.begin();\n"
+            "++it;\n"
+            "**it = 9;\n"
+        ),
+        validate=_validate_list_pointer,
+    ),
+    "set_pointer_stack": SmokeCase(
+        name="set_pointer_stack",
+        code=(
+            "#include <set>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "set<int*> xs;\n"
+            "xs.insert(&a);\n"
+            "xs.insert(&b);\n"
+            "int count = xs.size();\n"
+        ),
+        validate=_validate_set_pointer,
+    ),
     "heap_object": SmokeCase(
         name="heap_object",
         code=(
@@ -2252,6 +2412,21 @@ CASES: dict[str, SmokeCase] = {
             '*m["b"] = 9;\n'
         ),
         validate=_validate_map_pointer,
+    ),
+    "unordered_map_pointer": SmokeCase(
+        name="unordered_map_pointer",
+        code=(
+            "#include <string>\n"
+            "#include <unordered_map>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "unordered_map<string, int*> m;\n"
+            "m[\"a\"] = &a;\n"
+            "m[\"b\"] = &b;\n"
+            "*m[\"b\"] = 9;\n"
+        ),
+        validate=_validate_unordered_map_pointer,
     ),
     "map_string_unique_ptr": SmokeCase(
         name="map_string_unique_ptr",

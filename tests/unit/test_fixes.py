@@ -7265,6 +7265,159 @@ def test_native_debug_smoke_requires_roadshow_native_demo_state():
     assert _validate_roadshow_native_demo(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_stl_container_breadth():
+    """Native smoke should cover common STL sequence/set/hash containers."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import (
+        CASES,
+        _validate_deque,
+        _validate_list_pointer,
+        _validate_set_pointer,
+        _validate_unordered_map_pointer,
+    )
+
+    for case_name in (
+        "deque_int",
+        "list_pointer_stack",
+        "set_pointer_stack",
+        "unordered_map_pointer",
+    ):
+        assert case_name in CASES
+
+    weak_deque = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="xs[2] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="xs", type="deque<int>", value="{[0]=0, [1]=1, [2]=8}", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    strong_deque = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="xs[2] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="xs",
+                    type="deque<int>",
+                    value="{[0]=0, [1]=1, [2]=8}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="int", value="0", address="0xS001[0]"),
+                        ArrayElement(index=1, type="int", value="1", address="0xS001[1]"),
+                        ArrayElement(index=2, type="int", value="8", address="0xS001[2]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    assert "deque xs should be marked as an array/container" in _validate_deque(weak_deque)
+    assert _validate_deque(strong_deque) == []
+
+    strong_list = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="**it = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="xs",
+                    type="list<int*>",
+                    value="{[0]=0xS001, [1]=0xS002}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="int*", value="0xS001", address="0xS003[0]"),
+                        ArrayElement(index=1, type="int*", value="0xS002", address="0xS003[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS001"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS002"),
+            ],
+        )
+    ])
+    weak_list = strong_list.model_copy(deep=True)
+    weak_list.steps[0].edges = []
+    assert any("missing list pointer element edges" in error for error in _validate_list_pointer(weak_list))
+    assert _validate_list_pointer(strong_list) == []
+
+    strong_set = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=8,
+            source_code="int count = xs.size();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="2", address="0xS002", is_pointer=False),
+                Variable(
+                    name="xs",
+                    type="set<int*>",
+                    value="{[0]=0xS002, [1]=0xS001}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="int*", value="0xS002", address="0xS003[0]"),
+                        ArrayElement(index=1, type="int*", value="0xS001", address="0xS003[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS002"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS001"),
+            ],
+        )
+    ])
+    weak_set = strong_set.model_copy(deep=True)
+    weak_set.steps[0].stack[0].variables[-1].elements = []
+    assert any("set pointer elements expected" in error for error in _validate_set_pointer(weak_set))
+    assert _validate_set_pointer(strong_set) == []
+
+    strong_unordered_map = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code='*m["b"] = 9;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="m",
+                    type="unordered_map<string,int*>",
+                    value="{[0]={first=b, second=0xS002}, [1]={first=a, second=0xS001}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="pair<string,int*>", value="{first=b, second=0xS002}", address="0xS003[0]"),
+                        ArrayElement(index=1, type="pair<string,int*>", value="{first=a, second=0xS001}", address="0xS003[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS002"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS001"),
+            ],
+        )
+    ])
+    weak_unordered_map = strong_unordered_map.model_copy(deep=True)
+    weak_unordered_map.steps[0].edges = []
+    assert any("missing unordered_map entry edge" in error for error in _validate_unordered_map_pointer(weak_unordered_map))
+    assert _validate_unordered_map_pointer(strong_unordered_map) == []
+
+
 def test_native_debug_smoke_requires_map_pointer_entry_edges():
     """Native smoke should prove map<string, int*> entries render pointer edges."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
@@ -8510,6 +8663,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_optional_pointer_member_edge,
         test_native_debug_smoke_requires_optional_variant_object_member_edges,
         test_native_debug_smoke_requires_roadshow_native_demo_state,
+        test_native_debug_smoke_requires_stl_container_breadth,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,

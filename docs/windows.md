@@ -89,6 +89,9 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case heap_member_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_array
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object
+python tools/native_debug_smoke.py --backend msvc-pdb --case deque_int
+python tools/native_debug_smoke.py --backend msvc-pdb --case list_pointer_stack
+python tools/native_debug_smoke.py --backend msvc-pdb --case set_pointer_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_polymorphic_delete
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_leak_overwrite
 python tools/native_debug_smoke.py --backend msvc-pdb --case unique_ptr_heap
@@ -112,6 +115,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case optional_variant_ob
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_pointer
+python tools/native_debug_smoke.py --backend msvc-pdb --case unordered_map_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_unique_ptr
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_unique_ptr_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_polymorphic_shared_ptr
