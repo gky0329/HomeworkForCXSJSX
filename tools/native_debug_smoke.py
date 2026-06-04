@@ -301,6 +301,35 @@ def _validate_heap_array_delete(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_pointer_reset_null(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    delete_state = next(
+        (state for state in trace.steps if state.source_code.startswith("delete ")),
+        None,
+    )
+    if delete_state is None:
+        errors.append("missing delete step")
+    else:
+        if not any(block.is_freed for block in delete_state.heap):
+            errors.append("delete step should keep the freed heap block visible")
+        if not any(edge.is_dangling for edge in delete_state.edges):
+            errors.append("delete step should show a dangling pointer edge")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    p = next((var for var in _all_variables(final_state) if var.name == "p"), None)
+    if p is None:
+        errors.append("missing pointer variable p")
+    elif p.value != "nullptr":
+        errors.append(f"p expected nullptr after reset, got {p.value!r}")
+    if final_state.edges:
+        errors.append(f"final nullptr state should have no pointer edges, got {len(final_state.edges)}")
+    if any(edge.is_dangling for edge in final_state.edges):
+        errors.append("final nullptr state should not keep a dangling edge")
+    return errors
+
+
 def _validate_stdin_sum(trace: ExecutionTrace) -> list[str]:
     state = _last_observed_state(trace)
     if state is None:
@@ -487,6 +516,15 @@ CASES: dict[str, SmokeCase] = {
             "delete[] arr;\n"
         ),
         validate=_validate_heap_array_delete,
+    ),
+    "pointer_reset_null": SmokeCase(
+        name="pointer_reset_null",
+        code=(
+            "int* p = new int(5);\n"
+            "delete p;\n"
+            "p = nullptr;\n"
+        ),
+        validate=_validate_pointer_reset_null,
     ),
     "call_stack": SmokeCase(
         name="call_stack",

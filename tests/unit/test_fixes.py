@@ -2158,6 +2158,54 @@ __CXXMV_FRAMEV__0
     assert final.edges[0].is_dangling is True
 
 
+def test_debug_executor_parses_cdb_pointer_reset_null_state():
+    """CDB/PDB should remove dangling edges when a deleted pointer is reset."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = new int(5);\n"
+        "delete p;\n"
+        "p = nullptr;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l1}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000001df`4e700000 {{5}}
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000001df`4e700000 {{5}}
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l3 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 00000000`00000000
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    delete_step = trace.steps[1]
+    final = trace.steps[-1]
+    p = final.stack[0].variables[0]
+
+    assert any(block.is_freed for block in delete_step.heap)
+    assert any(edge.is_dangling for edge in delete_step.edges)
+    assert p.name == "p"
+    assert p.value == "nullptr"
+    assert final.heap == []
+    assert final.edges == []
+
+
 def test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer():
     """CDB dx child rows under a pointer should become pointee object members."""
     from app.core.debug_executor import DebugExecutor
@@ -2848,6 +2896,65 @@ def test_native_debug_smoke_requires_heap_array_delete_state():
     assert _validate_heap_array_delete(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_pointer_reset_null_state():
+    """Native smoke should prove nullptr reset clears stale heap edges."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_pointer_reset_null
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="delete p;",
+            stack=[],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=3,
+            source_code="p = nullptr;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="nullptr", address="0xS001", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[PointerEdge(
+                source_address="0xS001",
+                target_address="0xH001",
+                is_dangling=True,
+            )],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="delete p;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="0xH001", address="0xS001", is_pointer=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="5", is_freed=True)],
+            edges=[PointerEdge(
+                source_address="0xS001",
+                target_address="0xH001",
+                is_dangling=True,
+            )],
+        ),
+        MemoryState(
+            line_number=3,
+            source_code="p = nullptr;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="p", type="int*", value="nullptr", address="0xS001", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_pointer_reset_null(weak_trace)
+    assert "delete step should keep the freed heap block visible" in weak_errors
+    assert "delete step should show a dangling pointer edge" in weak_errors
+    assert any("final nullptr state should have no pointer edges" in error for error in weak_errors)
+    assert _validate_pointer_reset_null(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_stack_array_elements():
     """Native smoke should prove stack arrays preserve updated element cells."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -3288,6 +3395,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_delete_state,
+        test_debug_executor_parses_cdb_pointer_reset_null_state,
         test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer,
         test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
         test_debug_executor_parses_cdb_dx_vector_object_children,
@@ -3309,6 +3417,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_summarizes_and_dumps_trace,
         test_native_debug_smoke_requires_final_freed_heap_state,
         test_native_debug_smoke_requires_heap_array_delete_state,
+        test_native_debug_smoke_requires_pointer_reset_null_state,
         test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
