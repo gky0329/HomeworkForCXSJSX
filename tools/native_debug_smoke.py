@@ -782,6 +782,78 @@ def _validate_vector_shared_ptr(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_vector_unique_ptr(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    xs = values.get("xs")
+    errors: list[str] = []
+    if xs is None:
+        return ["missing vector<unique_ptr<int>> variable xs"]
+    if not xs.is_array:
+        errors.append("xs should be marked as an array/container")
+    if xs.is_pointer:
+        errors.append("xs should not be marked as a pointer")
+    elements = list(xs.elements)
+    if len(elements) != 1:
+        errors.append(f"xs expected one unique_ptr element, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    if "unique_ptr" not in element.type:
+        errors.append(f"xs[0] type should be unique_ptr, got {element.type!r}")
+    if not element.value.startswith("0xH"):
+        errors.append(f"xs[0] should target a heap block, got {element.value!r}")
+        return errors
+    target_heap = next((block for block in state.heap if block.address == element.value), None)
+    if target_heap is None:
+        errors.append(f"missing heap block for vector unique_ptr target {element.value!r}")
+    elif target_heap.value != "8":
+        errors.append(f"unique_ptr heap value expected 8 after *xs[0] write, got {target_heap.value!r}")
+    if not any(edge.source_address == element.address and edge.target_address == element.value for edge in state.edges):
+        errors.append("missing xs[0] -> unique_ptr heap edge")
+    return errors
+
+
+def _validate_std_array_shared_ptr(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    alias = values.get("alias")
+    xs = values.get("xs")
+    errors: list[str] = []
+    if alias is None:
+        errors.append("missing shared_ptr alias variable")
+    elif not alias.is_pointer:
+        errors.append("alias should be rendered as a pointer-like owner")
+    if xs is None:
+        return errors + ["missing array<shared_ptr<int>,2> variable xs"]
+    if not xs.is_array:
+        errors.append("xs should be marked as an array/container")
+    if xs.is_pointer:
+        errors.append("xs should not be marked as a pointer")
+    if xs.is_object:
+        errors.append("xs should not be marked as an object after element expansion")
+    elements = list(xs.elements)
+    if len(elements) != 2:
+        errors.append(f"xs expected two shared_ptr elements, got {[element.value for element in elements]!r}")
+        return errors
+    if alias is not None:
+        if elements[0].value != alias.value:
+            errors.append(f"xs[0] should target alias heap {alias.value!r}, got {elements[0].value!r}")
+        if elements[1].value != "nullptr":
+            errors.append(f"xs[1] should be nullptr, got {elements[1].value!r}")
+        if not any(edge.source_address == elements[0].address and edge.target_address == alias.value for edge in state.edges):
+            errors.append("missing xs[0] -> alias heap edge")
+        target_heap = next((block for block in state.heap if block.address == alias.value), None)
+        if target_heap is None:
+            errors.append(f"missing heap block for std::array shared_ptr target {alias.value!r}")
+        elif target_heap.value != "8":
+            errors.append(f"shared heap value expected 8 after *xs[0] write, got {target_heap.value!r}")
+    return errors
+
+
 def _validate_weak_ptr_expired(trace: ExecutionTrace) -> list[str]:
     final_state = _last_observed_state(trace)
     if final_state is None:
@@ -1418,6 +1490,30 @@ CASES: dict[str, SmokeCase] = {
             "*xs[0] = 8;\n"
         ),
         validate=_validate_vector_shared_ptr,
+    ),
+    "vector_unique_ptr": SmokeCase(
+        name="vector_unique_ptr",
+        code=(
+            "#include <memory>\n"
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "vector<unique_ptr<int>> xs;\n"
+            "xs.push_back(make_unique<int>(5));\n"
+            "*xs[0] = 8;\n"
+        ),
+        validate=_validate_vector_unique_ptr,
+    ),
+    "std_array_shared_ptr": SmokeCase(
+        name="std_array_shared_ptr",
+        code=(
+            "#include <array>\n"
+            "#include <memory>\n"
+            "using namespace std;\n"
+            "shared_ptr<int> alias = make_shared<int>(5);\n"
+            "array<shared_ptr<int>,2> xs = {alias, nullptr};\n"
+            "*xs[0] = 8;\n"
+        ),
+        validate=_validate_std_array_shared_ptr,
     ),
     "weak_ptr_expired": SmokeCase(
         name="weak_ptr_expired",

@@ -1152,8 +1152,9 @@ def test_debug_executor_lldb_script_expands_string_keyed_containers():
     script = DebugExecutor._lldb_stack_snapshot_command()
     assert "def is_std_string_type" in script
     assert "def is_expandable_container_type" in script
+    assert "def is_c_array_type" in script
     assert "if is_std_string_type(typ) and val:" in script
-    assert "if val and not is_expandable_container_type(typ):" in script
+    assert "if val and not is_expandable_container_type(typ) and not is_c_array_type(typ):" in script
     assert "'string' in typ and 'vector' not in typ" not in script
 
 
@@ -1167,7 +1168,9 @@ def test_debug_executor_lldb_script_expands_smart_pointers():
     assert "def top_level_template_type_key" in script
     assert "def smart_pointer_child" in script
     assert "if is_smart_pointer_type(typ):" in script
-    assert "return raw_val if raw_val else '0x0'" in script
+    assert "if not raw_val:" in script
+    assert "return '0x0'" in script
+    assert "return raw_val + ' {' + deref_val + '}'" in script
     assert "emit_child(deref, '*' + name" in script
 
 
@@ -1196,6 +1199,21 @@ def test_debug_executor_smart_pointer_checks_are_top_level_only():
     assert DebugExecutor._is_smart_pointer_type("std::__1::vector<std::__1::shared_ptr<int> >") is False
     assert DebugExecutor._is_shared_pointer_type("std::map<std::string, std::shared_ptr<int> >") is False
     assert DebugExecutor._is_weak_pointer_type("std::array<std::weak_ptr<int>, 2>") is False
+
+
+def test_debug_executor_detects_std_array_declarations_with_nested_templates():
+    """LLDB probes should know std::array<T,N> sizes even when T has commas."""
+    from app.core.debug_executor import DebugExecutor
+
+    declarations = DebugExecutor._std_array_declarations([
+        "array<shared_ptr<int>,2> xs = {alias, nullptr};",
+        "std::array<std::pair<int, int>, 3> pairs{};",
+    ])
+
+    assert declarations == {
+        "xs": ("shared_ptr<int>", 2),
+        "pairs": ("std::pair<int, int>", 3),
+    }
 
 
 def test_debug_executor_parses_lambda_captures_as_function_object():
@@ -5396,6 +5414,105 @@ def test_native_debug_smoke_requires_vector_shared_ptr_container_state():
     assert _validate_vector_shared_ptr(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_vector_unique_ptr_heap_state():
+    """Native smoke should prove vector<unique_ptr<T>> elements own visible heap."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_vector_unique_ptr
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="xs",
+                    type="std::vector<std::unique_ptr<int>>",
+                    value="{[0]=0xH001}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<int>", value="0xH001", address="0xS001[0]")],
+                ),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="xs",
+                    type="std::vector<std::unique_ptr<int>>",
+                    value="{[0]=0xH001}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="std::unique_ptr<int>", value="0xH001", address="0xS001[0]")],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+
+    weak_errors = _validate_vector_unique_ptr(weak_trace)
+    assert "missing heap block for vector unique_ptr target '0xH001'" in weak_errors
+    assert _validate_vector_unique_ptr(strong_trace) == []
+
+
+def test_native_debug_smoke_requires_std_array_shared_ptr_edges():
+    """Native smoke should prove array<shared_ptr<T>,N> uses element edges."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_std_array_shared_ptr
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="alias", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="xs", type="std::array<std::shared_ptr<int>, 2>", value="{__elems_=nullptr}", address="0xS002", is_pointer=False, is_object=True),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*xs[0] = 8;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="alias", type="std::shared_ptr<int>", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(
+                    name="xs",
+                    type="std::array<std::shared_ptr<int>, 2>",
+                    value="{[0]=0xH001, [1]=nullptr}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="std::shared_ptr<int>", value="0xH001", address="0xS002[0]"),
+                        ArrayElement(index=1, type="std::shared_ptr<int>", value="nullptr", address="0xS002[1]"),
+                    ],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001"),
+                PointerEdge(source_address="0xS002[0]", target_address="0xH001"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_std_array_shared_ptr(weak_trace)
+    assert "xs should be marked as an array/container" in weak_errors
+    assert "xs should not be marked as an object after element expansion" in weak_errors
+    assert _validate_std_array_shared_ptr(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_control_flow_loop_state():
     """Native smoke should prove real debugger execution follows loop/branch paths."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -6826,6 +6943,7 @@ if __name__ == "__main__":
         test_debug_executor_lldb_script_expands_smart_pointers,
         test_debug_executor_lldb_script_uses_top_level_pointer_checks,
         test_debug_executor_smart_pointer_checks_are_top_level_only,
+        test_debug_executor_detects_std_array_declarations_with_nested_templates,
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_lldb_std_array_as_array_variable,
@@ -6924,6 +7042,8 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_shared_ptr_owner_state,
         test_native_debug_smoke_requires_weak_ptr_expired_state,
         test_native_debug_smoke_requires_vector_shared_ptr_container_state,
+        test_native_debug_smoke_requires_vector_unique_ptr_heap_state,
+        test_native_debug_smoke_requires_std_array_shared_ptr_edges,
         test_native_debug_smoke_requires_control_flow_loop_state,
         test_native_debug_smoke_requires_lambda_capture_state,
         test_native_debug_smoke_requires_heap_array_delete_state,

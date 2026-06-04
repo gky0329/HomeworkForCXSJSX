@@ -49,6 +49,7 @@ class _PreparedSource:
     original_lines: list[str]
     line_map: dict[int, int]
     heap_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
+    std_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
     step_in_lines: set[int] = field(default_factory=set)
     class_info: dict[str, _ClassInfo] = field(default_factory=dict)
     source_path: str = ""
@@ -59,6 +60,9 @@ class _ParsedElement:
     index: int
     type: str
     value: str
+    pointee_addr: str = ""
+    pointee_type: str = ""
+    pointee_value: str = ""
 
 
 @dataclass
@@ -420,6 +424,7 @@ class DebugExecutor:
                 original_lines=original_lines,
                 line_map=line_map,
                 heap_arrays=self._heap_array_declarations(original_lines),
+                std_arrays=self._std_array_declarations(original_lines),
                 step_in_lines=self._step_in_lines(original_lines, line_map),
                 class_info=class_info,
             )
@@ -430,6 +435,7 @@ class DebugExecutor:
             original_lines=original_lines,
             line_map=line_map,
             heap_arrays=self._heap_array_declarations(original_lines),
+            std_arrays=self._std_array_declarations(original_lines),
             step_in_lines=self._step_in_lines(source.splitlines(), line_map),
             class_info=class_info,
         )
@@ -718,6 +724,10 @@ class DebugExecutor:
             for pointer_name, (_, count) in prepared.heap_arrays.items():
                 for index in range(count):
                     commands.append(self._lldb_array_probe_command(i, pointer_name, index))
+            for array_name, (_, count) in prepared.std_arrays.items():
+                for index in range(count):
+                    element_type = prepared.std_arrays[array_name][0]
+                    commands.append(self._lldb_std_array_probe_command(i, array_name, index, element_type))
         return "\n".join(commands) + "\n"
 
     def _run_lldb(self, binary: Path, commands: Path) -> str:
@@ -887,6 +897,11 @@ class DebugExecutor:
                         )
                     if new_name and var.name == new_name:
                         allocated_heap.add(var.pointee_addr)
+            self._record_element_pointee_values(
+                parsed_vars,
+                heap_values,
+                freed_heap,
+            )
 
             if delete_name and delete_name in pointer_targets:
                 freed_heap.add(pointer_targets[delete_name])
@@ -960,6 +975,7 @@ class DebugExecutor:
             )
             parsed_vars = [var for frame in parsed_frames for var in frame.variables]
             array_exprs = self._parse_array_expressions(after_chunk)
+            self._apply_std_array_expression_elements(parsed_vars, array_exprs)
             for var in parsed_vars:
                 if var.pointee_addr:
                     pointer_targets[var.name] = var.pointee_addr
@@ -980,6 +996,11 @@ class DebugExecutor:
                         )
                     if new_name and var.name == new_name:
                         allocated_heap.add(var.pointee_addr)
+            self._record_element_pointee_values(
+                parsed_vars,
+                heap_values,
+                freed_heap,
+            )
 
             if delete_name and delete_name in pointer_targets:
                 freed_heap.add(pointer_targets[delete_name])
@@ -1203,6 +1224,18 @@ class DebugExecutor:
             for var in variables:
                 self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs)
                 self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+        self._ensure_heap_blocks_for_edge_targets(
+            pointer_edges,
+            heap_blocks_by_actual,
+            heap_addr_map,
+            heap_values,
+            heap_array_values,
+            heap_object_values,
+            class_info,
+            actual_stack_lookup,
+            stack_addr_map,
+            dangling_target_addrs,
+        )
         for block in heap_blocks_by_actual.values():
             self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
             self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
@@ -1217,6 +1250,88 @@ class DebugExecutor:
             heap=list(heap_blocks_by_actual.values()),
             edges=pointer_edges,
         )
+
+    def _record_element_pointee_values(
+        self,
+        parsed_vars: list[_ParsedVar],
+        heap_values: dict[str, tuple[str, str]],
+        freed_heap: set[str],
+    ):
+        for var in parsed_vars:
+            elements = (
+                var.elements
+                or self._wrapped_std_array_elements(var)
+                or self._wrapped_container_adapter_elements(var)
+            )
+            for element in [*elements, *var.pointee_elements]:
+                if (
+                    not element.pointee_addr
+                    or self._is_null(element.pointee_addr)
+                    or element.pointee_addr in freed_heap
+                    or not element.pointee_value
+                ):
+                    continue
+                heap_values[element.pointee_addr] = (
+                    element.pointee_type or self._pointee_type(element.type),
+                    element.pointee_value,
+                )
+
+    def _apply_std_array_expression_elements(
+        self,
+        parsed_vars: list[_ParsedVar],
+        array_exprs: dict[str, list[_ParsedElement]],
+    ):
+        if not array_exprs:
+            return
+        for var in parsed_vars:
+            elements = array_exprs.get(var.name)
+            if not elements or not self._is_std_array_type(var.type):
+                continue
+            wrapped_elements = self._wrapped_std_array_elements(var)
+            if wrapped_elements:
+                continue
+            if not any(element.value for element in elements):
+                continue
+            var.elements = elements
+            var.members = []
+
+    def _ensure_heap_blocks_for_edge_targets(
+        self,
+        pointer_edges: list[PointerEdge],
+        heap_blocks_by_actual: dict[str, HeapBlock],
+        heap_addr_map: dict[str, str],
+        heap_values: dict[str, tuple[str, str]],
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        class_info: dict[str, _ClassInfo],
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        dangling_target_addrs: set[str],
+    ):
+        sim_to_actual = {sim: actual for actual, sim in heap_addr_map.items()}
+        existing_targets = {block.address for block in heap_blocks_by_actual.values()}
+        for edge in pointer_edges:
+            target_addr = edge.target_address
+            if not target_addr.startswith("0xH") or target_addr in existing_targets:
+                continue
+            actual_addr = sim_to_actual.get(target_addr)
+            if not actual_addr:
+                continue
+            heap_blocks_by_actual[actual_addr] = self._heap_block_from_history(
+                actual_addr=actual_addr,
+                target_addr=target_addr,
+                default_type="unknown",
+                default_value="",
+                is_freed=edge.is_dangling or target_addr in dangling_target_addrs,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                class_info=class_info,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+            )
+            existing_targets.add(target_addr)
 
     @staticmethod
     def _frame_line(text: str) -> int | None:
@@ -1563,11 +1678,7 @@ class DebugExecutor:
                         if pending.pointee_addr
                         else pending.elements
                     )
-                    element = _ParsedElement(
-                        index=element_index,
-                        type=clean_type,
-                        value=self._clean_value(raw_value),
-                    )
+                    element = self._parsed_element_from_raw(element_index, clean_type, raw_value)
                     target_elements.append(element)
                     pending_element = element
                     pending_element_indent = indent
@@ -1648,11 +1759,9 @@ class DebugExecutor:
                     pending_pointer.pointee_type = pending_pointer.pointee_type or self._pointee_type(pending_pointer.type)
                     element_index = self._array_index(child_name)
                     if element_index is not None:
-                        pending_pointer.pointee_elements.append(_ParsedElement(
-                            index=element_index,
-                            type=self._clean_type(child_type),
-                            value=self._clean_value(child_value),
-                        ))
+                        pending_pointer.pointee_elements.append(
+                            self._parsed_element_from_raw(element_index, child_type, child_value)
+                        )
                     else:
                         pending_pointer.pointee_members.append(_ParsedMember(
                             name=child_name.lstrip("*&"),
@@ -1663,11 +1772,9 @@ class DebugExecutor:
                 elif pending_container is not None:
                     element_index = self._array_index(child_name)
                     if element_index is not None:
-                        pending_container.elements.append(_ParsedElement(
-                            index=element_index,
-                            type=self._clean_type(child_type),
-                            value=self._clean_value(child_value),
-                        ))
+                        pending_container.elements.append(
+                            self._parsed_element_from_raw(element_index, child_type, child_value)
+                        )
                     else:
                         pending_container.members.append(_ParsedMember(
                             name=child_name.lstrip("*&"),
@@ -1735,11 +1842,13 @@ class DebugExecutor:
                 continue
 
             pointer_name, index = pending
-            arrays.setdefault(pointer_name, []).append(_ParsedElement(
-                index=index,
-                type=self._clean_type(value_match.group("type")),
-                value=self._clean_value(value_match.group("value")),
-            ))
+            arrays.setdefault(pointer_name, []).append(
+                self._parsed_element_from_raw(
+                    index,
+                    value_match.group("type"),
+                    value_match.group("value"),
+                )
+            )
             pending = None
 
         for elements in arrays.values():
@@ -1944,6 +2053,45 @@ class DebugExecutor:
         return declarations
 
     @staticmethod
+    def _std_array_declarations(lines: list[str]) -> dict[str, tuple[str, int]]:
+        declarations: dict[str, tuple[str, int]] = {}
+        for line in lines:
+            start_match = re.search(r"\b(?:std::)?array\s*<", line)
+            if not start_match:
+                continue
+            start = start_match.end() - 1
+            depth = 0
+            end = -1
+            for idx in range(start, len(line)):
+                ch = line[idx]
+                if ch == "<":
+                    depth += 1
+                    continue
+                if ch == ">":
+                    depth -= 1
+                    if depth == 0:
+                        end = idx
+                        break
+            if end < 0:
+                continue
+            args = DebugExecutor._template_args("array" + line[start:end + 1])
+            if len(args) < 2:
+                continue
+            name_match = re.match(r"\s*(?P<name>[A-Za-z_]\w*)\b", line[end + 1:])
+            if not name_match:
+                continue
+            count_text = args[1].strip()
+            if not count_text.isdigit():
+                continue
+            count = min(int(count_text), 32)
+            if count > 0:
+                declarations[name_match.group("name")] = (
+                    DebugExecutor._clean_type(args[0]),
+                    count,
+                )
+        return declarations
+
+    @staticmethod
     def _step_in_lines(lines: list[str], line_map: dict[int, int]) -> set[int]:
         function_names = DebugExecutor._user_function_names(lines)
         if not function_names:
@@ -2102,6 +2250,8 @@ class DebugExecutor:
             "    compact=typ.replace(' ', '')\n"
             "    tokens=('array<', 'deque<', 'list<', 'map<', 'multimap<', 'multiset<', 'pair<', 'set<', 'tuple<', 'unordered_map<', 'unordered_set<', 'vector<')\n"
             "    return any(token in compact for token in tokens)\n"
+            "def is_c_array_type(typ):\n"
+            "    return '[' in typ and ']' in typ\n"
             "def top_level_template_type_key(typ):\n"
             "    compact=typ.replace(' ', '')\n"
             "    changed=True\n"
@@ -2135,8 +2285,25 @@ class DebugExecutor:
             "    typ=type_of(value)\n"
             "    if is_smart_pointer_type(typ):\n"
             "        raw_child, raw_val=smart_pointer_child(value)\n"
-            "        return raw_val if raw_val else '0x0'\n"
-            "    if val and not is_expandable_container_type(typ):\n"
+            "        if not raw_val:\n"
+            "            return '0x0'\n"
+            "        deref=raw_child.Dereference() if raw_child is not None else None\n"
+            "        if deref is not None and deref.IsValid():\n"
+            "            deref_count=min(deref.GetNumChildren(), 16)\n"
+            "            if deref_count > 0:\n"
+            "                parts=[]\n"
+            "                for child_idx in range(deref_count):\n"
+            "                    child=deref.GetChildAtIndex(child_idx)\n"
+            "                    child_name=child.GetName() or ''\n"
+            "                    child_val=flat_value(child, depth + 1)\n"
+            "                    parts.append('%s=%s' % (child_name.lstrip('*&'), child_val) if child_name else child_val)\n"
+            "                if parts:\n"
+            "                    return raw_val + ' {' + ', '.join(parts) + '}'\n"
+            "            deref_val=val_of(deref)\n"
+            "            if deref_val:\n"
+            "                return raw_val + ' {' + deref_val + '}'\n"
+            "        return raw_val\n"
+            "    if val and not is_expandable_container_type(typ) and not is_c_array_type(typ):\n"
             "        return val\n"
             "    if depth >= 2:\n"
             "        return val\n"
@@ -2248,6 +2415,47 @@ class DebugExecutor:
             f"var=frame.FindVariable('{pointer_name}'); "
             "value=var.GetValue(); "
             "ok=var.IsValid() and value and int(value, 0) != 0; "
+            f"print('{marker}') if ok else None; "
+            f"print(frame.EvaluateExpression('{expression}')) if ok else None"
+        )
+
+    @staticmethod
+    def _lldb_std_array_probe_command(step: int, array_name: str, index: int, element_type: str) -> str:
+        marker = f"__CXXMV_EXPR__{step}__{array_name}__{index}"
+        expression = f"{array_name}[{index}]"
+        if DebugExecutor._is_smart_pointer_type(element_type):
+            script = (
+                "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame()\n"
+                f"var=frame.FindVariable({array_name!r})\n"
+                "storage=var.GetChildAtIndex(0) if var.IsValid() and var.GetNumChildren() else None\n"
+                f"elem=storage.GetChildAtIndex({index}) if storage is not None and storage.GetNumChildren() > {index} else None\n"
+                "ok=elem is not None and elem.IsValid()\n"
+                f"print({marker!r}) if ok else None\n"
+                "ptr=None\n"
+                "raw=''\n"
+                "count=min(elem.GetNumChildren(), 16) if ok else 0\n"
+                "for child_idx in range(count):\n"
+                "    if raw:\n"
+                "        break\n"
+                "    child=elem.GetChildAtIndex(child_idx)\n"
+                "    child_typ=child.GetTypeName() or ''\n"
+                "    child_raw=child.GetValue() or ''\n"
+                "    child_unsigned=child.GetValueAsUnsigned(0) if not child_raw and '*' in child_typ and '[' not in child_typ else 0\n"
+                "    child_raw=child_raw or ('0x%x' % child_unsigned if child_unsigned else '')\n"
+                "    if '*' in child_typ and '[' not in child_typ and child_raw and child_raw not in ('0x0', '0x0000000000000000'):\n"
+                "        ptr=child\n"
+                "        raw=child_raw\n"
+                "raw=raw or '0x0'\n"
+                "deref=ptr.Dereference() if ptr is not None and raw not in ('0x0', '0x0000000000000000') else None\n"
+                "deref_text=(deref.GetValue() or deref.GetSummary() or '') if deref and deref.IsValid() else ''\n"
+                f"print('({element_type}) $0 = ' + raw + ((' {{' + deref_text + '}}') if deref_text else '')) if ok else None\n"
+            )
+            return f"script exec({script!r})"
+        return (
+            "script "
+            "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame(); "
+            f"var=frame.FindVariable('{array_name}'); "
+            "ok=var.IsValid(); "
             f"print('{marker}') if ok else None; "
             f"print(frame.EvaluateExpression('{expression}')) if ok else None"
         )
@@ -2724,22 +2932,49 @@ class DebugExecutor:
             match = re.match(r"^\[(?P<index>\d+)\]\s*=\s*(?P<value>.*)$", item)
             if match:
                 indexed = True
-                elements.append(_ParsedElement(
-                    index=int(match.group("index")),
-                    type=element_type,
-                    value=DebugExecutor._clean_value(match.group("value")),
+                elements.append(DebugExecutor._parsed_element_from_raw(
+                    int(match.group("index")),
+                    element_type,
+                    match.group("value"),
                 ))
                 continue
             if indexed:
                 return []
             if re.match(r"^[A-Za-z_]\w*\s*=", item):
                 return []
-            elements.append(_ParsedElement(
-                index=idx,
-                type=element_type,
-                value=DebugExecutor._clean_value(item),
-            ))
+            elements.append(DebugExecutor._parsed_element_from_raw(idx, element_type, item))
         return elements if elements and (indexed or len(items) > 1) else []
+
+    @staticmethod
+    def _parsed_element_from_raw(index: int, type_text: str, raw_value: str) -> _ParsedElement:
+        clean_type = DebugExecutor._clean_type(type_text)
+        value = DebugExecutor._clean_value(raw_value)
+        if DebugExecutor._is_cdb_addr(value):
+            value = DebugExecutor._normalize_cdb_addr(value)
+        elif DebugExecutor._is_hex_addr(value):
+            value = DebugExecutor._normalize_actual_addr(value)
+        element = _ParsedElement(index=index, type=clean_type, value=value)
+        if (
+            DebugExecutor._is_pointer_like_type(clean_type)
+            and (DebugExecutor._is_hex_addr(value) or DebugExecutor._is_cdb_addr(value))
+            and not DebugExecutor._is_null(value)
+        ):
+            element.pointee_addr = (
+                DebugExecutor._normalize_cdb_addr(value)
+                if DebugExecutor._is_cdb_addr(value)
+                else DebugExecutor._normalize_actual_addr(value)
+            )
+            element.pointee_type = DebugExecutor._pointee_type(clean_type)
+            payload = DebugExecutor._structured_payload(raw_value)
+            if payload:
+                nested_elements = DebugExecutor._parse_structured_elements(
+                    payload,
+                    DebugExecutor._array_element_type(element.pointee_type),
+                )
+                nested_members = [] if nested_elements else DebugExecutor._parse_structured_members(payload)
+                if not nested_elements and not nested_members:
+                    element.pointee_value = DebugExecutor._clean_value(payload)
+        return element
 
     @staticmethod
     def _parse_structured_members(payload: str) -> list[_ParsedMember]:

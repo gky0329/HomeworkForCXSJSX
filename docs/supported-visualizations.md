@@ -97,7 +97,7 @@ STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包
 
 `std::unique_ptr<T>` / `std::shared_ptr<T>` 会按 pointer-like owner 渲染，目标对象显示为 heap block。多个 `shared_ptr` 指向同一对象时共享同一个 `0xH...` block，并分别画 owner edge。
 
-当 `std::shared_ptr<T>` 出现在 `std::vector` / `std::array` / `std::map` 等容器的模板参数里时，容器本身仍按 array/container cell 渲染，不能把整个容器误判为 pointer-like owner。元素 cell 会保留 `shared_ptr` 目标地址，并从元素 cell 画到对应 heap block。
+当 `std::unique_ptr<T>` / `std::shared_ptr<T>` 出现在 `std::vector` / `std::array` / `std::map` 等容器的模板参数里时，容器本身仍按 array/container cell 渲染，不能把整个容器误判为 pointer-like owner。元素 cell 会保留智能指针目标地址，并从元素 cell 画到对应 heap block。
 
 `std::weak_ptr<T>` 不视为 owner。只要仍有 live `shared_ptr` owner，`weak_ptr` 会显示为普通弱引用边；当所有 `shared_ptr` owner reset 后，`weak_ptr` 仍保留历史目标地址，但目标 heap 标记为 freed，边显示为 dangling，避免误导用户以为 weak_ptr 延长了对象生命周期。
 
