@@ -3868,6 +3868,64 @@ __CXXMV_FRAMEDX__0
     assert members["name"].value == "Ada"
 
 
+def test_debug_executor_parses_cdb_dx_string_variables_and_elements():
+    """CDB/PDB string char children should collapse for scalars and containers."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <string>\n"
+        "#include <vector>\n"
+        "using namespace std;\n"
+        'string s = "abc";\n'
+        "vector<string> words;\n"
+        'words.push_back("one");\n'
+        'words.push_back("two");\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efa0 std::string s = {{ size=3 }}
+000000aa`0000efc0 std::vector<std::string> words = size=2
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    s : {{ size=3 }} [Type: std::string]
+        [0] : 97 'a' [Type: char]
+        [1] : 98 'b' [Type: char]
+        [2] : 99 'c' [Type: char]
+    words : {{ size=2 }} [Type: std::vector<std::string>]
+        [0] : {{ size=3 }} [Type: std::string]
+            [0] : 111 'o' [Type: char]
+            [1] : 110 'n' [Type: char]
+            [2] : 101 'e' [Type: char]
+        [1] : {{ size=3 }} [Type: std::string]
+            [0] : 116 't' [Type: char]
+            [1] : 119 'w' [Type: char]
+            [2] : 111 'o' [Type: char]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    values = {var.name: var for var in trace.steps[0].stack[0].variables}
+    s = values["s"]
+    words = values["words"]
+
+    assert s.value == "abc"
+    assert s.is_object is False
+    assert s.is_array is False
+    assert s.members == []
+    assert words.is_array is True
+    assert words.value == "{[0]=one, [1]=two}"
+    assert [(element.index, element.type, element.value) for element in words.elements] == [
+        (0, "std::string", "one"),
+        (1, "std::string", "two"),
+    ]
+
+
 def test_debug_executor_parses_cdb_inherited_virtual_object_metadata():
     """CDB/PDB object snapshots should carry base classes and virtual methods."""
     from app.core.debug_executor import DebugExecutor
@@ -8802,6 +8860,7 @@ if __name__ == "__main__":
         test_debug_executor_cdb_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_dx_object_string_member_children,
+        test_debug_executor_parses_cdb_dx_string_variables_and_elements,
         test_debug_executor_parses_cdb_inherited_virtual_object_metadata,
         test_debug_executor_parses_cdb_polymorphic_heap_delete_state,
         test_debug_executor_parses_cdb_overwritten_heap_as_leak,

@@ -1810,6 +1810,9 @@ class DebugExecutor:
                 existing.pointee_members = dx_var.pointee_members
             if dx_var.value and not self._is_hex_addr(existing.value):
                 existing.value = dx_var.value
+            if self._is_std_string_type(dx_var.type):
+                existing.elements = []
+                existing.members = []
 
         return variables
 
@@ -1846,7 +1849,7 @@ class DebugExecutor:
                 value=value,
             )
             payload = self._structured_payload(raw_value_text)
-            if payload:
+            if payload and not self._is_std_string_type(clean_type):
                 element_type = self._array_element_type(clean_type)
                 elements = self._parse_structured_elements(payload, element_type)
                 members = [] if elements else self._parse_structured_members(payload)
@@ -1871,6 +1874,7 @@ class DebugExecutor:
         pending_indent = 0
         pending_element: _ParsedElement | None = None
         pending_element_indent = 0
+        pending_element_elements: list[_ParsedElement] = []
         pending_element_members: list[_ParsedMember] = []
         pending_member: _ParsedMember | None = None
         pending_member_indent = 0
@@ -1884,11 +1888,19 @@ class DebugExecutor:
         )
 
         def flush_pending_element():
-            nonlocal pending_element, pending_element_members
+            nonlocal pending_element, pending_element_elements, pending_element_members
             flush_pending_member()
-            if pending_element is not None and pending_element_members:
-                pending_element.value = self._format_members(pending_element_members)
+            if pending_element is not None:
+                if pending_element_elements and self._is_std_string_type(pending_element.type):
+                    string_value = self._string_from_char_elements(pending_element_elements)
+                    if string_value is not None:
+                        pending_element.value = string_value
+                elif pending_element_elements:
+                    pending_element.value = self._format_elements(pending_element_elements)
+                elif pending_element_members:
+                    pending_element.value = self._format_members(pending_element_members)
             pending_element = None
+            pending_element_elements = []
             pending_element_members = []
 
         def flush_pending_member():
@@ -1896,7 +1908,7 @@ class DebugExecutor:
             if pending_member is not None:
                 if pending_member_elements and self._is_std_string_type(pending_member.type):
                     string_value = self._string_from_char_elements(pending_member_elements)
-                    if string_value:
+                    if string_value is not None:
                         pending_member.value = string_value
                 elif pending_member_elements:
                     pending_member.value = self._format_elements(pending_member_elements)
@@ -1960,44 +1972,49 @@ class DebugExecutor:
                 flush_pending_member()
 
             if pending_element is not None and indent > pending_element_indent:
-                if self._array_index(name) is None:
-                    member_value = self._clean_value(raw_value)
-                    if self._is_cdb_addr(member_value):
-                        member_value = self._normalize_cdb_addr(member_value)
-                    elif self._is_hex_addr(member_value):
-                        member_value = self._normalize_actual_addr(member_value)
-                    if (
-                        self._is_pointer_like_type(clean_type)
-                        and member_value
-                        and not self._is_null(member_value)
-                    ):
-                        member_payload = self._structured_payload(raw_value)
-                        if member_payload:
-                            pending_element.pointee_addr = member_value
-                            pending_element.pointee_type = self._pointee_type(clean_type)
-                            nested_members = self._parse_structured_members(member_payload)
-                            if nested_members:
-                                pending_element.pointee_members = nested_members
-                            else:
-                                pending_element.pointee_value = self._clean_value(member_payload)
-                    pending_element_members.append(_ParsedMember(
-                        name=name,
-                        type=clean_type,
-                        value=self._clean_value_preserving_payload(raw_value),
-                        actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
-                    ))
-                    if member_points_to_live_object(clean_type, raw_value):
-                        pending_member = pending_element_members[-1]
-                        pending_member_indent = indent
-                        pending_member_elements = []
-                        pending_member_members = []
-                    elif self._is_expandable_cdb_member_type(clean_type):
-                        pending_member = pending_element_members[-1]
-                        pending_member_indent = indent
-                        pending_member_elements = []
-                        pending_member_members = []
-                    pending_element.value = self._format_members(pending_element_members)
+                child_index = self._array_index(name)
+                if child_index is not None:
+                    pending_element_elements.append(
+                        self._parsed_element_from_raw(child_index, clean_type, raw_value)
+                    )
                     continue
+                member_value = self._clean_value(raw_value)
+                if self._is_cdb_addr(member_value):
+                    member_value = self._normalize_cdb_addr(member_value)
+                elif self._is_hex_addr(member_value):
+                    member_value = self._normalize_actual_addr(member_value)
+                if (
+                    self._is_pointer_like_type(clean_type)
+                    and member_value
+                    and not self._is_null(member_value)
+                ):
+                    member_payload = self._structured_payload(raw_value)
+                    if member_payload:
+                        pending_element.pointee_addr = member_value
+                        pending_element.pointee_type = self._pointee_type(clean_type)
+                        nested_members = self._parse_structured_members(member_payload)
+                        if nested_members:
+                            pending_element.pointee_members = nested_members
+                        else:
+                            pending_element.pointee_value = self._clean_value(member_payload)
+                pending_element_members.append(_ParsedMember(
+                    name=name,
+                    type=clean_type,
+                    value=self._clean_value_preserving_payload(raw_value),
+                    actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
+                ))
+                if member_points_to_live_object(clean_type, raw_value):
+                    pending_member = pending_element_members[-1]
+                    pending_member_indent = indent
+                    pending_member_elements = []
+                    pending_member_members = []
+                elif self._is_expandable_cdb_member_type(clean_type):
+                    pending_member = pending_element_members[-1]
+                    pending_member_indent = indent
+                    pending_member_elements = []
+                    pending_member_members = []
+                pending_element.value = self._format_members(pending_element_members)
+                continue
 
             if pending_element is not None and indent <= pending_element_indent:
                 flush_pending_element()
@@ -2014,6 +2031,7 @@ class DebugExecutor:
                     target_elements.append(element)
                     pending_element = element
                     pending_element_indent = indent
+                    pending_element_elements = []
                     pending_element_members = []
                 else:
                     target_members = (
@@ -2050,7 +2068,7 @@ class DebugExecutor:
             elements: list[_ParsedElement] = []
             members: list[_ParsedMember] = []
             payload = self._structured_payload(raw_value)
-            if payload:
+            if payload and not self._is_std_string_type(clean_type):
                 element_type = self._array_element_type(clean_type)
                 elements = self._parse_structured_elements(payload, element_type)
                 members = [] if elements else self._parse_structured_members(payload)
@@ -2067,6 +2085,7 @@ class DebugExecutor:
             pending_indent = indent
 
         flush_pending_element()
+        self._collapse_cdb_string_children(variables)
         return variables
 
     def _parse_variables(self, text: str) -> list[_ParsedVar]:
@@ -3818,13 +3837,29 @@ class DebugExecutor:
         )
 
     @staticmethod
-    def _string_from_char_elements(elements: list[_ParsedElement]) -> str:
+    def _collapse_cdb_string_children(variables: list[_ParsedVar]):
+        for var in variables:
+            if var.elements and DebugExecutor._is_std_string_type(var.type):
+                string_value = DebugExecutor._string_from_char_elements(var.elements)
+                if string_value is not None:
+                    var.value = string_value
+                    var.elements = []
+            if var.pointee_elements and DebugExecutor._is_std_string_type(var.pointee_type):
+                string_value = DebugExecutor._string_from_char_elements(var.pointee_elements)
+                if string_value is not None:
+                    var.pointee_value = string_value
+                    var.pointee_elements = []
+
+    @staticmethod
+    def _string_from_char_elements(elements: list[_ParsedElement]) -> str | None:
+        if not elements:
+            return None
         chars: list[str] = []
         for element in sorted(elements, key=lambda item: item.index):
             value = DebugExecutor._clean_value(element.value)
             match = re.search(r"'(?P<char>(?:\\.|[^'])*)'", value)
             if match is None:
-                return ""
+                return None
             char = DebugExecutor._decode_cdb_char_literal(match.group("char"))
             if char == "\0":
                 break
