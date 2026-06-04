@@ -295,6 +295,41 @@ def _validate_std_array(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_std_array_object_pointer(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    first = values.get("first")
+    nodes = values.get("nodes")
+    errors: list[str] = []
+    if first is None:
+        errors.append("missing Node variable first")
+    elif _member_map(first).get("value") != "5":
+        errors.append(f"first.value expected 5 after nodes[1].next write, got {_member_map(first).get('value')!r}")
+    if nodes is None:
+        errors.append("missing std::array<Node> variable nodes")
+        return errors
+    if not nodes.is_array:
+        errors.append("nodes should be marked as an array/container")
+    if nodes.is_object:
+        errors.append("nodes should not be marked as an object after element expansion")
+    if nodes.members:
+        errors.append("nodes should unwrap elements instead of showing implementation members")
+    elements = list(nodes.elements)
+    if len(elements) != 2:
+        errors.append(f"nodes expected 2 elements, got {[(e.index, e.value) for e in elements]!r}")
+    elif first is not None:
+        second_value = elements[1].value
+        if f"next={first.address}" not in second_value:
+            errors.append(f"nodes[1].next should map to {first.address}, got {second_value!r}")
+        if "0000" in second_value:
+            errors.append(f"nodes[1] should not expose raw debugger addresses, got {second_value!r}")
+        if not any(edge.source_address == elements[1].address and edge.target_address == first.address for edge in state.edges):
+            errors.append("missing nodes[1] -> first pointer edge")
+    return errors
+
+
 def _validate_vector(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "v")
     if match is None:
@@ -1189,6 +1224,19 @@ CASES: dict[str, SmokeCase] = {
             "a[1] = 8;\n"
         ),
         validate=_validate_std_array,
+    ),
+    "std_array_object_pointer": SmokeCase(
+        name="std_array_object_pointer",
+        code=(
+            "#include <array>\n"
+            "using namespace std;\n"
+            "struct Node { int value; Node* next; };\n"
+            "Node first{1, nullptr};\n"
+            "Node second{2, &first};\n"
+            "array<Node,2> nodes = {first, second};\n"
+            "nodes[1].next->value = 5;\n"
+        ),
+        validate=_validate_std_array_object_pointer,
     ),
     "stack_int": SmokeCase(
         name="stack_int",

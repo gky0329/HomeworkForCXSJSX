@@ -89,6 +89,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case shared_ptr_owners
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_array_delete
 python tools/native_debug_smoke.py --backend msvc-pdb --case pointer_reset_null
 python tools/native_debug_smoke.py --backend msvc-pdb --case std_array
+python tools/native_debug_smoke.py --backend msvc-pdb --case std_array_object_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case priority_queue_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_int

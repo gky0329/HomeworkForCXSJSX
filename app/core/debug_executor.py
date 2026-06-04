@@ -40,6 +40,7 @@ class DebugBackendStatus:
 class _ClassInfo:
     base_classes: list[str] = field(default_factory=list)
     virtual_methods: list[str] = field(default_factory=list)
+    member_types: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -1056,6 +1057,7 @@ class DebugExecutor:
                     actual_stack_lookup=actual_stack_lookup,
                     stack_addr_map=stack_addr_map,
                     heap_addr_map=heap_addr_map,
+                    class_info=class_info,
                 )
                 member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
                     parsed.members,
@@ -1185,10 +1187,10 @@ class DebugExecutor:
         for _, variables in frame_variables:
             for var in variables:
                 self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs)
-                self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs)
+                self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
         for block in heap_blocks_by_actual.values():
             self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
-            self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs)
+            self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
 
         return MemoryState(
             line_number=original_line,
@@ -1772,9 +1774,15 @@ class DebugExecutor:
         info: dict[str, _ClassInfo] = {}
         for match in class_re.finditer(source):
             name = match.group("name")
+            body = match.group("body") or ""
             bases = DebugExecutor._parse_base_classes(match.group("bases") or "")
-            virtuals = DebugExecutor._parse_virtual_methods(match.group("body") or "", name)
-            info[name] = _ClassInfo(base_classes=bases, virtual_methods=virtuals)
+            virtuals = DebugExecutor._parse_virtual_methods(body, name)
+            member_types = DebugExecutor._parse_member_type_declarations(body)
+            info[name] = _ClassInfo(
+                base_classes=bases,
+                virtual_methods=virtuals,
+                member_types=member_types,
+            )
 
         def inherited_virtuals(class_name: str, seen: set[str] | None = None) -> list[str]:
             seen = seen or set()
@@ -1810,6 +1818,73 @@ class DebugExecutor:
                 if name not in bases:
                     bases.append(name)
         return bases
+
+    @staticmethod
+    def _parse_member_type_declarations(body: str) -> dict[str, str]:
+        members: dict[str, str] = {}
+        for raw_stmt in body.split(";"):
+            stmt = re.sub(r"\b(?:public|protected|private)\s*:\s*", " ", raw_stmt)
+            stmt = re.sub(r"//.*", "", stmt).strip()
+            if not stmt or "(" in stmt or ")" in stmt:
+                continue
+            stmt = re.sub(r"\b(?:static|mutable|constexpr|inline)\b", " ", stmt).strip()
+            if not stmt or stmt.startswith(("using ", "typedef ")):
+                continue
+
+            declarations = DebugExecutor._split_top_level_commas(stmt)
+            if not declarations:
+                continue
+
+            first = declarations[0].strip()
+            first_match = re.match(
+                r"^(?P<prefix>.+?)(?P<name>[A-Za-z_]\w*)"
+                r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                first,
+            )
+            if first_match is None:
+                continue
+
+            prefix = first_match.group("prefix").strip()
+            base_type = re.sub(r"[\s*&]+$", "", prefix).strip()
+            if not base_type:
+                continue
+
+            members[first_match.group("name")] = DebugExecutor._clean_type(prefix)
+
+            for declaration in declarations[1:]:
+                decl = declaration.strip()
+                decl_match = re.match(
+                    r"^(?P<symbols>[\s*&]*)(?P<name>[A-Za-z_]\w*)"
+                    r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                    decl,
+                )
+                if decl_match is None:
+                    continue
+                symbols = decl_match.group("symbols").replace(" ", "")
+                members[decl_match.group("name")] = DebugExecutor._clean_type(base_type + symbols)
+        return members
+
+    @staticmethod
+    def _split_top_level_commas(text: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        depth = 0
+        for ch in text:
+            if ch in "<({[":
+                depth += 1
+            elif ch in ">)}]":
+                depth = max(0, depth - 1)
+            if ch == "," and depth == 0:
+                part = "".join(current).strip()
+                if part:
+                    parts.append(part)
+                current = []
+                continue
+            current.append(ch)
+        part = "".join(current).strip()
+        if part:
+            parts.append(part)
+        return parts
 
     @staticmethod
     def _parse_virtual_methods(body: str, class_name: str = "") -> list[str]:
@@ -2194,6 +2269,7 @@ class DebugExecutor:
                 actual_stack_lookup=actual_stack_lookup,
                 stack_addr_map=stack_addr_map,
                 heap_addr_map=heap_addr_map,
+                class_info=class_info,
             )
             return HeapBlock(
                 address=target_addr,
@@ -2242,7 +2318,9 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo] | None = None,
     ) -> list[ArrayElement]:
+        class_info = class_info or {}
         return [
             ArrayElement(
                 index=element.index,
@@ -2252,6 +2330,7 @@ class DebugExecutor:
                     actual_stack_lookup,
                     stack_addr_map,
                     heap_addr_map,
+                    class_info,
                 ),
                 address=self._array_element_sim_addr(owner_address, element.index),
             )
@@ -2264,6 +2343,7 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
     ) -> str:
         value = self._clean_value(element.value)
         formatted_structured = self._structured_array_element_display_value(
@@ -2271,6 +2351,7 @@ class DebugExecutor:
             actual_stack_lookup,
             stack_addr_map,
             heap_addr_map,
+            class_info,
         )
         if formatted_structured:
             return formatted_structured
@@ -2291,8 +2372,10 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
     ) -> str:
-        if not self._pair_type_has_pointer_member(element.type):
+        member_types = self._structured_array_element_member_types(element.type, class_info)
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
             return ""
         payload = self._structured_payload(element.value)
         if not payload:
@@ -2302,7 +2385,7 @@ class DebugExecutor:
             return ""
         parts: list[str] = []
         for member in members:
-            member_type = self._pair_member_type(element.type, member.name)
+            member_type = member_types.get(member.name, "")
             value = self._clean_value(member.value)
             if (
                 self._is_pointer_like_type(member_type)
@@ -2315,6 +2398,24 @@ class DebugExecutor:
                 value = "nullptr"
             parts.append(f"{member.name}={value}")
         return "{" + ", ".join(parts) + "}"
+
+    @staticmethod
+    def _structured_array_element_member_types(
+        type_text: str,
+        class_info: dict[str, _ClassInfo],
+    ) -> dict[str, str]:
+        if DebugExecutor._is_pair_type(type_text):
+            return {
+                name: member_type
+                for name, member_type in (
+                    ("first", DebugExecutor._pair_member_type(type_text, "first")),
+                    ("second", DebugExecutor._pair_member_type(type_text, "second")),
+                )
+                if member_type
+            }
+        class_name = DebugExecutor._object_class_name(type_text)
+        info = class_info.get(class_name)
+        return dict(info.member_types) if info is not None else {}
 
     @staticmethod
     def _array_element_sim_addr(owner_address: str, index: int) -> str:
@@ -2331,6 +2432,7 @@ class DebugExecutor:
     ) -> list[StructMember]:
         member_models: list[StructMember] = []
         seen: set[tuple[str, str, str]] = set()
+        index_by_name: dict[str, int] = {}
         for member in members:
             name = self._semantic_member_name(owner_type, member)
             member_type = self._semantic_member_type(owner_type, member)
@@ -2345,12 +2447,32 @@ class DebugExecutor:
             if key in seen:
                 continue
             seen.add(key)
+            if name in index_by_name:
+                existing_index = index_by_name[name]
+                existing = member_models[existing_index]
+                prefer_new = (
+                    (not existing.type and bool(member_type))
+                    or (
+                        bool(member_type)
+                        and not (existing.value.startswith("0xS") or existing.value.startswith("0xH") or existing.value == "nullptr")
+                        and (value.startswith("0xS") or value.startswith("0xH") or value == "nullptr")
+                    )
+                )
+                if prefer_new:
+                    member_models[existing_index] = StructMember(
+                        name=name,
+                        type=member_type,
+                        value=value,
+                        address=existing.address or self._member_sim_addr(owner_address, member.name, existing_index),
+                    )
+                continue
             member_models.append(StructMember(
                 name=name,
                 type=member_type,
                 value=value,
                 address=self._member_sim_addr(owner_address, member.name, len(member_models)),
             ))
+            index_by_name[name] = len(member_models) - 1
         return member_models
 
     def _member_display_value(
@@ -2425,14 +2547,16 @@ class DebugExecutor:
         pointer_edges: list[PointerEdge],
         edge_keys: set[tuple[str, str]],
         dangling_target_addrs: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
     ):
+        class_info = class_info or {}
         for element in elements:
             if not element.address:
                 continue
             target_addrs: list[str] = []
             if self._is_pointer_like_type(element.type):
                 target_addrs.append(element.value)
-            target_addrs.extend(self._structured_array_element_pointer_targets(element))
+            target_addrs.extend(self._structured_array_element_pointer_targets(element, class_info))
             for target_addr in target_addrs:
                 if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
                     continue
@@ -2446,15 +2570,20 @@ class DebugExecutor:
                 ))
                 edge_keys.add(key)
 
-    def _structured_array_element_pointer_targets(self, element: ArrayElement) -> list[str]:
-        if not self._pair_type_has_pointer_member(element.type):
+    def _structured_array_element_pointer_targets(
+        self,
+        element: ArrayElement,
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[str]:
+        member_types = self._structured_array_element_member_types(element.type, class_info or {})
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
             return []
         payload = self._structured_payload(element.value)
         if not payload:
             return []
         targets: list[str] = []
         for member in self._parse_structured_members(payload):
-            member_type = self._pair_member_type(element.type, member.name)
+            member_type = member_types.get(member.name, "")
             if not self._is_pointer_like_type(member_type):
                 continue
             value = self._clean_value(member.value)

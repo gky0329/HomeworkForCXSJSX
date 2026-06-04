@@ -87,6 +87,8 @@
 
 `std::array<T, N>` 会解包其调试器实现字段（如 `__elems_` / `_Elems`），按普通数组的 `elements` cell 渲染，而不是显示为单个对象成员。
 
+当 `std::array` / 容器元素本身是结构体或类时，元素值中的指针成员会根据源码字段类型映射成 `0xS...` / `0xH...` 模拟地址，并从对应 element cell 画出指针箭头。例如 `std::array<Node, 2>` 中 `nodes[1].next` 指向 `first` 时，`nodes[1]` cell 会显示 `next=0xS001`，并连到 `first`。
+
 STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包底层容器字段 `c`，按 `elements` cell 渲染当前存储内容，避免把实现细节当成业务成员展示。
 
 ---
@@ -361,6 +363,16 @@ std::vector<int*> ptrs = {&a, &b};
 *ptrs[1] = 9;
 ```
 预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9；`ptrs[0]` / `ptrs[1]` 单元格分别画出指向 `a` / `b` 的箭头
+
+### std::array 对象元素指针成员测试
+```cpp
+struct Node { int value; Node* next; };
+Node first{1, nullptr};
+Node second{2, &first};
+std::array<Node, 2> nodes = {first, second};
+nodes[1].next->value = 5;
+```
+预期: `nodes` 显示为 element cell，不显示 `__elems_` / `_Elems` 实现字段；`nodes[1]` 中的 `next` 映射为 `first` 的模拟地址，并从 `nodes[1]` cell 画出指向 `first` 的箭头；`first.value` 变成 5
 
 ### std::map 指针值测试
 ```cpp

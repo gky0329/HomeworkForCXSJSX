@@ -1342,6 +1342,67 @@ __CXXMV_FRAME__0__{l4 + 1}__main
     assert var.members == []
 
 
+def test_debug_executor_maps_lldb_std_array_object_member_pointer_edges():
+    """std::array<Node> elements should map pointer members to simulated targets."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <array>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1, nullptr};\n"
+        "Node second{2, &first};\n"
+        "array<Node,2> nodes = {first, second};\n"
+        "nodes[1].next->value = 5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[7]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6a0: (Node) first = {{
+0x000000016fdfe6a0:   (int) value = 5
+0x000000016fdfe6a8:   (Node *) next = 0x0000000000000000
+}}
+0x000000016fdfe6b0: (Node) second = {{
+0x000000016fdfe6b0:   (int) value = 2
+0x000000016fdfe6b8:   (Node *) next = 0x000000016fdfe6a0
+}}
+0x000000016fdfe6c0: (std::__1::array<Node, 2>) nodes = {{
+0x000000016fdfe6c0:   (Node[2]) __elems_ = {{[0]={{value=1, next=0x0000000000000000}}, [1]={{value=2, next=0x000000016fdfe6a0}}}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    second = values["second"]
+    nodes = values["nodes"]
+    second_next = next(member for member in second.members if member.name == "next")
+
+    assert first.members[0].value == "5"
+    assert second_next.value == first.address
+    assert nodes.is_array is True
+    assert nodes.is_object is False
+    assert [(element.index, element.type, element.value, element.address) for element in nodes.elements] == [
+        (0, "Node", "{value=1, next=nullptr}", f"{nodes.address}[0]"),
+        (1, "Node", "{value=2, next=" + first.address + "}", f"{nodes.address}[1]"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (second_next.address, first.address),
+        (nodes.elements[1].address, first.address),
+    }
+    assert step.heap == []
+
+
 def test_debug_executor_parses_lldb_container_adapters_as_array_variables():
     """LLDB stack/priority_queue adapter storage should unwrap to elements."""
     from app.core.debug_executor import DebugExecutor
@@ -2874,6 +2935,69 @@ __CXXMV_FRAMEDX__0
     assert var.value == "{[0]=1, [1]=8, [2]=3}"
     assert [(element.index, element.value) for element in var.elements] == [(0, "1"), (1, "8"), (2, "3")]
     assert var.members == []
+
+
+def test_debug_executor_maps_cdb_std_array_object_member_pointer_edges():
+    """CDB/PDB std::array<Node> elements should map pointer members to simulated targets."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <array>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node first{1, nullptr};\n"
+        "Node second{2, &first};\n"
+        "array<Node,2> nodes = {first, second};\n"
+        "nodes[1].next->value = 5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 Node first = {{}}
+000000aa`0000efe0 Node second = {{}}
+000000aa`0000eff0 std::array<Node,2> nodes = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    first : {{ value=5, next=0x0000000000000000 }} [Type: Node]
+        value : 5 [Type: int]
+        next : 0x0000000000000000 [Type: Node *]
+    second : {{ value=2, next=0x000000aa0000efd0 }} [Type: Node]
+        value : 2 [Type: int]
+        next : 0x000000aa0000efd0 [Type: Node *]
+    nodes : {{...}} [Type: std::array<Node,2>]
+        _Elems : {{[0]={{value=1, next=0x0000000000000000}}, [1]={{value=2, next=0x000000aa0000efd0}}}} [Type: Node [2]]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    first = values["first"]
+    second = values["second"]
+    nodes = values["nodes"]
+    second_next = next(member for member in second.members if member.name == "next")
+
+    assert first.members[0].value == "5"
+    assert second_next.value == first.address
+    assert nodes.is_array is True
+    assert nodes.is_object is False
+    assert [(element.index, element.type, element.value, element.address) for element in nodes.elements] == [
+        (0, "Node", "{value=1, next=nullptr}", f"{nodes.address}[0]"),
+        (1, "Node", "{value=2, next=" + first.address + "}", f"{nodes.address}[1]"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (second_next.address, first.address),
+        (nodes.elements[1].address, first.address),
+    }
+    assert step.heap == []
 
 
 def test_debug_executor_parses_cdb_container_adapters_as_array_variables():
@@ -5452,6 +5576,87 @@ def test_native_debug_smoke_requires_std_array_elements():
     assert _validate_std_array(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_std_array_object_pointer_edges():
+    """Native smoke should prove object array element pointers are mapped and linked."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_std_array_object_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="nodes[1].next->value = 5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=5, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="5", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="nodes",
+                    type="std::array<Node,2>",
+                    value="{[0]={value=1, next=0x0000000000000000}, [1]={value=2, next=0x000000aa0000efd0}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="Node", value="{value=1, next=0x0000000000000000}", address="0xS002[0]"),
+                        ArrayElement(index=1, type="Node", value="{value=2, next=0x000000aa0000efd0}", address="0xS002[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code="nodes[1].next->value = 5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="first",
+                    type="Node",
+                    value="{value=5, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="5", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="nodes",
+                    type="std::array<Node,2>",
+                    value="{[0]={value=1, next=nullptr}, [1]={value=2, next=0xS001}}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="Node", value="{value=1, next=nullptr}", address="0xS002[0]"),
+                        ArrayElement(index=1, type="Node", value="{value=2, next=0xS001}", address="0xS002[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002[1]", target_address="0xS001")],
+        ),
+    ])
+
+    weak_errors = _validate_std_array_object_pointer(weak_trace)
+    assert any("nodes[1].next should map" in error for error in weak_errors)
+    assert any("nodes[1] should not expose raw debugger addresses" in error for error in weak_errors)
+    assert "missing nodes[1] -> first pointer edge" in weak_errors
+    assert _validate_std_array_object_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_container_adapter_elements():
     """Native smoke should prove stack and priority_queue unwrap adapter storage."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, StructMember, Variable
@@ -6327,6 +6532,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_lldb_std_array_as_array_variable,
+        test_debug_executor_maps_lldb_std_array_object_member_pointer_edges,
         test_debug_executor_parses_lldb_container_adapters_as_array_variables,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_lldb_vector_of_pointers_as_array_not_pointer,
@@ -6368,6 +6574,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_double_pointer_stack_edges,
         test_debug_executor_parses_cdb_member_pointer_edges,
         test_debug_executor_parses_cdb_std_array_as_array_variable,
+        test_debug_executor_maps_cdb_std_array_object_member_pointer_edges,
         test_debug_executor_parses_cdb_container_adapters_as_array_variables,
         test_debug_executor_parses_cdb_vector_of_pointers_as_array_not_pointer,
         test_debug_executor_parses_cdb_optional_pointer_member_edge,
@@ -6422,6 +6629,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_stack_dangling_pointer_state,
         test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_std_array_elements,
+        test_native_debug_smoke_requires_std_array_object_pointer_edges,
         test_native_debug_smoke_requires_container_adapter_elements,
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_optional_pointer_member_edge,
