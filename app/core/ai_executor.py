@@ -17,12 +17,19 @@ class AIExecutor:
         self._debug_executor = DebugExecutor()
 
     async def run_code(self, code: str, stdin_text: str = "") -> ExecutionTrace:
-        try:
-            trace = self._debug_executor.run_code(code, stdin_text)
-            logger.info("DebugExecutor produced %d steps", len(trace.steps))
-            return trace
-        except DebugExecutionError as e:
-            logger.info("DebugExecutor fallback to AI: %s", e)
+        prefer_ai = (
+            bool(getattr(self._ai_service, "api_key", ""))
+            and DebugExecutor.should_prefer_ai_for_complex_code(code)
+        )
+        if prefer_ai:
+            logger.info("DebugExecutor skipped complex code; using AI fallback")
+        else:
+            try:
+                trace = self._debug_executor.run_code(code, stdin_text)
+                logger.info("DebugExecutor produced %d steps", len(trace.steps))
+                return trace
+            except DebugExecutionError as e:
+                logger.info("DebugExecutor fallback to AI: %s", e)
 
         user_msg = USER_PROMPT_TEMPLATE.format(code=code)
         if stdin_text.strip():

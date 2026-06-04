@@ -30,6 +30,10 @@ python main.py
 
 Do not advertise the MSVC/PDB backend as stable until the smoke tests below pass on a Windows machine.
 
+When an API key is configured, very large control-flow-heavy programs are sent
+directly to the AI fallback instead of first waiting for LLDB/CDB to time out.
+Small and medium visual examples still prefer the native debugger path.
+
 ## Experimental MSVC/PDB Validation
 
 Install:

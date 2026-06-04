@@ -2759,6 +2759,24 @@ def test_debug_executor_local_capability_rejects_stdin_code():
         assert DebugExecutor.can_run_code_locally("int x; cin >> x;", "7\n") is True
 
 
+def test_debug_executor_marks_large_simulations_as_ai_preferred():
+    """Large control-flow-heavy programs should avoid debugger timeout when AI is configured."""
+    from app.core.debug_executor import DebugExecutor
+
+    simple_code = "int main() {\nint a = 1;\nint b = a + 2;\n}\n"
+    complex_code = (
+        "int main() {\n"
+        + "\n".join(
+            f"for (int i{i} = 0; i{i} < 10; ++i{i}) {{ if (i{i} % 2) continue; }}"
+            for i in range(24)
+        )
+        + "\n}\n"
+    )
+
+    assert DebugExecutor.should_prefer_ai_for_complex_code(simple_code) is False
+    assert DebugExecutor.should_prefer_ai_for_complex_code(complex_code) is True
+
+
 def test_debug_executor_lldb_script_sets_stdin_input_path():
     """When stdin is provided, LLDB should launch the inferior with that input file."""
     from pathlib import Path
@@ -5280,6 +5298,88 @@ def test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run():
             result = asyncio.run(AIExecutor().run_code("template <class T> T f(T x) { return x; }"))
 
     assert result.steps == []
+
+
+def test_ai_executor_skips_complex_native_when_ai_key_is_configured():
+    """Complex programs should use AI immediately when an API key is available."""
+    import asyncio
+
+    complex_code = (
+        "int main() {\n"
+        + "\n".join(
+            f"for (int i{i} = 0; i{i} < 10; ++i{i}) {{ if (i{i} % 2) continue; }}"
+            for i in range(24)
+        )
+        + "\n}\n"
+    )
+    captured = {}
+
+    class FailingDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            raise AssertionError("complex code should skip native debugger when AI key exists")
+
+    class FakeAIService:
+        api_key = "sk-test"
+
+        async def chat_json(self, **kwargs):
+            captured["user_message"] = kwargs["user_message"]
+            return '{"steps":[]}'
+
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FailingDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=FakeAIService()):
+            from app.core.ai_executor import AIExecutor
+
+            result = asyncio.run(AIExecutor().run_code(complex_code))
+
+    assert result.steps == []
+    assert complex_code in captured["user_message"]
+
+
+def test_ai_executor_keeps_native_for_complex_code_without_ai_key():
+    """Without an API key, complex code should still try the local debugger path."""
+    import asyncio
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+
+    complex_code = (
+        "int main() {\n"
+        + "\n".join(
+            f"for (int i{i} = 0; i{i} < 10; ++i{i}) {{ if (i{i} % 2) continue; }}"
+            for i in range(24)
+        )
+        + "\n}\n"
+    )
+    expected = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=1,
+            source_code="int ok = 1;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="ok", type="int", value="1", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    captured = {}
+
+    class FakeDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            captured["code"] = code
+            return expected
+
+    class FailingAIService:
+        api_key = ""
+
+        async def chat_json(self, **kwargs):
+            raise AssertionError("AI service should not be called without a key when native succeeds")
+
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FakeDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=FailingAIService()):
+            from app.core.ai_executor import AIExecutor
+
+            result = asyncio.run(AIExecutor().run_code(complex_code))
+
+    assert result is expected
+    assert captured["code"] == complex_code
 
 
 # ── Phase 3: HeapItem _value_label for object and array ─────────────────
@@ -8160,6 +8260,7 @@ if __name__ == "__main__":
         test_debug_executor_msvc_shell_command_loads_vcvarsall,
         test_debug_executor_skips_stdin_programs_before_lldb_run,
         test_debug_executor_local_capability_rejects_stdin_code,
+        test_debug_executor_marks_large_simulations_as_ai_preferred,
         test_debug_executor_lldb_script_sets_stdin_input_path,
         test_debug_executor_wraps_snippet_includes_outside_main,
         test_debug_executor_wraps_helper_function_outside_main_and_steps_in,
@@ -8216,6 +8317,8 @@ if __name__ == "__main__":
         test_debug_executor_lldb_timeout_is_debug_execution_error,
         test_ai_executor_prefers_debug_executor_without_ai_call,
         test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run,
+        test_ai_executor_skips_complex_native_when_ai_key_is_configured,
+        test_ai_executor_keeps_native_for_complex_code_without_ai_key,
         test_heap_item_object_sets_value_label,
         test_heap_item_array_sets_value_label,
         test_stack_item_object_draws_member_labels,

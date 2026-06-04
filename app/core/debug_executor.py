@@ -113,6 +113,8 @@ class DebugExecutor:
     LLDB_TIMEOUT_SECONDS = 20
     CDB_TIMEOUT_SECONDS = 25
     VSWHERE_TIMEOUT_SECONDS = 5
+    NATIVE_COMPLEXITY_LINE_LIMIT = 180
+    NATIVE_COMPLEXITY_SCORE_LIMIT = 260
 
     def __init__(self, preferred_backend: str | None = None):
         self._preferred_backend = preferred_backend
@@ -126,6 +128,26 @@ class DebugExecutor:
         if DebugExecutor.requires_stdin(code) and not stdin_text.strip():
             return False
         return DebugExecutor.is_available()
+
+    @staticmethod
+    def should_prefer_ai_for_complex_code(code: str) -> bool:
+        lines = [
+            line for line in code.splitlines()
+            if line.strip() and not line.strip().startswith("//")
+        ]
+        if len(lines) > DebugExecutor.NATIVE_COMPLEXITY_LINE_LIMIT:
+            return True
+
+        control_flow_count = len(re.findall(r"\b(?:for|while|do|switch)\b", code))
+        function_count = len(DebugExecutor._user_function_names(code.splitlines()))
+        class_count = len(DebugExecutor._class_names(code.splitlines()))
+        score = (
+            len(lines)
+            + control_flow_count * 12
+            + function_count * 8
+            + class_count * 6
+        )
+        return control_flow_count >= 3 and score > DebugExecutor.NATIVE_COMPLEXITY_SCORE_LIMIT
 
     @staticmethod
     def available_backend() -> str | None:
