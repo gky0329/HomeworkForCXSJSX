@@ -293,12 +293,16 @@ def test_canvas_view_uses_stable_fit_bounds():
     view.set_stable_fit_bounds(QRectF(0, 0, 800, 600))
     view.zoom_fit()
     first_scale = view.transform().m11()
+    first_center = view.mapToScene(view.viewport().rect().center())
 
     scene.addRect(0, 0, 1600, 1600)
     view.zoom_fit()
     second_scale = view.transform().m11()
+    second_center = view.mapToScene(view.viewport().rect().center())
 
     assert abs(first_scale - second_scale) < 0.000001
+    assert abs(first_center.x() - second_center.x()) < 0.000001
+    assert abs(first_center.y() - second_center.y()) < 0.000001
 
 
 def test_code_editor_auto_fit_defaults_to_initial_fit_only():
