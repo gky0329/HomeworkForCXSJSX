@@ -2401,6 +2401,60 @@ def test_debug_executor_closes_heap_member_pointer_targets():
     }
 
 
+def test_debug_executor_parses_lldb_nested_member_pointer_object_values():
+    """LLDB member pointer payloads should materialize child heap objects."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Node { int value; Node* left; Node* right; };\n"
+        "Node* root = new Node{1, new Node{2,nullptr,nullptr}, new Node{3,nullptr,nullptr}};\n"
+        "delete root;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = l3 + 1
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l2}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l3}:1
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe6e0: (Node *) root = 0x00000001005f91b0 {{
+0x00000001005f91b0:   (int) value = 1
+0x00000001005f91b8:   (Node *) left = 0x00000001005f91d0 {{value=2, left=0x0, right=0x0}}
+0x00000001005f91c0:   (Node *) right = 0x00000001005f91f0 {{value=3, left=0x0, right=0x0}}
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l3}:1
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l4}:1
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe6e0: (Node *) root = 0x00000001005f91b0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    heaps = {block.address: block for block in step.heap}
+
+    assert set(heaps) == {"0xH001", "0xH002", "0xH003"}
+    assert heaps["0xH001"].value == "{value=1, left=0xH002, right=0xH003}"
+    assert heaps["0xH002"].type == "Node"
+    assert heaps["0xH002"].value == "{value=2, left=nullptr, right=nullptr}"
+    assert heaps["0xH003"].type == "Node"
+    assert heaps["0xH003"].value == "{value=3, left=nullptr, right=nullptr}"
+    assert trace.steps[1].heap[0].is_freed is True
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in trace.steps[1].edges
+    } == {
+        ("0xS001", "0xH001", True),
+        ("0xH001.left", "0xH002", False),
+        ("0xH001.right", "0xH003", False),
+    }
+
+
 def test_debug_executor_parses_heap_array_expression_snapshots():
     """LLDB expression probes should populate heap arrays and keep delete[] state."""
     from app.core.debug_executor import DebugExecutor
@@ -7624,6 +7678,104 @@ def test_native_debug_smoke_requires_recursive_tree_heap_closure():
     assert _validate_recursive_tree_heap(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_deleted_tree_child_objects():
+    """Native smoke should keep leaked child objects visible after deleting a tree root."""
+    from app.core.memory_model import ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_deleted_tree_keeps_child_objects
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="int after = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="root", type="Node*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="after", type="int", value="9", address="0xS002", is_pointer=False),
+            ])],
+            heap=[
+                HeapBlock(
+                    address="0xH001",
+                    type="Node",
+                    value="{value=1, left=0xH002, right=0xH003}",
+                    is_freed=True,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="1", address="0xH001.value"),
+                        StructMember(name="left", type="Node*", value="0xH002", address="0xH001.left"),
+                        StructMember(name="right", type="Node*", value="0xH003", address="0xH001.right"),
+                    ],
+                ),
+                HeapBlock(address="0xH002", type="unknown", value=""),
+                HeapBlock(address="0xH003", type="unknown", value=""),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001", is_dangling=True),
+                PointerEdge(source_address="0xH001.left", target_address="0xH002"),
+                PointerEdge(source_address="0xH001.right", target_address="0xH003"),
+            ],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=4,
+            source_code="int after = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="root", type="Node*", value="0xH001", address="0xS001", is_pointer=True),
+                Variable(name="after", type="int", value="9", address="0xS002", is_pointer=False),
+            ])],
+            heap=[
+                HeapBlock(
+                    address="0xH001",
+                    type="Node",
+                    value="{value=1, left=0xH002, right=0xH003}",
+                    is_freed=True,
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="1", address="0xH001.value"),
+                        StructMember(name="left", type="Node*", value="0xH002", address="0xH001.left"),
+                        StructMember(name="right", type="Node*", value="0xH003", address="0xH001.right"),
+                    ],
+                ),
+                HeapBlock(
+                    address="0xH002",
+                    type="Node",
+                    value="{value=2, left=nullptr, right=nullptr}",
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="2", address="0xH002.value"),
+                        StructMember(name="left", type="Node*", value="nullptr", address="0xH002.left"),
+                        StructMember(name="right", type="Node*", value="nullptr", address="0xH002.right"),
+                    ],
+                ),
+                HeapBlock(
+                    address="0xH003",
+                    type="Node",
+                    value="{value=3, left=nullptr, right=nullptr}",
+                    is_object=True,
+                    class_name="Node",
+                    members=[
+                        StructMember(name="value", type="int", value="3", address="0xH003.value"),
+                        StructMember(name="left", type="Node*", value="nullptr", address="0xH003.left"),
+                        StructMember(name="right", type="Node*", value="nullptr", address="0xH003.right"),
+                    ],
+                ),
+            ],
+            edges=[
+                PointerEdge(source_address="0xS001", target_address="0xH001", is_dangling=True),
+                PointerEdge(source_address="0xH001.left", target_address="0xH002"),
+                PointerEdge(source_address="0xH001.right", target_address="0xH003"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_deleted_tree_keeps_child_objects(weak_trace)
+    assert "left leaked child should render as Node object, got 'unknown'" in weak_errors
+    assert "right leaked child should render as Node object, got 'unknown'" in weak_errors
+    assert _validate_deleted_tree_keeps_child_objects(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_object_method_call_state():
     """Native smoke should prove object methods expose this and updated members."""
     from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
@@ -7761,6 +7913,7 @@ if __name__ == "__main__":
         test_debug_executor_marks_expired_lldb_weak_ptr_as_dangling,
         test_debug_executor_preserves_polymorphic_heap_pointer_address_after_delete,
         test_debug_executor_closes_heap_member_pointer_targets,
+        test_debug_executor_parses_lldb_nested_member_pointer_object_values,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
         test_debug_executor_msvc_pdb_backend_is_experimental_by_default,
@@ -7869,6 +8022,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_heap_member_pointer_linked_list_state,
         test_native_debug_smoke_requires_recursive_call_stack_state,
         test_native_debug_smoke_requires_recursive_tree_heap_closure,
+        test_native_debug_smoke_requires_deleted_tree_child_objects,
         test_native_debug_smoke_requires_object_method_call_state,
     ]
 

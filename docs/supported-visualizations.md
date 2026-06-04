@@ -169,6 +169,8 @@ bool gone = wp.expired();
 | `p = new int(5)` | heap: `0xH001`, edge: `source=0xS00p target=0xH001` | 堆块飞入 + 箭头指向堆 |
 | `delete p` | heap `is_freed=true`, edge `is_dangling=true` | 堆块抖动渐隐 + 箭头变红虚线后消失 |
 
+对于树/链表/图这类堆对象，若删除根指针但子节点仍未释放，原生调试器路径会保留根节点的 freed 状态，同时继续把 `left/right/next` 等成员指针指向的泄漏子对象渲染为 `Node` heap object，而不是退化成 `unknown` 块。
+
 ---
 
 ## 6. 地址规则

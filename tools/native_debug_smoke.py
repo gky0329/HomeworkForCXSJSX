@@ -1525,6 +1525,61 @@ def _validate_recursive_tree_heap(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_deleted_tree_keeps_child_objects(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return ["trace has no observed state"]
+
+    values = {var.name: var for var in _all_variables(final_state)}
+    root = values.get("root")
+    if root is None:
+        return ["missing root pointer"]
+
+    heaps = {block.address: block for block in final_state.heap}
+    root_heap = heaps.get(root.value)
+    if root_heap is None:
+        errors.append(f"missing deleted root heap block {root.value!r}")
+        return errors
+    if not root_heap.is_freed:
+        errors.append("root heap block should remain visible as freed after delete root")
+    if not any(
+        edge.source_address == root.address and edge.target_address == root.value and edge.is_dangling
+        for edge in final_state.edges
+    ):
+        errors.append("missing dangling root pointer edge after delete root")
+
+    members = {member.name: member for member in root_heap.members}
+    left = members.get("left")
+    right = members.get("right")
+    if left is None or right is None:
+        errors.append(f"deleted root should keep left/right members, got {list(members)}")
+        return errors
+
+    expected_children = ((left, "left", "2"), (right, "right", "3"))
+    for member, label, expected_value in expected_children:
+        child_heap = heaps.get(member.value)
+        if child_heap is None:
+            errors.append(f"missing {label} leaked child heap block {member.value!r}")
+            continue
+        if child_heap.is_freed:
+            errors.append(f"{label} leaked child heap should remain allocated")
+        if child_heap.type != "Node" or not child_heap.is_object:
+            errors.append(f"{label} leaked child should render as Node object, got {child_heap.type!r}")
+        actual_value = _member_map(child_heap).get("value")
+        if actual_value != expected_value:
+            errors.append(f"{label} leaked child value expected {expected_value}, got {actual_value!r}")
+        if not any(
+            edge.source_address == member.address
+            and edge.target_address == member.value
+            and not edge.is_dangling
+            for edge in final_state.edges
+        ):
+            errors.append(f"missing deleted root.{label} -> leaked child heap edge")
+
+    return errors
+
+
 def _validate_object_method_call(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     method_state = None
@@ -1920,6 +1975,16 @@ CASES: dict[str, SmokeCase] = {
             "int total = sum(root);\n"
         ),
         validate=_validate_recursive_tree_heap,
+    ),
+    "delete_tree_root_leaks_children": SmokeCase(
+        name="delete_tree_root_leaks_children",
+        code=(
+            "struct Node { int value; Node* left; Node* right; };\n"
+            "Node* root = new Node{1, new Node{2,nullptr,nullptr}, new Node{3,nullptr,nullptr}};\n"
+            "delete root;\n"
+            "int after = 9;\n"
+        ),
+        validate=_validate_deleted_tree_keeps_child_objects,
     ),
     "object_method_call": SmokeCase(
         name="object_method_call",

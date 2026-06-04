@@ -1292,6 +1292,13 @@ class DebugExecutor:
         class_info: dict[str, _ClassInfo],
     ):
         for var in parsed_vars:
+            self._record_member_pointee_values(
+                [*var.members, *var.pointee_members],
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                class_info,
+            )
             elements = (
                 var.elements
                 or self._wrapped_std_array_elements(var)
@@ -1321,6 +1328,14 @@ class DebugExecutor:
                         pointee_type,
                         element.pointee_value,
                     )
+                if element.pointee_members:
+                    self._record_member_pointee_values(
+                        element.pointee_members,
+                        heap_values,
+                        heap_object_values,
+                        freed_heap,
+                        class_info,
+                    )
             self._record_structured_element_pointee_values(
                 all_elements,
                 heap_values,
@@ -1328,6 +1343,46 @@ class DebugExecutor:
                 freed_heap,
                 class_info,
             )
+
+    def _record_member_pointee_values(
+        self,
+        members: list[_ParsedMember],
+        heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
+    ):
+        for member in members:
+            member_type = self._clean_type(member.type)
+            if not self._is_pointer_like_type(member_type):
+                continue
+            value = self._clean_value(member.value)
+            if self._is_cdb_addr(value):
+                value = self._normalize_cdb_addr(value)
+            elif self._is_hex_addr(value):
+                value = self._normalize_actual_addr(value)
+            if not value or self._is_null(value) or value in freed_heap:
+                continue
+            payload = self._structured_payload(member.value)
+            if not payload:
+                continue
+            pointee_type = self._pointee_type(member_type)
+            pointee_members = self._parse_structured_members(payload)
+            if pointee_members:
+                pointee_type = self._dynamic_object_type_from_members(
+                    pointee_type,
+                    pointee_members,
+                    class_info,
+                )
+                heap_object_values[value] = (
+                    pointee_type,
+                    self._typed_members_for_owner(pointee_members, pointee_type, class_info),
+                )
+            else:
+                heap_values[value] = (
+                    pointee_type,
+                    self._clean_value(payload),
+                )
 
     def _record_structured_element_pointee_values(
         self,
@@ -1853,7 +1908,7 @@ class DebugExecutor:
                     pending_element_members.append(_ParsedMember(
                         name=name,
                         type=clean_type,
-                        value=self._clean_value(raw_value),
+                        value=self._clean_value_preserving_payload(raw_value),
                         actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
                     ))
                     pending_element.value = self._format_members(pending_element_members)
@@ -1884,7 +1939,7 @@ class DebugExecutor:
                     target_members.append(_ParsedMember(
                         name=name,
                         type=clean_type,
-                        value=self._clean_value(raw_value),
+                        value=self._clean_value_preserving_payload(raw_value),
                         actual_addr=f"{pending.actual_addr}:{name}",
                     ))
                 continue
@@ -1958,7 +2013,7 @@ class DebugExecutor:
                         pending_pointer.pointee_members.append(_ParsedMember(
                             name=child_name.lstrip("*&"),
                             type=self._clean_type(child_type),
-                            value=self._clean_value(child_value),
+                            value=self._clean_value_preserving_payload(child_value),
                             actual_addr=actual_addr,
                         ))
                 elif pending_container is not None:
@@ -1971,7 +2026,7 @@ class DebugExecutor:
                         pending_container.members.append(_ParsedMember(
                             name=child_name.lstrip("*&"),
                             type=self._clean_type(child_type),
-                            value=self._clean_value(child_value),
+                            value=self._clean_value_preserving_payload(child_value),
                             actual_addr=actual_addr,
                         ))
                 continue
@@ -2495,6 +2550,23 @@ class DebugExecutor:
             "            if deref_val:\n"
             "                return raw_val + ' {' + deref_val + '}'\n"
             "        return raw_val\n"
+            "    if is_pointer_type(typ) and val and val not in ('0x0', '0x0000000000000000') and 'char' not in typ and depth < 3:\n"
+            "        deref=value.Dereference()\n"
+            "        if deref.IsValid():\n"
+            "            deref_count=min(deref.GetNumChildren(), 16)\n"
+            "            if deref_count > 0:\n"
+            "                parts=[]\n"
+            "                for child_idx in range(deref_count):\n"
+            "                    child=deref.GetChildAtIndex(child_idx)\n"
+            "                    child_name=child.GetName() or ''\n"
+            "                    child_val=flat_value(child, depth + 1)\n"
+            "                    parts.append('%s=%s' % (child_name.lstrip('*&'), child_val) if child_name else child_val)\n"
+            "                if parts:\n"
+            "                    return val + ' {' + ', '.join(parts) + '}'\n"
+            "            deref_val=val_of(deref)\n"
+            "            if deref_val:\n"
+            "                return val + ' {' + deref_val + '}'\n"
+            "        return val\n"
             "    if val and not is_expandable_container_type(typ) and not is_c_array_type(typ):\n"
             "        return val\n"
             "    if depth >= 3:\n"
@@ -3392,6 +3464,10 @@ class DebugExecutor:
         if DebugExecutor._is_hex_addr(cleaned):
             return cleaned
         return DebugExecutor._clean_float_value(cleaned)
+
+    @staticmethod
+    def _clean_value_preserving_payload(value: str) -> str:
+        return value.strip() if DebugExecutor._structured_payload(value) else DebugExecutor._clean_value(value)
 
     @staticmethod
     def _clean_cdb_value(value: str) -> str:
