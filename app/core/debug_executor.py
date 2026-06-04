@@ -412,6 +412,16 @@ class DebugExecutor:
                 step_in_lines=self._step_in_lines(original_lines, line_map),
             )
 
+        source, line_map = self._wrap_snippet_source(original_lines)
+        return _PreparedSource(
+            source=source,
+            original_lines=original_lines,
+            line_map=line_map,
+            heap_arrays=self._heap_array_declarations(original_lines),
+            step_in_lines=self._step_in_lines(source.splitlines(), line_map),
+        )
+
+    def _wrap_snippet_source(self, original_lines: list[str]) -> tuple[str, dict[int, int]]:
         prefix = [
             "#include <algorithm>",
             "#include <cmath>",
@@ -425,22 +435,107 @@ class DebugExecutor:
             "#include <utility>",
             "#include <vector>",
             "using namespace std;",
-            "int main() {",
         ]
-        body = [f"  {line}" for line in original_lines]
+        hoisted: list[tuple[int, str]] = []
+        body: list[tuple[int, str]] = []
+
+        idx = 0
+        while idx < len(original_lines):
+            line = original_lines[idx]
+            stripped = self._strip_line_comment(line).strip()
+            if self._is_hoisted_single_line(stripped):
+                hoisted.append((idx + 1, line))
+                idx += 1
+                continue
+
+            if self._starts_hoisted_block(original_lines, idx):
+                depth = 0
+                saw_brace = False
+                while idx < len(original_lines):
+                    block_line = original_lines[idx]
+                    hoisted.append((idx + 1, block_line))
+                    clean = self._strip_line_comment(block_line)
+                    depth += clean.count("{") - clean.count("}")
+                    saw_brace = saw_brace or "{" in clean
+                    idx += 1
+                    if saw_brace and depth <= 0:
+                        break
+                    if not saw_brace and clean.rstrip().endswith(";"):
+                        break
+                continue
+
+            body.append((idx + 1, line))
+            idx += 1
+
+        generated_lines: list[str] = []
+        line_map: dict[int, int] = {}
+
+        for line in prefix:
+            generated_lines.append(line)
+        for original_line, line in hoisted:
+            generated_lines.append(line)
+            line_map[len(generated_lines)] = original_line
+
+        generated_lines.append("int main() {")
+        for original_line, line in body:
+            generated_lines.append(f"  {line}")
+            line_map[len(generated_lines)] = original_line
         suffix = ["  return 0;", "}"]
-        line_map = {
-            len(prefix) + idx: idx
-            for idx in range(1, len(original_lines) + 1)
-        }
-        source = "\n".join(prefix + body + suffix) + "\n"
-        return _PreparedSource(
-            source=source,
-            original_lines=original_lines,
-            line_map=line_map,
-            heap_arrays=self._heap_array_declarations(original_lines),
-            step_in_lines=self._step_in_lines(source.splitlines(), line_map),
+        generated_lines.extend(suffix)
+        return "\n".join(generated_lines) + "\n", line_map
+
+    @staticmethod
+    def _is_hoisted_single_line(stripped: str) -> bool:
+        if not stripped:
+            return False
+        return (
+            stripped.startswith("#")
+            or stripped.startswith("using ")
+            or (
+                stripped.endswith(";")
+                and DebugExecutor._looks_like_function_signature(stripped[:-1].strip())
+            )
         )
+
+    @staticmethod
+    def _starts_hoisted_block(lines: list[str], index: int) -> bool:
+        line = DebugExecutor._strip_line_comment(lines[index]).strip()
+        if not line:
+            return False
+        if re.match(r"^(?:template\s*<[^>]+>\s*)?(?:class|struct|enum|namespace)\b", line):
+            return True
+        if DebugExecutor._looks_like_function_definition_start(line):
+            return True
+        if (
+            index + 1 < len(lines)
+            and DebugExecutor._looks_like_function_signature(line)
+            and DebugExecutor._strip_line_comment(lines[index + 1]).strip().startswith("{")
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_function_definition_start(line: str) -> bool:
+        if "{" not in line or ";" in line.split("{", 1)[0]:
+            return False
+        return DebugExecutor._looks_like_function_signature(line.split("{", 1)[0].strip())
+
+    @staticmethod
+    def _looks_like_function_signature(line: str) -> bool:
+        if not line or "=" in line:
+            return False
+        if re.match(r"^(?:if|for|while|switch|catch)\b", line):
+            return False
+        pattern = re.compile(
+            r"^(?:template\s*<[^>]+>\s*)?"
+            r"(?:(?:inline|static|virtual|explicit|constexpr|friend)\s+)*"
+            r"(?:[A-Za-z_]\w*(?:::\w+)?|~?[A-Za-z_]\w*|operator\s*\S+)"
+            r"(?:<[^;{}()]*>)?[\s*&]+"
+            r"(?P<name>~?[A-Za-z_]\w*)\s*\([^;{}]*\)\s*"
+            r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^:{]+)?\s*$"
+        )
+        match = pattern.match(line)
+        return bool(match and match.group("name") not in {"if", "for", "while", "switch", "catch"})
 
     def _compile(self, src: Path, binary: Path):
         compiler = self._compiler()
@@ -960,11 +1055,11 @@ class DebugExecutor:
         after: _FrameLocation | None,
         prepared: _PreparedSource,
     ) -> bool:
-        if before.line not in prepared.step_in_lines or after is None:
+        if after is None:
             return False
         if prepared.source_path and Path(after.file).name != Path(prepared.source_path).name:
             return True
-        return before.function != after.function or before.line != after.line
+        return before.function != after.function
 
     def _parse_stack_snapshots(
         self,

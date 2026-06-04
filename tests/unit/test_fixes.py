@@ -1329,6 +1329,52 @@ def test_debug_executor_lldb_script_sets_stdin_input_path():
     assert script.index("settings set target.input-path") < script.index("run")
 
 
+def test_debug_executor_wraps_snippet_includes_outside_main():
+    """Header includes in no-main snippets should not be inserted inside main()."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <deque>\n"
+        "std::deque<int> q;\n"
+        "q.push_back(7);\n"
+        "int front = q.front();\n"
+    )
+
+    source_lines = prepared.source.splitlines()
+    include_line = source_lines.index("#include <deque>") + 1
+    main_line = source_lines.index("int main() {") + 1
+
+    assert include_line < main_line
+    assert "  #include <deque>" not in prepared.source
+    assert prepared.line_map[main_line + 1] == 2
+    assert prepared.line_map[main_line + 3] == 4
+
+
+def test_debug_executor_wraps_helper_function_outside_main_and_steps_in():
+    """No-main snippets can define helpers and still step into user calls."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int square(int x) {\n"
+        "    int y = x * x;\n"
+        "    return y;\n"
+        "}\n"
+        "int result = square(3);\n"
+    )
+
+    source_lines = prepared.source.splitlines()
+    function_line = source_lines.index("int square(int x) {") + 1
+    main_line = source_lines.index("int main() {") + 1
+    call_line = main_line + 1
+
+    assert function_line < main_line
+    assert prepared.line_map[function_line + 1] == 2
+    assert prepared.line_map[call_line] == 5
+    assert call_line in prepared.step_in_lines
+
+
 def test_debug_executor_msvc_compile_args_enable_pdb_symbols():
     """MSVC compile command should emit debug info and a named PDB."""
     from pathlib import Path
@@ -1466,6 +1512,62 @@ frame #0: 0x3 program`RunGame() at program.cpp:3:1
 
     assert [step.line_number for step in trace.steps] == [2]
     assert trace.steps[0].stack[0].frame_name == "RunGame"
+
+
+def test_debug_executor_keeps_caller_assignment_after_user_function_returns():
+    """The caller statement should appear after a stepped-in function returns."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int square(int x) {\n"
+        "    int y = x * x;\n"
+        "    return y;\n"
+        "}\n"
+        "int result = square(3);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    y_line = generated_lines[2]
+    return_line = generated_lines[3]
+    call_line = generated_lines[5]
+    wrapper_return_line = call_line + 1
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{call_line}:16
+__CXXMV_AFTER__0
+frame #0: 0x2 program`square(int) at program.cpp:{y_line}:13
+__CXXMV_FRAME__0__{y_line}__square(int)
+0x000000016fdfe6c0: (int) x = 3
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`square(int) at program.cpp:{y_line}:13
+__CXXMV_AFTER__1
+frame #0: 0x3 program`square(int) at program.cpp:{return_line}:12
+__CXXMV_FRAME__0__{return_line}__square(int)
+0x000000016fdfe6c0: (int) x = 3
+0x000000016fdfe6c4: (int) y = 9
+__CXXMV_FRAME__1__{call_line}__main
+0x000000016fdfe6d0: (int) result = -1
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`square(int) at program.cpp:{return_line}:12
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{call_line}:16
+__CXXMV_FRAME__0__{call_line}__main
+0x000000016fdfe6d0: (int) result = -1
+__CXXMV_BEFORE__3
+frame #0: 0x4 program`main at program.cpp:{call_line}:16
+__CXXMV_AFTER__3
+frame #0: 0x5 program`main at program.cpp:{wrapper_return_line}:3
+__CXXMV_FRAME__0__{wrapper_return_line}__main
+0x000000016fdfe6d0: (int) result = 9
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [step.line_number for step in trace.steps] == [2, 5]
+    assert trace.steps[0].stack[0].frame_name == "square"
+    result = trace.steps[1].stack[0].variables[0]
+    assert result.name == "result"
+    assert result.value == "9"
 
 
 def test_debug_executor_parses_multiple_user_stack_frames():
@@ -2017,12 +2119,15 @@ if __name__ == "__main__":
         test_debug_executor_skips_stdin_programs_before_lldb_run,
         test_debug_executor_local_capability_rejects_stdin_code,
         test_debug_executor_lldb_script_sets_stdin_input_path,
+        test_debug_executor_wraps_snippet_includes_outside_main,
+        test_debug_executor_wraps_helper_function_outside_main_and_steps_in,
         test_debug_executor_msvc_compile_args_enable_pdb_symbols,
         test_debug_executor_cdb_script_uses_source_lines_and_local_vars,
         test_debug_executor_steps_into_user_function_calls,
         test_debug_executor_steps_over_constructors_but_keeps_method_calls,
         test_debug_executor_uses_current_function_frame_name,
         test_debug_executor_skips_step_in_transition_snapshots,
+        test_debug_executor_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
         test_debug_executor_parses_cdb_arrays_and_objects,
