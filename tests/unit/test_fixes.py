@@ -4550,6 +4550,51 @@ __CXXMV_FRAMEDX__0
     assert step.heap == []
 
 
+def test_debug_executor_parses_cdb_dx_map_unique_ptr_values_as_heap_entries():
+    """CDB/PDB map<string, unique_ptr<T>> entries should create valued heap blocks."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <memory>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "map<string, unique_ptr<int>> m;\n"
+        'm["a"] = unique_ptr<int>(new int(5));\n'
+        '*m["a"] = 8;\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[7]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efe0 std::map<std::string,std::unique_ptr<int>> m = size=1
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    m : {{ size=1 }} [Type: std::map<std::string,std::unique_ptr<int>>]
+        [0] : {{first="a", second=000001df`4e700000 {{8}}}} [Type: std::pair<const std::string,std::unique_ptr<int>>]
+            first : "a" [Type: std::string]
+            second : 000001df`4e700000 {{8}} [Type: std::unique_ptr<int>]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    m = step.stack[0].variables[0]
+
+    assert m.is_array is True
+    assert m.elements[0].value == "{first=a, second=0xH001}"
+    assert step.heap[0].type == "int"
+    assert step.heap[0].value == "8"
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in step.edges
+    } == {(m.elements[0].address, "0xH001", False)}
+
+
 def test_debug_executor_parses_cdb_dx_nested_map_pair_children():
     """Nested CDB dx pair rows should be folded into map array element values."""
     from app.core.debug_executor import DebugExecutor
@@ -6345,6 +6390,69 @@ def test_native_debug_smoke_requires_map_pointer_entry_edges():
     assert _validate_map_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_map_unique_ptr_heap_entry():
+    """Native smoke should prove map<string, unique_ptr<int>> entries render valued heap blocks."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_map_unique_ptr
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code='*m["a"] = 8;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="m",
+                    type="std::map<string,unique_ptr<int>>",
+                    value="{[0]={first=a, second=0xH001}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(
+                            index=0,
+                            type="std::pair<string,unique_ptr<int>>",
+                            value="{first=a, second=0xH001}",
+                            address="0xS001[0]",
+                        ),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=7,
+            source_code='*m["a"] = 8;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="m",
+                    type="std::map<string,unique_ptr<int>>",
+                    value="{[0]={first=a, second=0xH001}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(
+                            index=0,
+                            type="std::pair<string,unique_ptr<int>>",
+                            value="{first=a, second=0xH001}",
+                            address="0xS001[0]",
+                        ),
+                    ],
+                ),
+            ])],
+            heap=[HeapBlock(address="0xH001", type="int", value="8")],
+            edges=[PointerEdge(source_address="0xS001[0]", target_address="0xH001")],
+        ),
+    ])
+
+    weak_errors = _validate_map_unique_ptr(weak_trace)
+    assert any("missing heap block for map unique_ptr target" in error for error in weak_errors)
+    assert _validate_map_unique_ptr(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -7019,6 +7127,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_vector_object_children,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
         test_debug_executor_parses_cdb_dx_map_pointer_values_as_entry_edges,
+        test_debug_executor_parses_cdb_dx_map_unique_ptr_values_as_heap_entries,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
@@ -7056,6 +7165,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_optional_pointer_member_edge,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
+        test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

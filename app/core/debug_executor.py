@@ -901,6 +901,7 @@ class DebugExecutor:
                 parsed_vars,
                 heap_values,
                 freed_heap,
+                prepared.class_info,
             )
 
             if delete_name and delete_name in pointer_targets:
@@ -1000,6 +1001,7 @@ class DebugExecutor:
                 parsed_vars,
                 heap_values,
                 freed_heap,
+                prepared.class_info,
             )
 
             if delete_name and delete_name in pointer_targets:
@@ -1256,6 +1258,7 @@ class DebugExecutor:
         parsed_vars: list[_ParsedVar],
         heap_values: dict[str, tuple[str, str]],
         freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
     ):
         for var in parsed_vars:
             elements = (
@@ -1263,6 +1266,7 @@ class DebugExecutor:
                 or self._wrapped_std_array_elements(var)
                 or self._wrapped_container_adapter_elements(var)
             )
+            all_elements = [*elements, *var.pointee_elements]
             for element in [*elements, *var.pointee_elements]:
                 if (
                     not element.pointee_addr
@@ -1274,6 +1278,44 @@ class DebugExecutor:
                 heap_values[element.pointee_addr] = (
                     element.pointee_type or self._pointee_type(element.type),
                     element.pointee_value,
+                )
+            self._record_structured_element_pointee_values(all_elements, heap_values, freed_heap, class_info)
+
+    def _record_structured_element_pointee_values(
+        self,
+        elements: list[_ParsedElement],
+        heap_values: dict[str, tuple[str, str]],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
+    ):
+        for element in elements:
+            member_types = self._structured_array_element_member_types(element.type, class_info)
+            if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+                continue
+            payload = self._structured_payload(element.value)
+            if not payload:
+                continue
+            for item in self._split_structured_items(payload):
+                match = re.match(r"^(?:\.|this->)?(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<value>.*)$", item)
+                if not match:
+                    continue
+                member_type = member_types.get(match.group("name"), "")
+                if not self._is_pointer_like_type(member_type):
+                    continue
+                raw_value = match.group("value")
+                value = self._clean_value(raw_value)
+                if self._is_cdb_addr(value):
+                    value = self._normalize_cdb_addr(value)
+                elif self._is_hex_addr(value):
+                    value = self._normalize_actual_addr(value)
+                if not value or self._is_null(value) or value in freed_heap:
+                    continue
+                pointee_value = self._clean_value(self._structured_payload(raw_value))
+                if not pointee_value:
+                    continue
+                heap_values[value] = (
+                    self._pointee_type(member_type),
+                    pointee_value,
                 )
 
     def _apply_std_array_expression_elements(
@@ -1658,6 +1700,21 @@ class DebugExecutor:
 
             if pending_element is not None and indent > pending_element_indent:
                 if self._array_index(name) is None:
+                    member_value = self._clean_value(raw_value)
+                    if self._is_cdb_addr(member_value):
+                        member_value = self._normalize_cdb_addr(member_value)
+                    elif self._is_hex_addr(member_value):
+                        member_value = self._normalize_actual_addr(member_value)
+                    if (
+                        self._is_pointer_like_type(clean_type)
+                        and member_value
+                        and not self._is_null(member_value)
+                    ):
+                        member_payload = self._structured_payload(raw_value)
+                        if member_payload:
+                            pending_element.pointee_addr = member_value
+                            pending_element.pointee_type = self._pointee_type(clean_type)
+                            pending_element.pointee_value = self._clean_value(member_payload)
                     pending_element_members.append(_ParsedMember(
                         name=name,
                         type=clean_type,

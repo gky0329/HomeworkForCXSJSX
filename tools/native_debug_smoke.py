@@ -532,6 +532,36 @@ def _validate_map_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_map_unique_ptr(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "m")
+    if match is None:
+        return ["missing map unique_ptr variable m"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("m should be marked as an array/container")
+    if var.is_pointer:
+        errors.append("m should not be marked as a pointer")
+    elements = list(var.elements)
+    if len(elements) != 1:
+        errors.append(f"m expected one key/value entry, got {[element.value for element in elements]!r}")
+        return errors
+    element = elements[0]
+    if "first=a" not in element.value or "second=0xH" not in element.value:
+        errors.append(f"m missing unique_ptr entry target: {element.value!r}")
+        return errors
+    target = next((edge.target_address for edge in state.edges if edge.source_address == element.address), "")
+    if not target:
+        errors.append("missing m entry -> unique_ptr heap edge")
+        return errors
+    target_heap = next((block for block in state.heap if block.address == target), None)
+    if target_heap is None:
+        errors.append(f"missing heap block for map unique_ptr target {target!r}")
+    elif target_heap.value != "8":
+        errors.append(f"map unique_ptr heap value expected 8 after *m[\"a\"] write, got {target_heap.value!r}")
+    return errors
+
+
 def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     live_blocks = [block for step in trace.steps for block in step.heap if block.is_object]
@@ -1736,6 +1766,19 @@ CASES: dict[str, SmokeCase] = {
             '*m["b"] = 9;\n'
         ),
         validate=_validate_map_pointer,
+    ),
+    "map_string_unique_ptr": SmokeCase(
+        name="map_string_unique_ptr",
+        code=(
+            "#include <map>\n"
+            "#include <memory>\n"
+            "#include <string>\n"
+            "using namespace std;\n"
+            "map<string, unique_ptr<int>> m;\n"
+            'm["a"] = make_unique<int>(5);\n'
+            '*m["a"] = 8;\n'
+        ),
+        validate=_validate_map_unique_ptr,
     ),
     "stdin_sum": SmokeCase(
         name="stdin_sum",
