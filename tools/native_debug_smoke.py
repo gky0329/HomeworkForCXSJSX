@@ -207,10 +207,10 @@ def _validate_map(trace: ExecutionTrace) -> list[str]:
     values = [element.value for element in var.elements]
     if not var.is_array:
         return ["m should be marked as an array/container"]
-    expected_fragments = ['first="a"', "second=1", 'first="b"', "second=2"]
-    missing = [fragment for fragment in expected_fragments if fragment not in var.value]
-    if missing:
-        return [f"m value is missing {missing!r}: {var.value!r}"]
+    has_a = 'first="a"' in var.value or "first=a" in var.value
+    has_b = 'first="b"' in var.value or "first=b" in var.value
+    if not (has_a and "second=1" in var.value and has_b and "second=2" in var.value):
+        return [f"m value does not contain expected key/value pairs: {var.value!r}"]
     if len(values) != 2:
         return [f"m expected 2 key/value entries, got {values!r}"]
     return []

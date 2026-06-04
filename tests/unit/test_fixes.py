@@ -2067,6 +2067,52 @@ __CXXMV_FRAMEDX__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_nested_map_pair_children():
+    """Nested CDB dx pair rows should be folded into map array element values."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "int main() {\n"
+        "    map<string, int> m;\n"
+        '    m["a"] = 1;\n'
+        '    m["b"] = 2;\n'
+        '    int got = m["a"];\n'
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 7]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ 8]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::map<std::string,int> m = size=2
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    m : { size=2 } [Type: std::map<std::string,int>]
+        [0] :  [Type: std::pair<const std::string,int>]
+            first : "a" [Type: std::string]
+            second : 1 [Type: int]
+        [1] :  [Type: std::pair<const std::string,int>]
+            first : "b" [Type: std::string]
+            second : 2 [Type: int]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    m = trace.steps[0].stack[0].variables[0]
+
+    assert m.is_array is True
+    assert m.element_count == 2
+    assert m.value == "{[0]={first=a, second=1}, [1]={first=b, second=2}}"
+    assert [(element.index, element.value) for element in m.elements] == [
+        (0, "{first=a, second=1}"),
+        (1, "{first=b, second=2}"),
+    ]
+
+
 def test_debug_executor_filters_future_locals_from_stack_snapshots():
     """Future loop/call locals should not appear before their source line completes."""
     from app.core.debug_executor import DebugExecutor
@@ -2496,6 +2542,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer,
         test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
+        test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
         test_debug_executor_lldb_timeout_is_debug_execution_error,

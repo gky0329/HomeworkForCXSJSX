@@ -1392,12 +1392,22 @@ class DebugExecutor:
         variables: list[_ParsedVar] = []
         pending: _ParsedVar | None = None
         pending_indent = 0
+        pending_element: _ParsedElement | None = None
+        pending_element_indent = 0
+        pending_element_members: list[_ParsedMember] = []
         pattern = re.compile(
             r"^(?P<indent>\s+)"
             r"(?P<name>\[\d+\]|[A-Za-z_]\w*)\s*:\s*"
             r"(?P<value>.*?)\s*"
             r"\[Type:\s*(?P<type>.*)\]\s*$"
         )
+
+        def flush_pending_element():
+            nonlocal pending_element, pending_element_members
+            if pending_element is not None and pending_element_members:
+                pending_element.value = self._format_members(pending_element_members)
+            pending_element = None
+            pending_element_members = []
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -1420,6 +1430,19 @@ class DebugExecutor:
             if self._is_cdb_addr(clean_value):
                 clean_value = self._normalize_cdb_addr(clean_value)
 
+            if pending_element is not None and indent > pending_element_indent:
+                if self._array_index(name) is None:
+                    pending_element_members.append(_ParsedMember(
+                        name=name,
+                        type=clean_type,
+                        value=self._clean_value(raw_value),
+                    ))
+                    pending_element.value = self._format_members(pending_element_members)
+                    continue
+
+            if pending_element is not None and indent <= pending_element_indent:
+                flush_pending_element()
+
             if pending is not None and indent > pending_indent:
                 element_index = self._array_index(name)
                 if element_index is not None:
@@ -1428,11 +1451,15 @@ class DebugExecutor:
                         if pending.pointee_addr
                         else pending.elements
                     )
-                    target_elements.append(_ParsedElement(
+                    element = _ParsedElement(
                         index=element_index,
                         type=clean_type,
                         value=self._clean_value(raw_value),
-                    ))
+                    )
+                    target_elements.append(element)
+                    pending_element = element
+                    pending_element_indent = indent
+                    pending_element_members = []
                 else:
                     target_members = (
                         pending.pointee_members
@@ -1446,6 +1473,7 @@ class DebugExecutor:
                     ))
                 continue
 
+            flush_pending_element()
             var = _ParsedVar(
                 actual_addr=f"cdbdx:{len(variables)}:{name}",
                 type=clean_type,
@@ -1471,6 +1499,7 @@ class DebugExecutor:
             pending = var
             pending_indent = indent
 
+        flush_pending_element()
         return variables
 
     def _parse_variables(self, text: str) -> list[_ParsedVar]:
