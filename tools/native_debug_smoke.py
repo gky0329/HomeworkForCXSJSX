@@ -303,6 +303,38 @@ def _validate_vector(trace: ExecutionTrace) -> list[str]:
     return []
 
 
+def _validate_stack_adapter(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "s")
+    if match is None:
+        return ["missing stack variable s"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("stack s should be marked as an array/container")
+    values = [element.value for element in var.elements]
+    if values != ["1"]:
+        errors.append(f"stack elements expected ['1'] after pop, got {values!r}")
+    if var.members:
+        errors.append("stack should unwrap adapter storage instead of showing c as a member")
+    return errors
+
+
+def _validate_priority_queue_adapter(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "pq")
+    if match is None:
+        return ["missing priority_queue variable pq"]
+    _, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("priority_queue pq should be marked as an array/container")
+    values = [element.value for element in var.elements]
+    if values != ["3", "1", "2"]:
+        errors.append(f"priority_queue storage expected ['3', '1', '2'], got {values!r}")
+    if var.members:
+        errors.append("priority_queue should unwrap adapter storage instead of showing c as a member")
+    return errors
+
+
 def _validate_vector_object(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "nodes")
     if match is None:
@@ -1030,6 +1062,30 @@ CASES: dict[str, SmokeCase] = {
             "a[1] = 8;\n"
         ),
         validate=_validate_std_array,
+    ),
+    "stack_int": SmokeCase(
+        name="stack_int",
+        code=(
+            "#include <stack>\n"
+            "using namespace std;\n"
+            "stack<int> s;\n"
+            "s.push(1);\n"
+            "s.push(2);\n"
+            "s.pop();\n"
+        ),
+        validate=_validate_stack_adapter,
+    ),
+    "priority_queue_int": SmokeCase(
+        name="priority_queue_int",
+        code=(
+            "#include <queue>\n"
+            "using namespace std;\n"
+            "priority_queue<int> pq;\n"
+            "pq.push(1);\n"
+            "pq.push(3);\n"
+            "pq.push(2);\n"
+        ),
+        validate=_validate_priority_queue_adapter,
     ),
     "heap_object": SmokeCase(
         name="heap_object",

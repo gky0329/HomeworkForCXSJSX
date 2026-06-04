@@ -1227,6 +1227,43 @@ __CXXMV_FRAME__0__{l4 + 1}__main
     assert var.members == []
 
 
+def test_debug_executor_parses_lldb_container_adapters_as_array_variables():
+    """LLDB stack/priority_queue adapter storage should unwrap to elements."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <queue>\n"
+        "using namespace std;\n"
+        "priority_queue<int> pq;\n"
+        "pq.push(1);\n"
+        "pq.push(3);\n"
+        "pq.push(2);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l6 = generated_lines[6]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l6}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l6 + 1}:1
+__CXXMV_FRAME__0__{l6 + 1}__main
+0x000000016fdfe6b0: (std::__1::priority_queue<int, std::__1::vector<int, std::__1::allocator<int> >, std::__1::less<int> >) pq = {{
+0x000000016fdfe6b0:   (std::__1::priority_queue<int>::container_type) c = {{[0]=3, [1]=1, [2]=2}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    var = trace.steps[0].stack[0].variables[0]
+
+    assert var.name == "pq"
+    assert var.is_array is True
+    assert var.is_object is False
+    assert var.value == "{[0]=3, [1]=1, [2]=2}"
+    assert [(element.index, element.value) for element in var.elements] == [(0, "3"), (1, "1"), (2, "2")]
+    assert var.members == []
+
+
 def test_debug_executor_parses_vector_elements_as_array_variable():
     """std::vector child snapshots should render like indexed array cells."""
     from app.core.debug_executor import DebugExecutor
@@ -2533,6 +2570,45 @@ __CXXMV_FRAMEDX__0
     assert var.element_count == 3
     assert var.value == "{[0]=1, [1]=8, [2]=3}"
     assert [(element.index, element.value) for element in var.elements] == [(0, "1"), (1, "8"), (2, "3")]
+    assert var.members == []
+
+
+def test_debug_executor_parses_cdb_container_adapters_as_array_variables():
+    """CDB/PDB stack/priority_queue adapter storage should unwrap to elements."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <stack>\n"
+        "using namespace std;\n"
+        "stack<int> s;\n"
+        "s.push(1);\n"
+        "s.push(2);\n"
+        "s.pop();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l6 = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l6}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l6 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 std::stack<int> s = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    s : {{...}} [Type: std::stack<int>]
+        c : {{[0]=1}} [Type: std::deque<int>]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    var = trace.steps[0].stack[0].variables[0]
+
+    assert var.name == "s"
+    assert var.is_array is True
+    assert var.is_object is False
+    assert var.value == "{[0]=1}"
+    assert [(element.index, element.value) for element in var.elements] == [(0, "1")]
     assert var.members == []
 
 
@@ -4914,6 +4990,103 @@ def test_native_debug_smoke_requires_std_array_elements():
     assert _validate_std_array(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_container_adapter_elements():
+    """Native smoke should prove stack and priority_queue unwrap adapter storage."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_priority_queue_adapter, _validate_stack_adapter
+
+    weak_stack = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="s.pop();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="s",
+                    type="std::stack<int>",
+                    value="{c={[0]=1}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="c", type="std::deque<int>", value="{[0]=1}")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_stack = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="s.pop();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="s",
+                    type="std::stack<int>",
+                    value="{[0]=1}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, value="1")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    weak_pq = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="pq.push(2);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="pq",
+                    type="std::priority_queue<int>",
+                    value="{c={[0]=3, [1]=1, [2]=2}}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="c", type="std::vector<int>", value="{[0]=3, [1]=1, [2]=2}")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_pq = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="pq.push(2);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="pq",
+                    type="std::priority_queue<int>",
+                    value="{[0]=3, [1]=1, [2]=2}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="3"),
+                        ArrayElement(index=1, value="1"),
+                        ArrayElement(index=2, value="2"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    stack_errors = _validate_stack_adapter(weak_stack)
+    assert "stack s should be marked as an array/container" in stack_errors
+    assert "stack should unwrap adapter storage instead of showing c as a member" in stack_errors
+    assert _validate_stack_adapter(strong_stack) == []
+
+    pq_errors = _validate_priority_queue_adapter(weak_pq)
+    assert "priority_queue pq should be marked as an array/container" in pq_errors
+    assert "priority_queue should unwrap adapter storage instead of showing c as a member" in pq_errors
+    assert _validate_priority_queue_adapter(strong_pq) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -5511,6 +5684,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_lldb_std_array_as_array_variable,
+        test_debug_executor_parses_lldb_container_adapters_as_array_variables,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
@@ -5546,6 +5720,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_double_pointer_stack_edges,
         test_debug_executor_parses_cdb_member_pointer_edges,
         test_debug_executor_parses_cdb_std_array_as_array_variable,
+        test_debug_executor_parses_cdb_container_adapters_as_array_variables,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -5596,6 +5771,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_stack_dangling_pointer_state,
         test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_std_array_elements,
+        test_native_debug_smoke_requires_container_adapter_elements,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

@@ -1045,7 +1045,11 @@ class DebugExecutor:
                 is_reference = "&" in parsed.type and "*" not in parsed.type
                 is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
                 is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
-                elements = parsed.elements or self._wrapped_std_array_elements(parsed)
+                elements = (
+                    parsed.elements
+                    or self._wrapped_std_array_elements(parsed)
+                    or self._wrapped_container_adapter_elements(parsed)
+                )
                 member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
                     parsed.members,
                     owner_address=stack_addr,
@@ -2420,6 +2424,24 @@ class DebugExecutor:
         return []
 
     @staticmethod
+    def _wrapped_container_adapter_elements(var: _ParsedVar) -> list[_ParsedElement]:
+        if not DebugExecutor._is_container_adapter_type(var.type):
+            return []
+        for member in var.members:
+            if member.name not in {"c", "container", "_Get_container"}:
+                continue
+            payload = DebugExecutor._structured_payload(member.value)
+            if not payload:
+                continue
+            elements = DebugExecutor._parse_structured_elements(
+                payload,
+                DebugExecutor._adapter_element_type(var.type),
+            )
+            if elements:
+                return elements
+        return []
+
+    @staticmethod
     def _array_element_type(type_text: str) -> str:
         cleaned = DebugExecutor._clean_type(type_text)
         if "[" in cleaned:
@@ -2430,6 +2452,47 @@ class DebugExecutor:
     def _is_std_array_type(type_text: str) -> bool:
         compact = DebugExecutor._clean_type(type_text).replace(" ", "")
         return any(token in compact for token in ("array<", "std::array<", "std::__1::array<"))
+
+    @staticmethod
+    def _is_container_adapter_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(
+            token in compact
+            for token in (
+                "queue<",
+                "stack<",
+                "priority_queue<",
+                "std::queue<",
+                "std::stack<",
+                "std::priority_queue<",
+                "std::__1::queue<",
+                "std::__1::stack<",
+                "std::__1::priority_queue<",
+            )
+        )
+
+    @staticmethod
+    def _adapter_element_type(type_text: str) -> str:
+        compact_start = type_text.find("<")
+        if compact_start < 0:
+            return ""
+        depth = 0
+        arg: list[str] = []
+        for ch in type_text[compact_start + 1:]:
+            if ch == "<":
+                depth += 1
+                arg.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    break
+                depth -= 1
+                arg.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                break
+            arg.append(ch)
+        return DebugExecutor._clean_type("".join(arg).strip())
 
     @staticmethod
     def _is_null(value: str) -> bool:

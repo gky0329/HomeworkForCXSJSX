@@ -87,6 +87,8 @@
 
 `std::array<T, N>` 会解包其调试器实现字段（如 `__elems_` / `_Elems`），按普通数组的 `elements` cell 渲染，而不是显示为单个对象成员。
 
+STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包底层容器字段 `c`，按 `elements` cell 渲染当前存储内容，避免把实现细节当成业务成员展示。
+
 ---
 
 ## 3. struct / class (members)
