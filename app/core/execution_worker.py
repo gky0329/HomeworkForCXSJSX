@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 
 from PySide6.QtCore import QThread, Signal
 
@@ -8,6 +9,12 @@ from app.core.memory_model import ExecutionTrace
 from app.core.ai_executor import AIExecutor
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ExecutionResult:
+    trace: ExecutionTrace
+    diagnostics: str = ""
 
 
 class ExecutionWorker(QThread):
@@ -24,7 +31,10 @@ class ExecutionWorker(QThread):
         try:
             executor = AIExecutor(self._config_path)
             trace = asyncio.run(executor.run_code(self._code, self._stdin_text))
-            self.finished.emit(trace)
+            self.finished.emit(ExecutionResult(
+                trace=trace,
+                diagnostics=getattr(executor, "execution_summary", ""),
+            ))
         except Exception as e:
             logger.error("Execution failed: %s", e)
             self.error.emit(str(e))

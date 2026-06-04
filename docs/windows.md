@@ -33,6 +33,9 @@ Do not advertise the MSVC/PDB backend as stable until the smoke tests below pass
 When an API key is configured, very large control-flow-heavy programs are sent
 directly to the AI fallback instead of first waiting for LLDB/CDB to time out.
 Small and medium visual examples still prefer the native debugger path.
+After a code run, the app status bar shows the execution source, for example
+`Native debugger: MSVC / PDB` or `AI fallback after native debugger failed: ...`.
+Use that message when reporting Windows validation results.
 
 ## Experimental MSVC/PDB Validation
 

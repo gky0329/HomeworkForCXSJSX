@@ -13,7 +13,7 @@ from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
-from app.core.execution_worker import ExecutionWorker
+from app.core.execution_worker import ExecutionResult, ExecutionWorker
 from app.core.debug_executor import DebugExecutor
 from app.ui.widgets import error_dialog
 from app.ui.widgets.threading import retire_worker
@@ -77,6 +77,7 @@ class Engine:
         self._worker: ExecutionWorker | None = None
         self._retired_workers: list[ExecutionWorker] = []
         self._last_code: str = ""
+        self._execution_diagnostics: str = ""
         self._auto_play_timer = QTimer()
         self._auto_play_timer.timeout.connect(self._on_next)
         self._auto_play_ms = 800
@@ -104,6 +105,7 @@ class Engine:
                 ],
             )
             self._worker = None
+        self._execution_diagnostics = ""
         self._window.show_loading(False)
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
@@ -134,7 +136,15 @@ class Engine:
         self._worker.error.connect(self._on_trace_error)
         self._worker.start()
 
-    def _on_trace_ready(self, trace: ExecutionTrace):
+    def _on_trace_ready(self, result: ExecutionTrace | ExecutionResult):
+        if isinstance(result, ExecutionResult):
+            trace = result.trace
+            diagnostics = result.diagnostics
+        else:
+            trace = result
+            diagnostics = ""
+        self._execution_diagnostics = diagnostics
+
         self._window.show_loading(False)
         self._trace = trace
         self._canvas.clear()
@@ -148,11 +158,13 @@ class Engine:
             self._queue_canvas_fit()
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
-            self._window.statusBar().showMessage(
-                tr("Step 1/{total} - Press PageDown for next step", total=len(trace.steps))
-            )
+            message = tr("Step 1/{total} - Press PageDown for next step", total=len(trace.steps))
+            if diagnostics:
+                message = f"{message} [{diagnostics}]"
+            self._window.statusBar().showMessage(message)
         else:
             self._current_index = -1
+            self._execution_diagnostics = ""
             self._window.canvas_view.clear_stable_fit_bounds()
             self._window.statusBar().showMessage(tr("AI returned empty trace"))
 
@@ -161,6 +173,7 @@ class Engine:
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
+        self._execution_diagnostics = ""
         self._window.statusBar().showMessage(
             tr("Error: {message}", message=error_msg.split(chr(10))[0])
         )
@@ -226,6 +239,7 @@ class Engine:
         self._auto_play_timer.stop()
         self._trace = None
         self._current_index = -1
+        self._execution_diagnostics = ""
         self._animator.stop_all()
         self._canvas.clear()
         self._window.canvas_view.clear_stable_fit_bounds()
@@ -325,11 +339,12 @@ class Engine:
         self._window.btn_autoplay.setEnabled(has_next)
         if not has_next:
             self._window.btn_autoplay.setChecked(False)
-        self._window.statusBar().showMessage(
-            tr(
-                "Step {current}/{total} - {hint}",
-                current=current,
-                total=total,
-                hint=tr("PageDown=next PageUp=prev") if self._trace else tr("Enter C++ code and click Run"),
-            )
+        message = tr(
+            "Step {current}/{total} - {hint}",
+            current=current,
+            total=total,
+            hint=tr("PageDown=next PageUp=prev") if self._trace else tr("Enter C++ code and click Run"),
         )
+        if self._trace and self._execution_diagnostics:
+            message = f"{message} [{self._execution_diagnostics}]"
+        self._window.statusBar().showMessage(message)

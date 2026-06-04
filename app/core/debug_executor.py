@@ -118,6 +118,8 @@ class DebugExecutor:
 
     def __init__(self, preferred_backend: str | None = None):
         self._preferred_backend = preferred_backend
+        self.last_backend_id = ""
+        self.last_backend_label = ""
 
     @staticmethod
     def is_available() -> bool:
@@ -362,12 +364,17 @@ class DebugExecutor:
                 raise DebugExecutionError(f"{status.label} backend is not implemented yet")
             if not status.available:
                 raise DebugExecutionError(status.detail)
+            self.last_backend_id = status.id
+            self.last_backend_label = status.label
             return status.id
 
         backend = self.available_backend()
         if backend is None:
             details = "; ".join(status.detail for status in statuses.values())
             raise DebugExecutionError(f"No supported debugger/compiler found: {details}")
+        status = statuses.get(backend)
+        self.last_backend_id = backend
+        self.last_backend_label = status.label if status is not None else backend
         return backend
 
     def _run_lldb_dwarf(self, code: str, stdin_text: str = "") -> ExecutionTrace:

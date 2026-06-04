@@ -714,6 +714,8 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _current_code_tab_active(self) -> bool:
+        if not hasattr(self, "_tabs") or not hasattr(self, "_code_tab"):
+            return False
         return self._tabs.currentWidget() is self._code_tab
 
     def _retranslate_ui(self):

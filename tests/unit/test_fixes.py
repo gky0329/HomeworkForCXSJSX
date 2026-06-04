@@ -359,6 +359,45 @@ def test_code_editor_auto_fit_defaults_to_initial_fit_only():
         window.close()
 
 
+def test_code_editor_status_shows_execution_diagnostics():
+    """Successful runs should show whether the trace came from native or AI fallback."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.engine import Engine
+    from app.core.execution_worker import ExecutionResult
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        engine = Engine(window)
+        engine._queue_canvas_fit = lambda: None
+        trace = ExecutionTrace(steps=[
+            MemoryState(
+                line_number=1,
+                source_code="int a = 1;",
+                stack=[StackFrame(frame_name="main", variables=[
+                    Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                ])],
+                heap=[],
+                edges=[],
+            ),
+        ])
+
+        with patch("app.core.engine.error_store.log_activity"), patch("app.core.engine.error_store.add_knowledge_point"):
+            engine._on_trace_ready(ExecutionResult(
+                trace=trace,
+                diagnostics="Native debugger: MSVC / PDB",
+            ))
+
+        assert "Native debugger: MSVC / PDB" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+
+
 def test_memory_canvas_prepares_trace_wide_fit_bounds():
     """Trace layout planning should include later heap/object-heavy steps."""
     from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
@@ -5521,6 +5560,8 @@ def test_ai_executor_prefers_debug_executor_without_ai_call():
     captured = {}
 
     class FakeDebugExecutor:
+        last_backend_label = "LLDB / DWARF"
+
         def run_code(self, code, stdin_text=""):
             captured["code"] = code
             captured["stdin"] = stdin_text
@@ -5534,11 +5575,13 @@ def test_ai_executor_prefers_debug_executor_without_ai_call():
         with patch("app.core.ai_executor.AIService", return_value=FailingAIService()):
             from app.core.ai_executor import AIExecutor
 
-            result = asyncio.run(AIExecutor().run_code("int a = 1;"))
+            executor = AIExecutor()
+            result = asyncio.run(executor.run_code("int a = 1;"))
 
     assert result is expected
     assert captured["code"] == "int a = 1;"
     assert captured["stdin"] == ""
+    assert executor.execution_summary == "Native debugger: LLDB / DWARF"
 
 
 def test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run():
@@ -5559,9 +5602,11 @@ def test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run():
         with patch("app.core.ai_executor.AIService", return_value=FakeAIService()):
             from app.core.ai_executor import AIExecutor
 
-            result = asyncio.run(AIExecutor().run_code("template <class T> T f(T x) { return x; }"))
+            executor = AIExecutor()
+            result = asyncio.run(executor.run_code("template <class T> T f(T x) { return x; }"))
 
     assert result.steps == []
+    assert executor.execution_summary == "AI fallback after native debugger failed: unsupported code"
 
 
 def test_ai_executor_skips_complex_native_when_ai_key_is_configured():
@@ -5593,10 +5638,12 @@ def test_ai_executor_skips_complex_native_when_ai_key_is_configured():
         with patch("app.core.ai_executor.AIService", return_value=FakeAIService()):
             from app.core.ai_executor import AIExecutor
 
-            result = asyncio.run(AIExecutor().run_code(complex_code))
+            executor = AIExecutor()
+            result = asyncio.run(executor.run_code(complex_code))
 
     assert result.steps == []
     assert complex_code in captured["user_message"]
+    assert executor.execution_summary == "AI fallback: complex code skipped native debugger"
 
 
 def test_ai_executor_keeps_native_for_complex_code_without_ai_key():
@@ -8780,6 +8827,7 @@ if __name__ == "__main__":
         test_memory_canvas_registers_array_element_pointer_edge_sources,
         test_canvas_view_uses_stable_fit_bounds,
         test_code_editor_auto_fit_defaults_to_initial_fit_only,
+        test_code_editor_status_shows_execution_diagnostics,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
