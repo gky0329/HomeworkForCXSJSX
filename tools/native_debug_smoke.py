@@ -54,6 +54,110 @@ def _member_map(var: Variable) -> dict[str, str]:
     return {member.name: member.value for member in var.members}
 
 
+def _variable_summary(var: Variable) -> dict[str, object]:
+    return {
+        "name": var.name,
+        "type": var.type,
+        "value": var.value,
+        "is_pointer": var.is_pointer,
+        "is_array": var.is_array,
+        "element_count": var.element_count,
+        "elements": [
+            {"index": element.index, "value": element.value}
+            for element in var.elements[:8]
+        ],
+        "is_object": var.is_object,
+        "members": [
+            {"name": member.name, "type": member.type, "value": member.value}
+            for member in var.members[:8]
+        ],
+    }
+
+
+def _trace_summary(trace: ExecutionTrace) -> dict[str, object]:
+    last_state: MemoryState | None = None
+    for state in reversed(trace.steps):
+        if state.stack or state.heap or state.edges:
+            last_state = state
+            break
+    if last_state is None and trace.steps:
+        last_state = trace.steps[-1]
+
+    if last_state is None:
+        return {
+            "step_count": 0,
+            "last_line": None,
+            "last_source": "",
+            "frames": [],
+            "heap": [],
+            "edges": [],
+        }
+
+    return {
+        "step_count": len(trace.steps),
+        "last_line": last_state.line_number,
+        "last_source": last_state.source_code,
+        "frames": [
+            {
+                "name": frame.frame_name,
+                "variables": [_variable_summary(var) for var in frame.variables],
+            }
+            for frame in last_state.stack
+        ],
+        "heap": [
+            {
+                "address": block.address,
+                "type": block.type,
+                "value": block.value,
+                "is_freed": block.is_freed,
+                "is_array": block.is_array,
+                "element_count": block.element_count,
+                "elements": [
+                    {"index": element.index, "value": element.value}
+                    for element in block.elements[:8]
+                ],
+                "is_object": block.is_object,
+                "members": [
+                    {"name": member.name, "type": member.type, "value": member.value}
+                    for member in block.members[:8]
+                ],
+            }
+            for block in last_state.heap
+        ],
+        "edges": [
+            {
+                "source": edge.source_address,
+                "target": edge.target_address,
+                "dangling": edge.is_dangling,
+            }
+            for edge in last_state.edges
+        ],
+    }
+
+
+def _write_trace_dump(
+    dump_dir: Path,
+    case: SmokeCase,
+    trace: ExecutionTrace,
+    summary: dict[str, object],
+) -> Path:
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    path = dump_dir / f"{case.name}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "case": case.name,
+                "code": case.code,
+                "summary": summary,
+                "trace": trace.model_dump(mode="json"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _validate_basic_double(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     if len(trace.steps) < 3:
@@ -211,17 +315,28 @@ def _backend_status() -> list[dict[str, object]]:
     ]
 
 
-def _run_case(case: SmokeCase, backend: str | None, render: bool) -> dict[str, object]:
+def _run_case(
+    case: SmokeCase,
+    backend: str | None,
+    render: bool,
+    dump_dir: Path | None = None,
+) -> dict[str, object]:
     result: dict[str, object] = {
         "name": case.name,
         "ok": False,
         "steps": 0,
         "rendered_items": None,
         "errors": [],
+        "summary": None,
+        "trace_path": None,
     }
     try:
         trace = DebugExecutor(preferred_backend=backend).run_code(case.code)
         result["steps"] = len(trace.steps)
+        summary = _trace_summary(trace)
+        result["summary"] = summary
+        if dump_dir is not None:
+            result["trace_path"] = str(_write_trace_dump(dump_dir, case, trace, summary))
         errors = case.validate(trace)
         if render:
             result["rendered_items"] = _render_trace(trace)
@@ -257,6 +372,16 @@ def parse_args() -> argparse.Namespace:
         help="Print machine-readable JSON only.",
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print trace summaries for passing cases too.",
+    )
+    parser.add_argument(
+        "--dump-traces",
+        type=Path,
+        help="Write each successful case trace as JSON files under this directory.",
+    )
+    parser.add_argument(
         "--list-backends",
         action="store_true",
         help="Print debugger backend availability and exit.",
@@ -273,7 +398,15 @@ def main() -> int:
         return 0
 
     selected_cases = [CASES[name] for name in (args.case or sorted(CASES))]
-    results = [_run_case(case, backend, render=not args.no_render) for case in selected_cases]
+    results = [
+        _run_case(
+            case,
+            backend,
+            render=not args.no_render,
+            dump_dir=args.dump_traces,
+        )
+        for case in selected_cases
+    ]
     payload = {
         "backend": args.backend,
         "render": not args.no_render,
@@ -296,6 +429,19 @@ def main() -> int:
             )
             for error in result["errors"]:
                 print(f"  - {error}")
+            if args.verbose or not result["ok"]:
+                summary = result.get("summary")
+                if isinstance(summary, dict):
+                    print(
+                        "  summary: "
+                        f"line={summary.get('last_line')} "
+                        f"source={summary.get('last_source')!r}"
+                    )
+                    print(f"  frames: {json.dumps(summary.get('frames'), ensure_ascii=False)}")
+                    print(f"  heap: {json.dumps(summary.get('heap'), ensure_ascii=False)}")
+                    print(f"  edges: {json.dumps(summary.get('edges'), ensure_ascii=False)}")
+                if result.get("trace_path"):
+                    print(f"  trace: {result['trace_path']}")
 
     return 0 if all(result["ok"] for result in results) else 1
 

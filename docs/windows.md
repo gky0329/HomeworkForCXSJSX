@@ -65,6 +65,9 @@ python tools/native_debug_smoke.py --list-backends
 # Produce JSON that can be pasted into chat or an issue.
 python tools/native_debug_smoke.py --backend msvc-pdb --json
 
+# Print observed stack/heap/edge summaries and save full trace JSON files.
+python tools/native_debug_smoke.py --backend msvc-pdb --verbose --dump-traces .\pdb-smoke-traces
+
 # Narrow a failure to one case.
 python tools/native_debug_smoke.py --backend msvc-pdb --case basic_double
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_object

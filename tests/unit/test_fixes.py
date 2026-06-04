@@ -2381,6 +2381,55 @@ def test_graph_page_named_canvas_class():
     assert _GraphCanvas.__name__ == "_GraphCanvas"
 
 
+def test_native_debug_smoke_summarizes_and_dumps_trace():
+    """Native smoke reports enough stack/heap/edge context for Windows failures."""
+    from app.core.memory_model import (
+        ExecutionTrace,
+        HeapBlock,
+        MemoryState,
+        PointerEdge,
+        StackFrame,
+        StructMember,
+        Variable,
+    )
+    from tools.native_debug_smoke import CASES, _trace_summary, _write_trace_dump
+
+    trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=2,
+            source_code="Point* hp = new Point{1, 2.5};",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="hp", type="Point*", value="0xH001", address="0xS001", is_pointer=True),
+            ])],
+            heap=[HeapBlock(
+                address="0xH001",
+                type="Point",
+                value="{x=1, y=2.5}",
+                is_object=True,
+                members=[
+                    StructMember(name="x", type="int", value="1"),
+                    StructMember(name="y", type="double", value="2.5"),
+                ],
+            )],
+            edges=[PointerEdge(source_address="0xS001", target_address="0xH001")],
+        ),
+    ])
+
+    summary = _trace_summary(trace)
+    assert summary["step_count"] == 1
+    assert summary["frames"][0]["variables"][0]["name"] == "hp"
+    assert summary["heap"][0]["members"][1]["value"] == "2.5"
+    assert summary["edges"][0]["target"] == "0xH001"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = _write_trace_dump(Path(tmpdir), CASES["heap_object"], trace, summary)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["case"] == "heap_object"
+    assert payload["summary"]["heap"][0]["type"] == "Point"
+    assert payload["trace"]["steps"][0]["line_number"] == 2
+
+
 # ── Runner ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2460,6 +2509,7 @@ if __name__ == "__main__":
         test_ai_service_invalid_json_error_has_context_and_raw_response,
         test_extract_code_preserves_comments,
         test_graph_page_named_canvas_class,
+        test_native_debug_smoke_summarizes_and_dumps_trace,
     ]
 
     passed = 0
