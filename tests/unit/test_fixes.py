@@ -5152,6 +5152,161 @@ __CXXMV_FRAMEDX__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_stl_container_breadth():
+    """CDB/PDB dx output should cover common STL sequence/set/hash containers."""
+    from app.core.debug_executor import DebugExecutor
+
+    def parse_step(code: str, original_line: int, framev: str, dx_rows: str):
+        executor = DebugExecutor()
+        prepared = executor._prepare_source(code)
+        generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+        line = generated_lines[original_line]
+        output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+{framev}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+{dx_rows}
+"""
+        return executor._parse_cdb_output(output, prepared).steps[0]
+
+    deque_step = parse_step(
+        "#include <deque>\n"
+        "using namespace std;\n"
+        "deque<int> xs;\n"
+        "xs.push_back(1);\n"
+        "xs.push_back(2);\n"
+        "xs.push_front(0);\n"
+        "xs[2] = 8;\n",
+        7,
+        "000000aa`0000efe0 std::deque<int> xs = size=3",
+        "    xs : { size=3 } [Type: std::deque<int>]\n"
+        "        [0] : 0 [Type: int]\n"
+        "        [1] : 1 [Type: int]\n"
+        "        [2] : 8 [Type: int]",
+    )
+    deque = deque_step.stack[0].variables[0]
+    assert deque.name == "xs"
+    assert deque.is_array is True
+    assert deque.value == "{[0]=0, [1]=1, [2]=8}"
+    assert [(element.index, element.type, element.value) for element in deque.elements] == [
+        (0, "int", "0"),
+        (1, "int", "1"),
+        (2, "int", "8"),
+    ]
+
+    list_step = parse_step(
+        "#include <list>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "list<int*> xs;\n"
+        "xs.push_back(&a);\n"
+        "xs.push_back(&b);\n"
+        "auto it = xs.begin();\n"
+        "++it;\n"
+        "**it = 9;\n",
+        10,
+        "000000aa`0000efd0 int a = 1\n"
+        "000000aa`0000efd4 int b = 9\n"
+        "000000aa`0000efe0 std::list<int *> xs = size=2",
+        "    xs : { size=2 } [Type: std::list<int *>]\n"
+        "        [0] : 0x000000aa0000efd0 [Type: int *]\n"
+        "        [1] : 0x000000aa0000efd4 [Type: int *]",
+    )
+    list_values = {var.name: var for var in list_step.stack[0].variables}
+    list_xs = list_values["xs"]
+    assert list_values["b"].value == "9"
+    assert list_xs.is_array is True
+    assert [(element.index, element.value) for element in list_xs.elements] == [
+        (0, list_values["a"].address),
+        (1, list_values["b"].address),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in list_step.edges
+    } == {
+        (list_xs.elements[0].address, list_values["a"].address),
+        (list_xs.elements[1].address, list_values["b"].address),
+    }
+
+    set_step = parse_step(
+        "#include <set>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "set<int*> xs;\n"
+        "xs.insert(&a);\n"
+        "xs.insert(&b);\n"
+        "int count = xs.size();\n",
+        8,
+        "000000aa`0000efd0 int a = 1\n"
+        "000000aa`0000efd4 int b = 2\n"
+        "000000aa`0000efe0 std::set<int *> xs = size=2\n"
+        "000000aa`0000efe8 int count = 2",
+        "    xs : { size=2 } [Type: std::set<int *>]\n"
+        "        [0] : 0x000000aa0000efd4 [Type: int *]\n"
+        "        [1] : 0x000000aa0000efd0 [Type: int *]",
+    )
+    set_values = {var.name: var for var in set_step.stack[0].variables}
+    set_xs = set_values["xs"]
+    assert set_values["count"].value == "2"
+    assert set_xs.is_array is True
+    assert {element.value for element in set_xs.elements} == {
+        set_values["a"].address,
+        set_values["b"].address,
+    }
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in set_step.edges
+    } == {
+        (element.address, element.value)
+        for element in set_xs.elements
+    }
+
+    unordered_step = parse_step(
+        "#include <string>\n"
+        "#include <unordered_map>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "unordered_map<string, int*> m;\n"
+        'm["a"] = &a;\n'
+        'm["b"] = &b;\n'
+        '*m["b"] = 9;\n',
+        9,
+        "000000aa`0000efd0 int a = 1\n"
+        "000000aa`0000efd4 int b = 9\n"
+        "000000aa`0000efe0 std::unordered_map<std::string,int *> m = size=2",
+        "    m : { size=2 } [Type: std::unordered_map<std::string,int *>]\n"
+        "        [0] : {first=\"b\", second=0x000000aa0000efd4} [Type: std::pair<const std::string,int *>]\n"
+        "            first : \"b\" [Type: std::string]\n"
+        "            second : 0x000000aa0000efd4 [Type: int *]\n"
+        "        [1] : {first=\"a\", second=0x000000aa0000efd0} [Type: std::pair<const std::string,int *>]\n"
+        "            first : \"a\" [Type: std::string]\n"
+        "            second : 0x000000aa0000efd0 [Type: int *]",
+    )
+    unordered_values = {var.name: var for var in unordered_step.stack[0].variables}
+    unordered_m = unordered_values["m"]
+    assert unordered_values["b"].value == "9"
+    assert unordered_m.is_array is True
+    assert [(element.index, element.value) for element in unordered_m.elements] == [
+        (0, "{first=b, second=" + unordered_values["b"].address + "}"),
+        (1, "{first=a, second=" + unordered_values["a"].address + "}"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in unordered_step.edges
+    } == {
+        (unordered_m.elements[0].address, unordered_values["b"].address),
+        (unordered_m.elements[1].address, unordered_values["a"].address),
+    }
+
+
 def test_debug_executor_filters_future_locals_from_stack_snapshots():
     """Future loop/call locals should not appear before their source line completes."""
     from app.core.debug_executor import DebugExecutor
@@ -8623,6 +8778,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_map_unique_ptr_object_heap_members,
         test_debug_executor_parses_cdb_dx_map_polymorphic_shared_ptr_dynamic_heap_type,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
+        test_debug_executor_parses_cdb_dx_stl_container_breadth,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
         test_debug_executor_lldb_timeout_is_debug_execution_error,
