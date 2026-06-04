@@ -355,6 +355,41 @@ def _validate_vector_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_optional_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "op")
+    if match is None:
+        return ["missing optional pointer variable op"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_object:
+        errors.append("op should be marked as an object with an engaged value")
+    if var.class_name != "optional<int*>":
+        errors.append(f"op class_name expected optional<int*>, got {var.class_name!r}")
+    if len(var.members) != 1:
+        errors.append(f"op expected one value member, got {[(m.name, m.type, m.value) for m in var.members]!r}")
+        return errors
+    value_member = var.members[0]
+    if value_member.name != "value":
+        errors.append(f"op member name expected value, got {value_member.name!r}")
+    if value_member.type != "int*":
+        errors.append(f"op value member type expected int*, got {value_member.type!r}")
+    a_match = _last_var(trace, "a")
+    if a_match is None:
+        errors.append("missing a variable after optional pointer write")
+        return errors
+    a = a_match[1]
+    if a.value != "5":
+        errors.append(f"a expected 5 after *op.value() write, got {a.value!r}")
+    if value_member.value != a.address:
+        errors.append(f"op value member should point to a, got {value_member.value!r}")
+    if not any(
+        edge.source_address == value_member.address and edge.target_address == a.address
+        for edge in state.edges
+    ):
+        errors.append("missing op.value -> a pointer edge")
+    return errors
+
+
 def _validate_stack_adapter(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "s")
     if match is None:
@@ -1354,6 +1389,17 @@ CASES: dict[str, SmokeCase] = {
             "*ptrs[1] = 9;\n"
         ),
         validate=_validate_vector_pointer,
+    ),
+    "optional_pointer": SmokeCase(
+        name="optional_pointer",
+        code=(
+            "#include <optional>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "optional<int*> op = &a;\n"
+            "*op.value() = 5;\n"
+        ),
+        validate=_validate_optional_pointer,
     ),
     "vector_object": SmokeCase(
         name="vector_object",

@@ -1443,6 +1443,89 @@ __CXXMV_FRAME__0__{line + 1}__main
     assert step.heap == []
 
 
+def test_debug_executor_parses_lldb_optional_pointer_member_edge():
+    """optional<T*> should expose its engaged value as a member pointer edge."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <optional>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "optional<int*> op = &a;\n"
+        "*op.value() = 5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[5]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (int) a = 5
+0x000000016fdfe6c0: (std::__1::optional<int *>) op = {{
+0x000000016fdfe6c0:   (std::__1::remove_cv_t<value_type>) Value = 0x000000016fdfe6b0
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    op = values["op"]
+    value_member = op.members[0]
+
+    assert values["a"].value == "5"
+    assert op.is_object is True
+    assert op.class_name == "optional<int*>"
+    assert op.value == "{value=" + values["a"].address + "}"
+    assert (value_member.name, value_member.type, value_member.value) == ("value", "int*", values["a"].address)
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {(value_member.address, values["a"].address)}
+    assert step.heap == []
+
+
+def test_debug_executor_formats_lldb_optional_empty_state():
+    """Disengaged optional values should show empty instead of raw debugger text."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <optional>\n"
+        "using namespace std;\n"
+        "optional<int> maybe;\n"
+        "maybe = 42;\n"
+        "maybe.reset();\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[5]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (std::__1::optional<int>) maybe = Has Value=false
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    maybe = trace.steps[0].stack[0].variables[0]
+
+    assert maybe.value == "empty"
+    assert maybe.is_object is False
+    assert maybe.members == []
+
+
+def test_debug_executor_preserves_template_pointer_in_object_class_name():
+    """Class names should keep template pointer arguments for optional/variant."""
+    from app.core.debug_executor import DebugExecutor
+
+    assert DebugExecutor._object_class_name("std::__1::optional<int *>") == "optional<int*>"
+    assert DebugExecutor._object_class_name("std::__1::variant<int *, double>") == "variant<int*, double>"
+
+
 def test_debug_executor_parses_vector_string_elements_from_summaries():
     """vector<string> should expand string children instead of showing only size=N."""
     from app.core.debug_executor import DebugExecutor
@@ -2776,6 +2859,52 @@ __CXXMV_FRAMEDX__0
         (ptrs.elements[0].address, values["a"].address),
         (ptrs.elements[1].address, values["b"].address),
     }
+    assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_optional_pointer_member_edge():
+    """CDB/PDB optional<T*> should infer value_type and keep the pointer edge."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <optional>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "optional<int*> op = &a;\n"
+        "*op.value() = 5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[5]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int a = 5
+000000aa`0000efe0 std::optional<int *> op = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    op : {{ Value=0x000000aa0000efd0 }} [Type: std::optional<int *>]
+        Value : 0x000000aa0000efd0 [Type: std::remove_cv_t<value_type>]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    op = values["op"]
+    value_member = op.members[0]
+
+    assert values["a"].value == "5"
+    assert op.is_object is True
+    assert op.class_name == "optional<int*>"
+    assert op.value == "{value=" + values["a"].address + "}"
+    assert (value_member.name, value_member.type, value_member.value) == ("value", "int*", values["a"].address)
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {(value_member.address, values["a"].address)}
     assert step.heap == []
 
 
@@ -5312,6 +5441,62 @@ def test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_contain
     assert _validate_vector_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_optional_pointer_member_edge():
+    """Native smoke should prove optional<T*> value members render pointer edges."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import _validate_optional_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="*op.value() = 5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="5", address="0xS001", is_pointer=False),
+                Variable(
+                    name="op",
+                    type="std::optional<int*>",
+                    value="{Value=0x000000aa0000efd0}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="optional<int>",
+                    members=[StructMember(name="Value", type="std::remove_cv_t<value_type>", value="0x000000aa0000efd0", address="0xS002.Value")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=5,
+            source_code="*op.value() = 5;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="5", address="0xS001", is_pointer=False),
+                Variable(
+                    name="op",
+                    type="std::optional<int*>",
+                    value="{value=0xS001}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    class_name="optional<int*>",
+                    members=[StructMember(name="value", type="int*", value="0xS001", address="0xS002.Value")],
+                ),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002.Value", target_address="0xS001")],
+        ),
+    ])
+
+    weak_errors = _validate_optional_pointer(weak_trace)
+    assert "op class_name expected optional<int*>, got 'optional<int>'" in weak_errors
+    assert "op member name expected value, got 'Value'" in weak_errors
+    assert "op value member type expected int*, got 'std::remove_cv_t<value_type>'" in weak_errors
+    assert "missing op.value -> a pointer edge" in weak_errors
+    assert _validate_optional_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -5914,6 +6099,9 @@ if __name__ == "__main__":
         test_debug_executor_parses_lldb_container_adapters_as_array_variables,
         test_debug_executor_parses_vector_elements_as_array_variable,
         test_debug_executor_parses_lldb_vector_of_pointers_as_array_not_pointer,
+        test_debug_executor_parses_lldb_optional_pointer_member_edge,
+        test_debug_executor_formats_lldb_optional_empty_state,
+        test_debug_executor_preserves_template_pointer_in_object_class_name,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
         test_debug_executor_preserves_nested_array_child_values,
@@ -5950,6 +6138,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_std_array_as_array_variable,
         test_debug_executor_parses_cdb_container_adapters_as_array_variables,
         test_debug_executor_parses_cdb_vector_of_pointers_as_array_not_pointer,
+        test_debug_executor_parses_cdb_optional_pointer_member_edge,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -6002,6 +6191,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_std_array_elements,
         test_native_debug_smoke_requires_container_adapter_elements,
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
+        test_native_debug_smoke_requires_optional_pointer_member_edge,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

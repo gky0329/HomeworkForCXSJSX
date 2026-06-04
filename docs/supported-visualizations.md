@@ -362,6 +362,14 @@ std::vector<int*> ptrs = {&a, &b};
 ```
 预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9；`ptrs[0]` / `ptrs[1]` 单元格分别画出指向 `a` / `b` 的箭头
 
+### std::optional 指针值测试
+```cpp
+int a = 1;
+std::optional<int*> op = &a;
+*op.value() = 5;
+```
+预期: `op` 显示为 `optional<int*>` 对象，内部 `.value: int* = 0xS...` 成员行作为箭头起点指向 `a`；`a` 的值变成 5。`optional<int>` 为空时显示 `empty`，不展示 `Has Value=false` 这类调试器摘要。
+
 ### 运算符重载测试
 ```cpp
 class Cents { int m_cents; };

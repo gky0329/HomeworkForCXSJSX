@@ -1059,6 +1059,7 @@ class DebugExecutor:
                 )
                 member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
                     parsed.members,
+                    owner_type=parsed.type,
                     owner_address=stack_addr,
                     actual_stack_lookup=actual_stack_lookup,
                     stack_addr_map=stack_addr_map,
@@ -1070,6 +1071,8 @@ class DebugExecutor:
                     value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
                 elif (is_pointer or is_reference) and self._is_null(value):
                     value = "nullptr"
+                elif self._is_optional_type(parsed.type) and self._is_optional_empty_summary(value):
+                    value = "empty"
                 elif element_models:
                     value = self._format_array_element_models(element_models)
                 elif member_models:
@@ -2208,6 +2211,7 @@ class DebugExecutor:
             metadata = class_info.get(class_name, _ClassInfo())
             member_models = self._struct_members_from_parsed(
                 members,
+                owner_type=object_type or default_type,
                 owner_address=target_addr,
                 actual_stack_lookup=actual_stack_lookup,
                 stack_addr_map=stack_addr_map,
@@ -2280,44 +2284,73 @@ class DebugExecutor:
     def _struct_members_from_parsed(
         self,
         members: list[_ParsedMember],
+        owner_type: str,
         owner_address: str,
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
     ) -> list[StructMember]:
-        return [
-            StructMember(
-                name=member.name,
-                type=self._clean_type(member.type),
-                value=self._member_display_value(
-                    member,
-                    actual_stack_lookup,
-                    stack_addr_map,
-                    heap_addr_map,
-                ),
-                address=self._member_sim_addr(owner_address, member.name, index),
+        member_models: list[StructMember] = []
+        seen: set[tuple[str, str, str]] = set()
+        for member in members:
+            name = self._semantic_member_name(owner_type, member)
+            member_type = self._semantic_member_type(owner_type, member)
+            value = self._member_display_value(
+                member,
+                owner_type,
+                actual_stack_lookup,
+                stack_addr_map,
+                heap_addr_map,
             )
-            for index, member in enumerate(members)
-        ]
+            key = (name, member_type, value)
+            if key in seen:
+                continue
+            seen.add(key)
+            member_models.append(StructMember(
+                name=name,
+                type=member_type,
+                value=value,
+                address=self._member_sim_addr(owner_address, member.name, len(member_models)),
+            ))
+        return member_models
 
     def _member_display_value(
         self,
         member: _ParsedMember,
+        owner_type: str,
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         heap_addr_map: dict[str, str],
     ) -> str:
         value = self._clean_value(member.value)
-        is_reference = self._is_reference_type(member.type)
-        if (self._is_pointer_like_type(member.type) or is_reference) and self._is_null(value):
+        member_type = self._semantic_member_type(owner_type, member)
+        is_reference = self._is_reference_type(member_type)
+        if (self._is_pointer_like_type(member_type) or is_reference) and self._is_null(value):
             return "nullptr"
         if (
-            (self._is_pointer_like_type(member.type) or is_reference)
+            (self._is_pointer_like_type(member_type) or is_reference)
             and (self._is_hex_addr(value) or self._is_cdb_addr(value))
         ):
             value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
             return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
         return value
+
+    @staticmethod
+    def _semantic_member_name(owner_type: str, member: _ParsedMember) -> str:
+        if DebugExecutor._is_optional_type(owner_type) and member.name == "Value":
+            return "value"
+        if DebugExecutor._is_variant_type(owner_type) and member.name == "Value":
+            return "value"
+        return member.name
+
+    @staticmethod
+    def _semantic_member_type(owner_type: str, member: _ParsedMember) -> str:
+        cleaned_member_type = DebugExecutor._clean_type(member.type)
+        if DebugExecutor._is_optional_type(owner_type) and member.name == "Value":
+            value_type = DebugExecutor._first_template_arg(owner_type)
+            if value_type:
+                return value_type
+        return cleaned_member_type
 
     @staticmethod
     def _member_sim_addr(owner_address: str, member_name: str, index: int) -> str:
@@ -2570,6 +2603,10 @@ class DebugExecutor:
 
     @staticmethod
     def _adapter_element_type(type_text: str) -> str:
+        return DebugExecutor._first_template_arg(type_text)
+
+    @staticmethod
+    def _first_template_arg(type_text: str) -> str:
         compact_start = type_text.find("<")
         if compact_start < 0:
             return ""
@@ -2592,6 +2629,21 @@ class DebugExecutor:
         return DebugExecutor._clean_type("".join(arg).strip())
 
     @staticmethod
+    def _is_optional_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("optional<", "std::optional<", "std::__1::optional<"))
+
+    @staticmethod
+    def _is_variant_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("variant<", "std::variant<", "std::__1::variant<"))
+
+    @staticmethod
+    def _is_optional_empty_summary(value: str) -> bool:
+        compact = value.strip().replace(" ", "").lower()
+        return compact in {"hasvalue=false", "nullopt", "empty"}
+
+    @staticmethod
     def _is_null(value: str) -> bool:
         stripped = value.strip().lower()
         return stripped in {"0x0", "0x0000000000000000", "nullptr", "null"}
@@ -2604,10 +2656,32 @@ class DebugExecutor:
     def _object_class_name(type_text: str) -> str:
         cleaned = DebugExecutor._clean_type(type_text)
         cleaned = re.sub(r"\b(?:class|struct|const|volatile)\b", "", cleaned).strip()
-        cleaned = cleaned.replace("*", "").replace("&", "").strip()
-        if "::" in cleaned:
+        cleaned = DebugExecutor._strip_top_level_pointer_reference(cleaned)
+        for prefix in ("std::__1::", "std::"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+                break
+        if "::" in cleaned and "<" not in cleaned:
             cleaned = cleaned.rsplit("::", 1)[-1]
         return cleaned
+
+    @staticmethod
+    def _strip_top_level_pointer_reference(type_text: str) -> str:
+        depth = 0
+        chars: list[str] = []
+        for ch in type_text:
+            if ch == "<":
+                depth += 1
+                chars.append(ch)
+                continue
+            if ch == ">":
+                depth = max(0, depth - 1)
+                chars.append(ch)
+                continue
+            if depth == 0 and ch in "*&":
+                continue
+            chars.append(ch)
+        return DebugExecutor._clean_type("".join(chars).strip())
 
     @staticmethod
     def _clean_value(value: str) -> str:
