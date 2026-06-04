@@ -1940,6 +1940,88 @@ __CXXMV_FRAMEV__0
     assert step.edges[0].target_address == "0xH001"
 
 
+def test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer():
+    """CDB dx child rows under a pointer should become pointee object members."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Point { int x; double y; };\n"
+        "int main() {\n"
+        "    Point* hp = new Point{4, 5.5};\n"
+        "    hp->y = 6.5;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 4]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ 5]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Point * hp = 000001df`4e700000
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    hp : 0x000001df4e700000 [Type: Point *]
+        x : 4 [Type: int]
+        y : 6.5 [Type: double]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    pointer = step.stack[0].variables[0]
+    heap = step.heap[0]
+
+    assert pointer.value == "0xH001"
+    assert pointer.is_object is False
+    assert heap.is_object is True
+    assert heap.type == "Point"
+    assert heap.value == "{x=4, y=6.5}"
+    assert [(member.name, member.value) for member in heap.members] == [
+        ("x", "4"),
+        ("y", "6.5"),
+    ]
+
+
+def test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer():
+    """CDB dx indexed child rows under a pointer should become a heap array."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int main() {\n"
+        "    int* hp = new int[3]{1, 2, 3};\n"
+        "    hp[1] = 8;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 3]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ 4]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * hp = 000001df`4e700000
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    hp : 0x000001df4e700000 [Type: int *]
+        [0] : 1 [Type: int]
+        [1] : 8 [Type: int]
+        [2] : 3 [Type: int]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    heap = step.heap[0]
+
+    assert heap.is_array is True
+    assert heap.type == "int[]"
+    assert heap.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(element.index, element.value) for element in heap.elements] == [
+        (0, "1"),
+        (1, "8"),
+        (2, "3"),
+    ]
+
+
 def test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries():
     """CDB dx/NatVis container children should merge into the dv local variable."""
     from app.core.debug_executor import DebugExecutor
@@ -2362,6 +2444,8 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
         test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
+        test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer,
+        test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,

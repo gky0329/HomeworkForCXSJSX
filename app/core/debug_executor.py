@@ -1423,13 +1423,23 @@ class DebugExecutor:
             if pending is not None and indent > pending_indent:
                 element_index = self._array_index(name)
                 if element_index is not None:
-                    pending.elements.append(_ParsedElement(
+                    target_elements = (
+                        pending.pointee_elements
+                        if pending.pointee_addr
+                        else pending.elements
+                    )
+                    target_elements.append(_ParsedElement(
                         index=element_index,
                         type=clean_type,
                         value=self._clean_value(raw_value),
                     ))
                 else:
-                    pending.members.append(_ParsedMember(
+                    target_members = (
+                        pending.pointee_members
+                        if pending.pointee_addr
+                        else pending.members
+                    )
+                    target_members.append(_ParsedMember(
                         name=name,
                         type=clean_type,
                         value=self._clean_value(raw_value),
@@ -1442,15 +1452,21 @@ class DebugExecutor:
                 name=name,
                 value=clean_value,
             )
+            elements: list[_ParsedElement] = []
+            members: list[_ParsedMember] = []
             payload = self._structured_payload(raw_value)
             if payload:
                 element_type = self._array_element_type(clean_type)
                 elements = self._parse_structured_elements(payload, element_type)
                 members = [] if elements else self._parse_structured_members(payload)
-                var.elements = elements
-                var.members = members
             if "*" in var.type and self._is_hex_addr(clean_value) and not self._is_null(clean_value):
                 var.pointee_addr = clean_value
+                var.pointee_type = self._pointee_type(var.type)
+                var.pointee_elements = elements
+                var.pointee_members = members
+            else:
+                var.elements = elements
+                var.members = members
             variables.append(var)
             pending = var
             pending_indent = indent
