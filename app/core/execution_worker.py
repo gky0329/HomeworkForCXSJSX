@@ -14,15 +14,16 @@ class ExecutionWorker(QThread):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, code: str, config_path: Path | None = None):
+    def __init__(self, code: str, config_path: Path | None = None, stdin_text: str = ""):
         super().__init__()
         self._code = code
         self._config_path = config_path
+        self._stdin_text = stdin_text
 
     def run(self):
         try:
             executor = AIExecutor(self._config_path)
-            trace = asyncio.run(executor.run_code(self._code))
+            trace = asyncio.run(executor.run_code(self._code, self._stdin_text))
             self.finished.emit(trace)
         except Exception as e:
             logger.error("Execution failed: %s", e)

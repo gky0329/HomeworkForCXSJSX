@@ -339,6 +339,1376 @@ def test_oj_page_autogen_passes_empty_code_to_worker():
     assert page._autogen is True
 
 
+def test_debug_executor_parses_lldb_snapshots():
+    """LLDB snapshots should map stack, heap, pointer, and delete states."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 42;\n"
+        "int* p = new int(100);\n"
+        "*p = 200;\n"
+        "delete p;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    l5 = l4 + 1
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:7
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:12
+0x000000016fdfe728: (int) a = 42
+0x000000016fdfe720: (int *) p = 0x0000000000000000
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:12
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:4
+0x000000016fdfe728: (int) a = 42
+0x000000016fdfe720: (int *) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *p = 100
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:4
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l4}:10
+0x000000016fdfe728: (int) a = 42
+0x000000016fdfe720: (int *) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) *p = 200
+}}
+__CXXMV_BEFORE__3
+frame #0: 0x4 program`main at program.cpp:{l4}:10
+__CXXMV_AFTER__3
+frame #0: 0x5 program`main at program.cpp:{l5}:3
+0x000000016fdfe728: (int) a = 42
+0x000000016fdfe720: (int *) p = 0x00000001006446a0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [s.line_number for s in trace.steps] == [1, 2, 3, 4]
+    assert [v.name for v in trace.steps[0].stack[0].variables] == ["a"]
+    assert trace.steps[1].heap[0].address == "0xH001"
+    assert trace.steps[1].heap[0].value == "100"
+    assert trace.steps[2].heap[0].value == "200"
+    assert trace.steps[3].heap[0].is_freed is True
+    assert trace.steps[3].edges[0].is_dangling is True
+
+
+def test_debug_executor_parses_arrays_and_struct_members():
+    """LLDB child values should populate array elements and struct members."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int arr[3] = {1, 2, 3};\n"
+        "arr[1] = 7;\n"
+        "struct Point { int x; int y; };\n"
+        "Point pt{1, 2};\n"
+        "pt.x = 5;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l4 = generated_lines[4]
+    l5 = generated_lines[5]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:7
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:8
+0x000000016fdfe6b8: (int[3]) arr = {{
+0x000000016fdfe6b8:   (int) [0] = 1
+0x000000016fdfe6bc:   (int) [1] = 2
+0x000000016fdfe6c0:   (int) [2] = 3
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:8
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l4}:9
+0x000000016fdfe6b8: (int[3]) arr = {{
+0x000000016fdfe6b8:   (int) [0] = 1
+0x000000016fdfe6bc:   (int) [1] = 7
+0x000000016fdfe6c0:   (int) [2] = 3
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l4}:9
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l5}:4
+0x000000016fdfe6b8: (int[3]) arr = {{
+0x000000016fdfe6b8:   (int) [0] = 1
+0x000000016fdfe6bc:   (int) [1] = 7
+0x000000016fdfe6c0:   (int) [2] = 3
+}}
+0x000000016fdfe6d0: (Point) pt = {{
+0x000000016fdfe6d0:   (int) x = 1
+0x000000016fdfe6d4:   (int) y = 2
+}}
+__CXXMV_BEFORE__3
+frame #0: 0x4 program`main at program.cpp:{l5}:4
+__CXXMV_AFTER__3
+frame #0: 0x5 program`main at program.cpp:{l5 + 1}:3
+0x000000016fdfe6b8: (int[3]) arr = {{
+0x000000016fdfe6b8:   (int) [0] = 1
+0x000000016fdfe6bc:   (int) [1] = 7
+0x000000016fdfe6c0:   (int) [2] = 3
+}}
+0x000000016fdfe6d0: (Point) pt = {{
+0x000000016fdfe6d0:   (int) x = 5
+0x000000016fdfe6d4:   (int) y = 2
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first_arr = trace.steps[0].stack[0].variables[0]
+    changed_arr = trace.steps[1].stack[0].variables[0]
+    point = trace.steps[3].stack[0].variables[1]
+    assert first_arr.is_array is True
+    assert [(e.index, e.value) for e in first_arr.elements] == [(0, "1"), (1, "2"), (2, "3")]
+    assert changed_arr.value == "{[0]=1, [1]=7, [2]=3}"
+    assert point.is_object is True
+    assert point.class_name == "Point"
+    assert [(m.name, m.type, m.value) for m in point.members] == [
+        ("x", "int", "5"),
+        ("y", "int", "2"),
+    ]
+
+
+def test_debug_executor_parses_lldb_class_object_members():
+    """Class instances should be represented as objects with member values."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Counter {\n"
+        "public:\n"
+        "    int value;\n"
+        "    Counter(int v) : value(v) {}\n"
+        "    void inc() { value++; }\n"
+        "};\n"
+        "int main() {\n"
+        "    Counter c(3);\n"
+        "    c.value = 4;\n"
+        "    return c.value;\n"
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:8:13
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:9:5
+__CXXMV_FRAME__0__9__main
+0x000000016fdfe710: (Counter) c = {
+0x000000016fdfe710:   (int) value = 3
+}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:9:5
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:10:12
+__CXXMV_FRAME__0__10__main
+0x000000016fdfe710: (Counter) c = {
+0x000000016fdfe710:   (int) value = 4
+}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [step.line_number for step in trace.steps] == [8, 9]
+    first = trace.steps[0].stack[0].variables[0]
+    changed = trace.steps[1].stack[0].variables[0]
+    assert first.is_object is True
+    assert first.class_name == "Counter"
+    assert first.value == "{value=3}"
+    assert changed.members[0].value == "4"
+
+
+def test_debug_executor_formats_double_values_for_display():
+    """Floating point scalar values should render readably on the canvas."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "double pi = 3.14;\n"
+        "double area = pi * 2.0;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:12
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:15
+0x000000016fdfe710: (double) pi = 3.1400000000000001
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:15
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l2 + 1}:1
+0x000000016fdfe710: (double) pi = 3.1400000000000001
+0x000000016fdfe718: (double) area = 6.2800000000000002
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first = trace.steps[0].stack[0].variables[0]
+    second_vars = trace.steps[1].stack[0].variables
+    assert first.type == "double"
+    assert first.value == "3.14"
+    assert [(var.name, var.type, var.value) for var in second_vars] == [
+        ("pi", "double", "3.14"),
+        ("area", "double", "6.28"),
+    ]
+
+
+def test_debug_executor_filters_future_long_long_locals():
+    """Compound scalar declarations should not appear before their source line."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "bool ok = true;\n"
+        "char ch = 'A';\n"
+        "long long big = 1234567890123LL;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:9
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe700: (bool) ok = true
+0x000000016fdfe708: (long long) big = 6171913536
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:9
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:15
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe700: (bool) ok = true
+0x000000016fdfe701: (char) ch = 'A'
+0x000000016fdfe708: (long long) big = 6171913536
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:15
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l3 + 1}:3
+__CXXMV_FRAME__0__{l3 + 1}__main
+0x000000016fdfe700: (bool) ok = true
+0x000000016fdfe701: (char) ch = 'A'
+0x000000016fdfe708: (long long) big = 1234567890123
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [var.name for var in trace.steps[0].stack[0].variables] == ["ok"]
+    assert [var.name for var in trace.steps[1].stack[0].variables] == ["ok", "ch"]
+    assert [(var.name, var.value) for var in trace.steps[2].stack[0].variables] == [
+        ("ok", "true"),
+        ("ch", "'A'"),
+        ("big", "1234567890123"),
+    ]
+
+
+def test_debug_executor_parses_nullptr_pointer_value():
+    """Null native pointers should render as nullptr, not an empty string."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source("int* p = nullptr;\n")
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:10
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l1 + 1}:3
+__CXXMV_FRAME__0__{l1 + 1}__main
+0x000000016fdfe700: (int *) p = 0x0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    pointer = trace.steps[0].stack[0].variables[0]
+
+    assert pointer.name == "p"
+    assert pointer.is_pointer is True
+    assert pointer.value == "nullptr"
+    assert trace.steps[0].heap == []
+    assert trace.steps[0].edges == []
+
+
+def test_debug_executor_parses_c_string_pointer_summary():
+    """char pointers should point to a readable C-string block, not only the first char."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source('const char* s = "hello";\n')
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:17
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l1 + 1}:3
+__CXXMV_FRAME__0__{l1 + 1}__main
+0x000000016fdfe700: (const char *) s = 0x0000000100003f9a {{
+0x0000000100003f9a:   (const char[]) *s = "hello"
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    pointer = trace.steps[0].stack[0].variables[0]
+    heap = trace.steps[0].heap[0]
+
+    assert pointer.value == "0xH001"
+    assert heap.type == "const char[]"
+    assert heap.value == "hello"
+    assert trace.steps[0].edges[0].target_address == "0xH001"
+
+
+def test_debug_executor_keeps_locals_on_wrapped_snippet_last_line():
+    """Snippet wrappers should not clear locals after the final user line runs."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 42;\n"
+        "int b = a + 10;\n"
+        "double pi = 3.14;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    wrapper_return_line = l3 + 1
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:9
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe700: (int) a = 42
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:9
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:12
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe700: (int) a = 42
+0x000000016fdfe704: (int) b = 52
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:12
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{wrapper_return_line}:3
+__CXXMV_FRAME__0__{wrapper_return_line}__main
+0x000000016fdfe700: (int) a = 42
+0x000000016fdfe704: (int) b = 52
+0x000000016fdfe708: (double) pi = 3.1400000000000001
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [step.line_number for step in trace.steps] == [1, 2, 3]
+    assert [(var.name, var.type, var.value) for var in trace.steps[2].stack[0].variables] == [
+        ("a", "int", "42"),
+        ("b", "int", "52"),
+        ("pi", "double", "3.14"),
+    ]
+
+
+def test_debug_executor_parses_reference_target_address():
+    """C++ references should point at their referent instead of rendering as objects."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 5;\n"
+        "int& r = a;\n"
+        "r = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:8
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe700: (int) a = 5
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:8
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:3
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe700: (int) a = 5
+0x000000016fdfe708: (int &) r = 0x000000016fdfe700
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:3
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l3 + 1}:3
+__CXXMV_FRAME__0__{l3 + 1}__main
+0x000000016fdfe700: (int) a = 9
+0x000000016fdfe708: (int &) r = 0x000000016fdfe700
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    ref_step = trace.steps[1]
+    changed_step = trace.steps[2]
+    a = ref_step.stack[0].variables[0]
+    ref = ref_step.stack[0].variables[1]
+    changed_a = changed_step.stack[0].variables[0]
+    changed_ref = changed_step.stack[0].variables[1]
+    assert ref.is_reference is True
+    assert ref.is_object is False
+    assert ref.value == a.address
+    assert ref_step.edges == []
+    assert changed_a.value == "9"
+    assert changed_ref.value == changed_a.address
+
+
+def test_debug_executor_formats_std_string_summary_as_scalar():
+    """std::string should show its readable value instead of an empty object shell."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        '#include <string>\n'
+        'using namespace std;\n'
+        'int main() {\n'
+        '    string s = "abc";\n'
+        '    s += "d";\n'
+        '}\n'
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:4:12
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:5:5
+__CXXMV_FRAME__0__5__main
+0x000000016fdfe700: (std::__1::string) s = "abc"
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:5:5
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:6:1
+__CXXMV_FRAME__0__6__main
+0x000000016fdfe700: (std::__1::string) s = "abcd"
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first = trace.steps[0].stack[0].variables[0]
+    changed = trace.steps[1].stack[0].variables[0]
+    assert first.type == "std::__1::string"
+    assert first.value == "abc"
+    assert first.is_object is False
+    assert changed.value == "abcd"
+
+
+def test_debug_executor_parses_vector_elements_as_array_variable():
+    """std::vector child snapshots should render like indexed array cells."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "int main() {\n"
+        "    vector<int> v = {1, 2, 3};\n"
+        "    v.push_back(4);\n"
+        "    v[1] = 8;\n"
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:4:17
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:5:5
+__CXXMV_FRAME__0__5__main
+0x000000016fdfe700: (std::__1::vector<int, std::__1::allocator<int> >) v = {
+0x000000010065c6a0:   (int) [0] = 1
+0x000000010065c6a4:   (int) [1] = 2
+0x000000010065c6a8:   (int) [2] = 3
+}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:5:5
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:6:5
+__CXXMV_FRAME__0__6__main
+0x000000016fdfe700: (std::__1::vector<int, std::__1::allocator<int> >) v = {
+0x000000010065c6a0:   (int) [0] = 1
+0x000000010065c6a4:   (int) [1] = 2
+0x000000010065c6a8:   (int) [2] = 3
+0x000000010065c6ac:   (int) [3] = 4
+}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:6:5
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:7:1
+__CXXMV_FRAME__0__7__main
+0x000000016fdfe700: (std::__1::vector<int, std::__1::allocator<int> >) v = {
+0x000000010065c6a0:   (int) [0] = 1
+0x000000010065c6a4:   (int) [1] = 8
+0x000000010065c6a8:   (int) [2] = 3
+0x000000010065c6ac:   (int) [3] = 4
+}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first = trace.steps[0].stack[0].variables[0]
+    pushed = trace.steps[1].stack[0].variables[0]
+    changed = trace.steps[2].stack[0].variables[0]
+    assert first.is_array is True
+    assert first.element_count == 3
+    assert first.value == "{[0]=1, [1]=2, [2]=3}"
+    assert [(element.index, element.value) for element in pushed.elements] == [
+        (0, "1"),
+        (1, "2"),
+        (2, "3"),
+        (3, "4"),
+    ]
+    assert changed.value == "{[0]=1, [1]=8, [2]=3, [3]=4}"
+
+
+def test_debug_executor_parses_vector_string_elements_from_summaries():
+    """vector<string> should expand string children instead of showing only size=N."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <vector>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "int main() {\n"
+        '    vector<string> names = {"aa", "bb"};\n'
+        '    names.push_back("cc");\n'
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:5:28
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:6:5
+__CXXMV_FRAME__0__6__main
+0x000000016fdfe700: (std::__1::vector<std::__1::string, std::__1::allocator<std::__1::string> >) names = {
+0x000000010065c6a0:   (std::__1::string) [0] = "aa"
+0x000000010065c6b8:   (std::__1::string) [1] = "bb"
+}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:6:5
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:7:1
+__CXXMV_FRAME__0__7__main
+0x000000016fdfe700: (std::__1::vector<std::__1::string, std::__1::allocator<std::__1::string> >) names = {
+0x000000010065c6a0:   (std::__1::string) [0] = "aa"
+0x000000010065c6b8:   (std::__1::string) [1] = "bb"
+0x000000010065c6d0:   (std::__1::string) [2] = "cc"
+}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first = trace.steps[0].stack[0].variables[0]
+    changed = trace.steps[1].stack[0].variables[0]
+    assert first.is_array is True
+    assert first.value == "{[0]=aa, [1]=bb}"
+    assert [(element.index, element.value) for element in changed.elements] == [
+        (0, "aa"),
+        (1, "bb"),
+        (2, "cc"),
+    ]
+
+
+def test_debug_executor_preserves_nested_array_child_values():
+    """Nested array child values should not be stripped to empty strings."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int grid[2][3] = {{1,2,3},{4,5,6}};\n"
+        "grid[1][2] = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:16
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:1
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe6c0: (int[2][3]) grid = {{
+0x000000016fdfe6c0:   (int[3]) [0] = {{[0]=1, [1]=2, [2]=3}}
+0x000000016fdfe6cc:   (int[3]) [1] = {{[0]=4, [1]=5, [2]=6}}
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:1
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l2 + 1}:1
+__CXXMV_FRAME__0__{l2 + 1}__main
+0x000000016fdfe6c0: (int[2][3]) grid = {{
+0x000000016fdfe6c0:   (int[3]) [0] = {{[0]=1, [1]=2, [2]=3}}
+0x000000016fdfe6cc:   (int[3]) [1] = {{[0]=4, [1]=5, [2]=9}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    first = trace.steps[0].stack[0].variables[0]
+    changed = trace.steps[1].stack[0].variables[0]
+
+    assert first.is_array is True
+    assert first.value == "{[0]={[0]=1, [1]=2, [2]=3}, [1]={[0]=4, [1]=5, [2]=6}}"
+    assert [(element.index, element.value) for element in changed.elements] == [
+        (0, "{[0]=1, [1]=2, [2]=3}"),
+        (1, "{[0]=4, [1]=5, [2]=9}"),
+    ]
+
+
+def test_debug_executor_preserves_array_of_struct_child_values():
+    """Array elements that are objects should keep their member summaries."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Point { int x; int y; };\n"
+        "Point pts[2] = {{1,2},{3,4}};\n"
+        "pts[1].x = 7;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l2}:14
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l3}:1
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe6d0: (Point[2]) pts = {{
+0x000000016fdfe6d0:   (Point) [0] = {{x=1, y=2}}
+0x000000016fdfe6d8:   (Point) [1] = {{x=3, y=4}}
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l3}:1
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3 + 1}:1
+__CXXMV_FRAME__0__{l3 + 1}__main
+0x000000016fdfe6d0: (Point[2]) pts = {{
+0x000000016fdfe6d0:   (Point) [0] = {{x=1, y=2}}
+0x000000016fdfe6d8:   (Point) [1] = {{x=7, y=4}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    first = trace.steps[0].stack[0].variables[0]
+    changed = trace.steps[1].stack[0].variables[0]
+
+    assert first.is_array is True
+    assert first.value == "{[0]={x=1, y=2}, [1]={x=3, y=4}}"
+    assert [(element.index, element.value) for element in changed.elements] == [
+        (0, "{x=1, y=2}"),
+        (1, "{x=7, y=4}"),
+    ]
+
+
+def test_debug_executor_parses_heap_object_members_from_pointer():
+    """A pointer to a heap object should produce an object HeapBlock with members."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Point { int x; double y; };\n"
+        "Point* p = new Point{1, 2.5};\n"
+        "p->x = 3;\n"
+        "delete p;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l2}:14
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l3}:5
+0x000000016fdfe710: (Point *) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) x = 1
+0x00000001006446a8:   (double) y = 2.5
+}}
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l3}:5
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l4}:10
+0x000000016fdfe710: (Point *) p = 0x00000001006446a0 {{
+0x00000001006446a0:   (int) x = 3
+0x00000001006446a8:   (double) y = 2.5
+}}
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l4}:10
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l4 + 1}:1
+0x000000016fdfe710: (Point *) p = 0x00000001006446a0
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first_heap = trace.steps[0].heap[0]
+    changed_heap = trace.steps[1].heap[0]
+    freed_heap = trace.steps[2].heap[0]
+    assert trace.steps[0].stack[0].variables[0].value == "0xH001"
+    assert first_heap.is_object is True
+    assert first_heap.class_name == "Point"
+    assert first_heap.value == "{x=1, y=2.5}"
+    assert [(member.name, member.type, member.value) for member in changed_heap.members] == [
+        ("x", "int", "3"),
+        ("y", "double", "2.5"),
+    ]
+    assert freed_heap.is_freed is True
+    assert freed_heap.value == "{x=3, y=2.5}"
+    assert trace.steps[2].edges[0].is_dangling is True
+
+
+def test_debug_executor_parses_heap_array_expression_snapshots():
+    """LLDB expression probes should populate heap arrays and keep delete[] state."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int* p = new int[3]{1, 2, 3};\n"
+        "p[1] = 8;\n"
+        "delete[] p;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:12
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:3
+0x000000016fdfe6c0: (int *) p = 0x000000010065c6a0 {{
+0x000000010065c6a0:   (int) *p = 1
+}}
+__CXXMV_EXPR__0__p__0
+(int) $0 = 1
+__CXXMV_EXPR__0__p__1
+(int) $1 = 2
+__CXXMV_EXPR__0__p__2
+(int) $2 = 3
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:3
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:12
+0x000000016fdfe6c0: (int *) p = 0x000000010065c6a0 {{
+0x000000010065c6a0:   (int) *p = 1
+}}
+__CXXMV_EXPR__1__p__0
+(int) $3 = 1
+__CXXMV_EXPR__1__p__1
+(int) $4 = 8
+__CXXMV_EXPR__1__p__2
+(int) $5 = 3
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:12
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l3 + 1}:3
+0x000000016fdfe6c0: (int *) p = 0x000000010065c6a0 {{
+0x000000010065c6a0:   (int) *p = 4472
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    first_heap = trace.steps[0].heap[0]
+    changed_heap = trace.steps[1].heap[0]
+    freed_heap = trace.steps[2].heap[0]
+    assert first_heap.is_array is True
+    assert first_heap.value == "{[0]=1, [1]=2, [2]=3}"
+    assert changed_heap.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(e.index, e.value) for e in changed_heap.elements] == [(0, "1"), (1, "8"), (2, "3")]
+    assert freed_heap.is_freed is True
+    assert freed_heap.value == "{[0]=1, [1]=8, [2]=3}"
+    assert trace.steps[2].edges[0].is_dangling is True
+
+
+def test_debug_executor_selects_lldb_backend_when_tools_exist():
+    """Backend detection should choose the implemented LLDB/DWARF path."""
+    from app.core.debug_executor import DebugExecutor
+
+    def fake_which(name):
+        return {
+            "lldb": "/usr/bin/lldb",
+            "clang++": "/usr/bin/clang++",
+        }.get(name)
+
+    with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+        assert DebugExecutor.available_backend() == DebugExecutor.LLDB_DWARF_BACKEND
+        status = {s.id: s for s in DebugExecutor.backend_status()}
+
+    assert status[DebugExecutor.LLDB_DWARF_BACKEND].available is True
+    assert status[DebugExecutor.LLDB_DWARF_BACKEND].implemented is True
+
+
+def test_debug_executor_msvc_pdb_backend_is_experimental_by_default():
+    """PDB support should not be auto-selected until it is explicitly enabled."""
+    from app.core.debug_executor import DebugExecutor
+
+    def fake_which(name):
+        return {
+            "cl": "C:/VS/VC/Tools/MSVC/bin/cl.exe",
+            "cdb": "C:/Windows Kits/Debuggers/x64/cdb.exe",
+            "vswhere": "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe",
+        }.get(name)
+
+    with patch.dict(os.environ, {"CXXMV_ENABLE_EXPERIMENTAL_PDB": ""}, clear=False):
+        with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+            with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+                status = {s.id: s for s in DebugExecutor.backend_status()}
+                try:
+                    DebugExecutor(preferred_backend=DebugExecutor.MSVC_PDB_BACKEND)._select_backend()
+                except Exception as exc:
+                    message = str(exc)
+                else:
+                    raise AssertionError("MSVC/PDB backend should require the experimental flag")
+
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].implemented is True
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
+    assert "experimental" in status[DebugExecutor.MSVC_PDB_BACKEND].detail
+    assert "CXXMV_ENABLE_EXPERIMENTAL_PDB=1" in message
+
+
+def test_debug_executor_selects_msvc_pdb_backend_when_enabled_on_windows():
+    """Windows with tools and the experiment flag may select the PDB backend."""
+    from app.core.debug_executor import DebugExecutor
+
+    def fake_which(name):
+        return {
+            "cl": "C:/VS/VC/Tools/MSVC/bin/cl.exe",
+            "cdb": "C:/Windows Kits/Debuggers/x64/cdb.exe",
+            "vswhere": "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe",
+        }.get(name)
+
+    with patch.dict(os.environ, {"CXXMV_ENABLE_EXPERIMENTAL_PDB": "1"}, clear=False):
+        with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+            with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+                status = {s.id: s for s in DebugExecutor.backend_status()}
+                assert DebugExecutor.available_backend() == DebugExecutor.MSVC_PDB_BACKEND
+                selected = DebugExecutor(preferred_backend=DebugExecutor.MSVC_PDB_BACKEND)._select_backend()
+
+    assert selected == DebugExecutor.MSVC_PDB_BACKEND
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].implemented is True
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is True
+    assert "PDB" in status[DebugExecutor.MSVC_PDB_BACKEND].detail
+
+
+def test_debug_executor_msvc_pdb_backend_requires_cdb():
+    """cl.exe alone is not enough; the command-line debugger is required."""
+    from app.core.debug_executor import DebugExecutionError, DebugExecutor
+
+    def fake_which(name):
+        return {"cl": "C:/VS/VC/Tools/MSVC/bin/cl.exe"}.get(name)
+
+    with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+        with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+            status = {s.id: s for s in DebugExecutor.backend_status()}
+            try:
+                DebugExecutor(preferred_backend=DebugExecutor.MSVC_PDB_BACKEND)._select_backend()
+            except DebugExecutionError as exc:
+                assert "cdb.exe" in str(exc)
+            else:
+                raise AssertionError("MSVC/PDB backend should require cdb.exe")
+
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
+
+
+def test_debug_executor_skips_stdin_programs_before_lldb_run():
+    """Programs that read stdin should not enter LLDB batch stepping and hang."""
+    from app.core.debug_executor import DebugExecutionError, DebugExecutor
+
+    executor = DebugExecutor()
+    try:
+        executor.run_code(
+            "#include <iostream>\n"
+            "using namespace std;\n"
+            "int main() { int cases; if (!(cin >> cases)) return 0; return cases; }\n"
+        )
+    except DebugExecutionError as exc:
+        assert "stdin" in str(exc)
+    else:
+        raise AssertionError("stdin program should be skipped by native debugger")
+
+
+def test_debug_executor_local_capability_rejects_stdin_code():
+    """Local availability alone is not enough for stdin-heavy code."""
+    from app.core.debug_executor import DebugExecutor
+
+    with patch("app.core.debug_executor.DebugExecutor.is_available", return_value=True):
+        assert DebugExecutor.can_run_code_locally("int a = 1;") is True
+        assert DebugExecutor.can_run_code_locally("int x; cin >> x;") is False
+        assert DebugExecutor.can_run_code_locally("int x; cin >> x;", "7\n") is True
+
+
+def test_debug_executor_lldb_script_sets_stdin_input_path():
+    """When stdin is provided, LLDB should launch the inferior with that input file."""
+    from pathlib import Path
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source("int x;\ncin >> x;\n")
+    script = executor._lldb_script(prepared, input_path=Path("/tmp/cxxmv_stdin.txt"))
+
+    assert "settings set target.input-path /tmp/cxxmv_stdin.txt" in script
+    assert script.index("settings set target.input-path") < script.index("run")
+
+
+def test_debug_executor_msvc_compile_args_enable_pdb_symbols():
+    """MSVC compile command should emit debug info and a named PDB."""
+    from pathlib import Path
+    from app.core.debug_executor import DebugExecutor
+
+    args = DebugExecutor._msvc_compile_args(
+        "cl.exe",
+        Path("program.cpp"),
+        Path("program.exe"),
+        Path("program.pdb"),
+    )
+
+    assert "/Zi" in args
+    assert "/Od" in args
+    assert "/EHsc" in args
+    assert "/Fe:program.exe" in args
+    assert "/Fd:program.pdb" in args
+
+
+def test_debug_executor_cdb_script_uses_source_lines_and_local_vars():
+    """CDB script should break at main, line-step, stack-walk, and dump locals."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source("int a = 1;\na++;\n")
+    script = executor._cdb_script(prepared)
+
+    assert ".lines" in script
+    assert "l+t" in script
+    assert "bp main" in script
+    assert "kP 8" in script
+    assert "dv /t /v" in script
+    assert "__CXXMV_FRAMEV__0" in script
+
+
+def test_debug_executor_steps_into_user_function_calls():
+    """A main-line user function call should step in instead of running the whole function."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "void RunGame() {\n"
+        "    int total = 1;\n"
+        "}\n"
+        "int main() {\n"
+        "    RunGame();\n"
+        "    return 0;\n"
+        "}\n"
+    )
+    script = executor._lldb_script(prepared)
+
+    assert 5 in prepared.step_in_lines
+    assert "'thread step-in' if line in {5} else 'thread step-over'" in script
+
+
+def test_debug_executor_steps_over_constructors_but_keeps_method_calls():
+    """Constructors/destructors should not produce confusing OO trace steps."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "class Point {\n"
+        "public:\n"
+        "    int x;\n"
+        "    Point(int v) : x(v) {}\n"
+        "    ~Point() {}\n"
+        "    void inc() { x++; }\n"
+        "};\n"
+        "int main() {\n"
+        "    Point p(1);\n"
+        "    p.inc();\n"
+        "}\n"
+    )
+
+    assert DebugExecutor._user_function_names(prepared.source.splitlines()) == {"inc"}
+    assert 9 not in prepared.step_in_lines
+    assert 10 in prepared.step_in_lines
+
+
+def test_debug_executor_uses_current_function_frame_name():
+    """Snapshots inside user functions should show that function as the stack frame."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "void RunGame() {\n"
+        "    int total = 1;\n"
+        "}\n"
+        "int main() {\n"
+        "    RunGame();\n"
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`RunGame() at program.cpp:2:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`RunGame() at program.cpp:3:1
+0x000000016fdfe720: (int) total = 1
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert len(trace.steps) == 1
+    assert trace.steps[0].line_number == 2
+    assert trace.steps[0].stack[0].frame_name == "RunGame"
+
+
+def test_debug_executor_skips_step_in_transition_snapshots():
+    """Entering a user function should not label callee variables as the caller line."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "void RunGame() {\n"
+        "    int total = 1;\n"
+        "}\n"
+        "int main() {\n"
+        "    RunGame();\n"
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:5:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`RunGame() at program.cpp:2:9
+0x000000016fdfe720: (int) total = 1
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`RunGame() at program.cpp:2:9
+__CXXMV_AFTER__1
+frame #0: 0x3 program`RunGame() at program.cpp:3:1
+0x000000016fdfe720: (int) total = 1
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [step.line_number for step in trace.steps] == [2]
+    assert trace.steps[0].stack[0].frame_name == "RunGame"
+
+
+def test_debug_executor_parses_multiple_user_stack_frames():
+    """LLDB stack snapshots should preserve callee and caller frames."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "void touch(int* p) {\n"
+        "    *p = 7;\n"
+        "}\n"
+        "int main() {\n"
+        "    int a = 1;\n"
+        "    touch(&a);\n"
+        "}\n"
+    )
+    output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`touch(int*) at program.cpp:2:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`touch(int*) at program.cpp:3:1
+__CXXMV_FRAME__0__2__touch(int*)
+0x000000016fdfe700: (int *) p = 0x000000016fdfe710 {
+0x000000016fdfe710:   (int) *p = 7
+}
+__CXXMV_FRAME__1__6__main
+0x000000016fdfe710: (int) a = 7
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+
+    assert [frame.frame_name for frame in step.stack] == ["touch", "main"]
+    assert step.stack[0].variables[0].name == "p"
+    assert step.stack[1].variables[0].name == "a"
+    assert step.stack[0].variables[0].value == step.stack[1].variables[0].address
+    assert step.edges[0].target_address == step.stack[1].variables[0].address
+    assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_pdb_stack_snapshots():
+    """CDB/PDB output should parse into the same trace model as LLDB."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "void touch(int* p) {\n"
+        "    *p = 7;\n"
+        "}\n"
+        "int main() {\n"
+        "    int a = 1;\n"
+        "    touch(&a);\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!touch+0x2 [C:\tmp\program.cpp @ 2]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!touch+0x9 [C:\tmp\program.cpp @ 3]
+01 000000aa`0000f040 program!main+0x21 [C:\tmp\program.cpp @ 6]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * p = 000000aa`0000efd0
+__CXXMV_FRAMEV__1
+000000aa`0000efd0 int a = 7
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+
+    assert step.line_number == 2
+    assert [frame.frame_name for frame in step.stack] == ["touch", "main"]
+    assert step.stack[0].variables[0].value == step.stack[1].variables[0].address
+    assert step.edges[0].target_address == step.stack[1].variables[0].address
+    assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_arrays_and_objects():
+    """CDB/PDB structured local values should become array/object model fields."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int main() {\n"
+        "    int arr[3] = {1, 2, 3};\n"
+        "    struct Point { int x; double y; };\n"
+        "    Point pt{1, 2.5};\n"
+        "    pt.x = 3;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x11 [C:\tmp\program.cpp @ 5]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x18 [C:\tmp\program.cpp @ 6]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int [3] arr = {1, 2, 3}
+000000aa`0000efe0 Point pt = {x=3, y=2.5}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    arr = step.stack[0].variables[0]
+    pt = step.stack[0].variables[1]
+
+    assert arr.is_array is True
+    assert arr.value == "{[0]=1, [1]=2, [2]=3}"
+    assert [(element.index, element.value) for element in arr.elements] == [
+        (0, "1"),
+        (1, "2"),
+        (2, "3"),
+    ]
+    assert pt.is_object is True
+    assert pt.value == "{x=3, y=2.5}"
+    assert [(member.name, member.value) for member in pt.members] == [
+        ("x", "3"),
+        ("y", "2.5"),
+    ]
+
+
+def test_debug_executor_parses_cdb_heap_object_from_pointer_summary():
+    """A PDB pointer summary with members should render as a heap object block."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Point { int x; double y; };\n"
+        "int main() {\n"
+        "    Point* hp = new Point{4, 5.5};\n"
+        "    hp->y = 6.5;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 4]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ 5]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Point * hp = 000001df`4e700000 {x=4, y=6.5}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    pointer = step.stack[0].variables[0]
+    heap = step.heap[0]
+
+    assert pointer.value == "0xH001"
+    assert heap.is_object is True
+    assert heap.type == "Point"
+    assert heap.value == "{x=4, y=6.5}"
+    assert [(member.name, member.value) for member in heap.members] == [
+        ("x", "4"),
+        ("y", "6.5"),
+    ]
+    assert step.edges[0].target_address == "0xH001"
+
+
+def test_debug_executor_filters_future_locals_from_stack_snapshots():
+    """Future loop/call locals should not appear before their source line completes."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int RunGame() {\n"
+        "    int score = 0;\n"
+        "    return score;\n"
+        "}\n"
+        "int main() {\n"
+        "    int cases;\n"
+        "    cin >> cases;\n"
+        "    for (int c = 0; c < cases; ++c) {\n"
+        "        int ans = RunGame();\n"
+        "    }\n"
+        "}\n"
+    )
+
+    before_for_output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:7:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:8:10
+__CXXMV_FRAME__0__8__main
+0x000000016fdfe700: (int) cases = 1
+0x000000016fdfe704: (int) c = 0
+"""
+    before_call_output = """
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`RunGame() at program.cpp:2:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`RunGame() at program.cpp:3:12
+__CXXMV_FRAME__0__2__RunGame()
+0x000000016fdfe710: (int) score = 0
+__CXXMV_FRAME__1__9__main
+0x000000016fdfe700: (int) cases = 1
+0x000000016fdfe704: (int) c = 0
+0x000000016fdfe708: (int) ans = 32767
+"""
+
+    before_for = executor._parse_lldb_output(before_for_output, prepared).steps[0]
+    before_call = executor._parse_lldb_output(before_call_output, prepared).steps[0]
+
+    assert [v.name for v in before_for.stack[0].variables] == ["cases"]
+    assert [v.name for v in before_call.stack[1].variables] == ["cases", "c"]
+
+
+def test_ai_executor_falls_back_to_ai_for_stdin_programs():
+    """stdin-heavy OJ programs should take the existing AI path instead of timing out."""
+    import asyncio
+
+    class FakeAIService:
+        async def chat_json(self, *args, **kwargs):
+            return '{"steps":[]}'
+
+    with patch("app.core.ai_executor.AIService", return_value=FakeAIService()):
+        from app.core.ai_executor import AIExecutor
+
+        result = asyncio.run(AIExecutor().run_code(
+            "#include <iostream>\n"
+            "using namespace std;\n"
+            "int main() { int cases; if (!(cin >> cases)) return 0; return cases; }\n"
+        ))
+
+    assert result.steps == []
+
+
+def test_debug_executor_lldb_timeout_is_debug_execution_error():
+    """Raw subprocess timeouts should become DebugExecutionError for AI fallback."""
+    import subprocess
+    from pathlib import Path
+    from app.core.debug_executor import DebugExecutionError, DebugExecutor
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+    with patch("app.core.debug_executor.subprocess.run", side_effect=fake_run):
+        try:
+            DebugExecutor()._run_lldb(Path("program"), Path("lldb_commands.txt"))
+        except DebugExecutionError as exc:
+            assert "timed out" in str(exc)
+        else:
+            raise AssertionError("LLDB timeout should be wrapped as DebugExecutionError")
+
+
+def test_ai_executor_prefers_debug_executor_without_ai_call():
+    """AIExecutor should use the native debugger path before making API calls."""
+    import asyncio
+    from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
+
+    expected = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=1,
+            source_code="int a = 1;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        )
+    ])
+    captured = {}
+
+    class FakeDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            captured["code"] = code
+            captured["stdin"] = stdin_text
+            return expected
+
+    class FailingAIService:
+        async def chat_json(self, *args, **kwargs):
+            raise AssertionError("AI service should not be called when debugger succeeds")
+
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FakeDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=FailingAIService()):
+            from app.core.ai_executor import AIExecutor
+
+            result = asyncio.run(AIExecutor().run_code("int a = 1;"))
+
+    assert result is expected
+    assert captured["code"] == "int a = 1;"
+    assert captured["stdin"] == ""
+
+
+def test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run():
+    """Debugger failures should preserve the existing AI JSON execution path."""
+    import asyncio
+
+    class FailingDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            from app.core.debug_executor import DebugExecutionError
+
+            raise DebugExecutionError("unsupported code")
+
+    class FakeAIService:
+        async def chat_json(self, *args, **kwargs):
+            return '{"steps":[]}'
+
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FailingDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=FakeAIService()):
+            from app.core.ai_executor import AIExecutor
+
+            result = asyncio.run(AIExecutor().run_code("template <class T> T f(T x) { return x; }"))
+
+    assert result.steps == []
+
+
 # ── Phase 3: HeapItem _value_label for object and array ─────────────────
 
 def test_heap_item_object_sets_value_label():
@@ -379,8 +1749,8 @@ def test_heap_item_array_sets_value_label():
     assert "7" in item._value_label.toPlainText()
 
 
-def test_stack_item_object_draws_member_summary_and_labels():
-    """Stack object variables should show both an object summary and member rows."""
+def test_stack_item_object_draws_member_labels():
+    """Stack object variables should visibly render their member rows."""
     from PySide6.QtWidgets import QApplication, QGraphicsTextItem
     import sys
     QApplication.instance() or QApplication(sys.argv)
@@ -448,6 +1818,33 @@ def test_ai_service_returns_raw_string():
     asyncio.run(run())
 
 
+def test_ai_service_extracts_json_from_mixed_response():
+    """Common fenced/prefaced model output should still normalize to JSON text."""
+    from app.services.ai_service import AIService
+
+    raw = "Here is the JSON:\n```json\n{\"steps\": []}\n```\nDone."
+
+    assert AIService._normalize_json(raw) == '{"steps": []}'
+
+
+def test_ai_service_invalid_json_error_has_context_and_raw_response():
+    """Truncated JSON should not leak a bare JSONDecodeError to the UI."""
+    from app.services.ai_service import AIService
+
+    raw = '{"steps": [{"line_number": 1, "source_code": }]}'
+
+    try:
+        AIService._normalize_json(raw)
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("invalid JSON should raise RuntimeError")
+
+    assert "AI returned invalid JSON" in message
+    assert "Near JSON line" in message
+    assert "---RAW RESPONSE---" in message
+
+
 # ── Phase 3: C++ comments preserved ────────────────────────────────────
 
 def test_extract_code_preserves_comments():
@@ -497,10 +1894,50 @@ if __name__ == "__main__":
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
+        test_debug_executor_parses_lldb_snapshots,
+        test_debug_executor_parses_arrays_and_struct_members,
+        test_debug_executor_parses_lldb_class_object_members,
+        test_debug_executor_formats_double_values_for_display,
+        test_debug_executor_filters_future_long_long_locals,
+        test_debug_executor_parses_nullptr_pointer_value,
+        test_debug_executor_parses_c_string_pointer_summary,
+        test_debug_executor_keeps_locals_on_wrapped_snippet_last_line,
+        test_debug_executor_parses_reference_target_address,
+        test_debug_executor_formats_std_string_summary_as_scalar,
+        test_debug_executor_parses_vector_elements_as_array_variable,
+        test_debug_executor_parses_vector_string_elements_from_summaries,
+        test_debug_executor_preserves_nested_array_child_values,
+        test_debug_executor_preserves_array_of_struct_child_values,
+        test_debug_executor_parses_heap_object_members_from_pointer,
+        test_debug_executor_parses_heap_array_expression_snapshots,
+        test_debug_executor_selects_lldb_backend_when_tools_exist,
+        test_debug_executor_msvc_pdb_backend_is_experimental_by_default,
+        test_debug_executor_selects_msvc_pdb_backend_when_enabled_on_windows,
+        test_debug_executor_msvc_pdb_backend_requires_cdb,
+        test_debug_executor_skips_stdin_programs_before_lldb_run,
+        test_debug_executor_local_capability_rejects_stdin_code,
+        test_debug_executor_lldb_script_sets_stdin_input_path,
+        test_debug_executor_msvc_compile_args_enable_pdb_symbols,
+        test_debug_executor_cdb_script_uses_source_lines_and_local_vars,
+        test_debug_executor_steps_into_user_function_calls,
+        test_debug_executor_steps_over_constructors_but_keeps_method_calls,
+        test_debug_executor_uses_current_function_frame_name,
+        test_debug_executor_skips_step_in_transition_snapshots,
+        test_debug_executor_parses_multiple_user_stack_frames,
+        test_debug_executor_parses_cdb_pdb_stack_snapshots,
+        test_debug_executor_parses_cdb_arrays_and_objects,
+        test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
+        test_debug_executor_filters_future_locals_from_stack_snapshots,
+        test_ai_executor_falls_back_to_ai_for_stdin_programs,
+        test_debug_executor_lldb_timeout_is_debug_execution_error,
+        test_ai_executor_prefers_debug_executor_without_ai_call,
+        test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run,
         test_heap_item_object_sets_value_label,
         test_heap_item_array_sets_value_label,
-        test_stack_item_object_draws_member_summary_and_labels,
+        test_stack_item_object_draws_member_labels,
         test_ai_service_returns_raw_string,
+        test_ai_service_extracts_json_from_mixed_response,
+        test_ai_service_invalid_json_error_has_context_and_raw_response,
         test_extract_code_preserves_comments,
         test_graph_page_named_canvas_class,
     ]

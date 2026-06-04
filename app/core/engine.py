@@ -14,6 +14,7 @@ from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
+from app.core.debug_executor import DebugExecutor
 from app.ui.widgets import error_dialog
 from app.ui.widgets.threading import retire_worker
 from app.services import error_store
@@ -47,6 +48,20 @@ def _has_api_key() -> bool:
     except Exception:
         logger.exception("Failed to read config for API key check")
     return False
+
+
+def _has_local_debugger() -> bool:
+    try:
+        return DebugExecutor.is_available()
+    except Exception:
+        return False
+
+
+def _can_run_locally(code: str, stdin_text: str = "") -> bool:
+    try:
+        return DebugExecutor.can_run_code_locally(code, stdin_text)
+    except Exception:
+        return False
 
 
 class Engine:
@@ -93,27 +108,28 @@ class Engine:
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
     def _on_run(self):
-        if not _has_api_key():
-            from app.ui.widgets.api_key_dialog import show_api_key_dialog
-            show_api_key_dialog(self._window)
-            if not _has_api_key():
-                self._window.statusBar().showMessage(
-                    tr("API key not configured - click Settings or set provider API key")
-                )
-                return
-
         code = self._window.get_code()
         if not code:
             self._window.statusBar().showMessage(tr("No code to run"))
             return
+        stdin_text = self._window.get_stdin()
+
+        if not _has_api_key() and not _can_run_locally(code, stdin_text):
+            from app.ui.widgets.api_key_dialog import show_api_key_dialog
+            show_api_key_dialog(self._window)
+            if not _has_api_key() and not _can_run_locally(code, stdin_text):
+                self._window.statusBar().showMessage(
+                    tr("API key not configured - click Settings or set provider API key")
+                )
+                return
         self._last_code = code
 
         self.cancel_current_run()
 
         self._window.show_loading(True)
-        self._window.statusBar().showMessage(tr("Sending code to AI..."))
+        self._window.statusBar().showMessage(tr("Analyzing code..."))
 
-        self._worker = ExecutionWorker(code, self._config_path)
+        self._worker = ExecutionWorker(code, self._config_path, stdin_text)
         self._worker.finished.connect(self._on_trace_ready)
         self._worker.error.connect(self._on_trace_error)
         self._worker.start()

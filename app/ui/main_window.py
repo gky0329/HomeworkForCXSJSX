@@ -383,6 +383,29 @@ class MainWindow(QMainWindow):
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
 
+        left_pane = QWidget()
+        left_layout = QVBoxLayout(left_pane)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        left_layout.addWidget(self.code_editor, 1)
+
+        self.stdin_label = QLabel(tr("Program Input (stdin)"))
+        self.stdin_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 11px; padding: 4px 8px; "
+            f"background-color: {SURFACE}; border-top: 1px solid {BORDER};"
+        )
+        left_layout.addWidget(self.stdin_label, 0)
+
+        self.stdin_editor = QPlainTextEdit()
+        self.stdin_editor.setFixedHeight(92)
+        self.stdin_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", max(10, font_size - 2)))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
+        self.stdin_editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
+            f"border: none; border-top: 1px solid {BORDER}; padding: 6px; }}"
+        )
+        left_layout.addWidget(self.stdin_editor, 0)
+
         self.canvas_view = CanvasView()
         self.canvas_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.canvas_scene = QGraphicsScene()
@@ -442,7 +465,7 @@ class MainWindow(QMainWindow):
 
         right_layout.addLayout(step_bar, 0)
 
-        splitter.addWidget(self.code_editor)
+        splitter.addWidget(left_pane)
         splitter.addWidget(right_pane)
         splitter.setSizes([500, 700])
         splitter.setStretchFactor(0, 4)
@@ -493,7 +516,7 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(12)
 
-        self._overlay_label = QLabel(tr("Analyzing code with AI..."))
+        self._overlay_label = QLabel(tr("Analyzing code..."))
         self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_label.setStyleSheet(
             f"QLabel {{ color: {HIGHLIGHT}; font-size: 24px; font-weight: bold; background: transparent; }}"
@@ -540,7 +563,7 @@ class MainWindow(QMainWindow):
             self._overlay.setGeometry(self.centralWidget().rect())
             self._overlay.raise_()
             self._load_start_time = time.time()
-            self._overlay_label.setText(tr("Analyzing code with AI..."))
+            self._overlay_label.setText(tr("Analyzing code..."))
             self._overlay_time.setText("")
             self._elapsed_timer.start(100)
         else:
@@ -551,6 +574,14 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._overlay.setGeometry(self.centralWidget().rect())
+
+    def closeEvent(self, event):
+        for page_attr in ("review_page", "knowledge_page", "file_page", "oj_page"):
+            page = getattr(self, page_attr, None)
+            shutdown = getattr(page, "shutdown_workers", None)
+            if callable(shutdown):
+                shutdown()
+        super().closeEvent(event)
 
     def _setup_shortcuts(self):
         self._global_shortcuts = ShortcutRegistry(self)
@@ -646,6 +677,8 @@ class MainWindow(QMainWindow):
         self.btn_next.setText(tr("Next"))
         self.btn_reset.setText(tr("Reset"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self.stdin_label.setText(tr("Program Input (stdin)"))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
         self.step_label.setText(tr("Ready") if "Ready" in self.step_label.text() or "就绪" in self.step_label.text() else self.step_label.text())
 
     def _setup_statusbar(self):
@@ -660,6 +693,9 @@ class MainWindow(QMainWindow):
 
     def get_code(self) -> str:
         return self.code_editor.toPlainText().strip()
+
+    def get_stdin(self) -> str:
+        return self.stdin_editor.toPlainText()
 
     def eventFilter(self, obj, event):
         if self._current_code_tab_active():
@@ -706,7 +742,9 @@ class MainWindow(QMainWindow):
         self.auto_fit_check.setText(tr("Auto Fit"))
         self.step_label.setText(tr("Ready"))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
-        self._overlay_label.setText(tr("Analyzing code with AI..."))
+        self.stdin_label.setText(tr("Program Input (stdin)"))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
+        self._overlay_label.setText(tr("Analyzing code..."))
         self._overlay_cancel_btn.setText(tr("Cancel"))
         if hasattr(self, "home_page"):
             self.home_page.retranslate_ui()
