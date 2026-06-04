@@ -8237,14 +8237,18 @@ def test_native_debug_smoke_requires_vector_object_elements():
 
 def test_native_debug_smoke_forwards_stdin_to_debug_executor():
     """Native smoke should validate input-aware debugger runs, not only no-stdin code."""
+    from pathlib import Path
+
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
     from tools.native_debug_smoke import CASES, _run_case
 
     captured = {}
+    config_path = Path("custom-config.yaml")
 
     class FakeDebugExecutor:
-        def __init__(self, preferred_backend=None):
+        def __init__(self, preferred_backend=None, config_path=None):
             captured["backend"] = preferred_backend
+            captured["config_path"] = config_path
 
         def run_code(self, code, stdin_text=""):
             captured["code"] = code
@@ -8264,12 +8268,52 @@ def test_native_debug_smoke_forwards_stdin_to_debug_executor():
             ])
 
     with patch("tools.native_debug_smoke.DebugExecutor", FakeDebugExecutor):
-        result = _run_case(CASES["stdin_sum"], "msvc-pdb", render=False)
+        result = _run_case(CASES["stdin_sum"], "msvc-pdb", render=False, config_path=config_path)
 
     assert result["ok"] is True
     assert captured["backend"] == "msvc-pdb"
+    assert captured["config_path"] == config_path
     assert captured["stdin"] == "7 5\n"
     assert "cin >> x >> y" in captured["code"]
+
+
+def test_native_debug_smoke_forwards_config_to_backend_status():
+    """Backend listing should honor a custom config path for experimental PDB enablement."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from tools.native_debug_smoke import _backend_status
+
+    captured = {}
+    config_path = Path("pdb-test-config.yaml")
+
+    class FakeDebugExecutor:
+        @staticmethod
+        def backend_status(config_path=None):
+            captured["config_path"] = config_path
+            return [
+                SimpleNamespace(
+                    id="msvc-pdb",
+                    label="MSVC / PDB",
+                    available=True,
+                    implemented=True,
+                    detail="configured from test file",
+                )
+            ]
+
+    with patch("tools.native_debug_smoke.DebugExecutor", FakeDebugExecutor):
+        statuses = _backend_status(config_path)
+
+    assert captured["config_path"] == config_path
+    assert statuses == [
+        {
+            "id": "msvc-pdb",
+            "label": "MSVC / PDB",
+            "available": True,
+            "implemented": True,
+            "detail": "configured from test file",
+        }
+    ]
 
 
 def test_native_debug_smoke_requires_call_stack_state():
@@ -9132,6 +9176,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_polymorphic_smart_pointer_container_heap,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
+        test_native_debug_smoke_forwards_config_to_backend_status,
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
         test_native_debug_smoke_requires_double_pointer_stack_state,

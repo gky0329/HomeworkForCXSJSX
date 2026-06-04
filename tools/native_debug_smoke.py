@@ -2550,7 +2550,7 @@ def _render_trace(trace: ExecutionTrace) -> int:
     return len(scene.items())
 
 
-def _backend_status() -> list[dict[str, object]]:
+def _backend_status(config_path: Path | None = None) -> list[dict[str, object]]:
     return [
         {
             "id": status.id,
@@ -2559,7 +2559,7 @@ def _backend_status() -> list[dict[str, object]]:
             "implemented": status.implemented,
             "detail": status.detail,
         }
-        for status in DebugExecutor.backend_status()
+        for status in DebugExecutor.backend_status(config_path)
     ]
 
 
@@ -2568,6 +2568,7 @@ def _run_case(
     backend: str | None,
     render: bool,
     dump_dir: Path | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "name": case.name,
@@ -2579,7 +2580,7 @@ def _run_case(
         "trace_path": None,
     }
     try:
-        trace = DebugExecutor(preferred_backend=backend).run_code(case.code, case.stdin_text)
+        trace = DebugExecutor(preferred_backend=backend, config_path=config_path).run_code(case.code, case.stdin_text)
         result["steps"] = len(trace.steps)
         summary = _trace_summary(trace)
         result["summary"] = summary
@@ -2630,6 +2631,11 @@ def parse_args() -> argparse.Namespace:
         help="Write each successful case trace as JSON files under this directory.",
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        help="Read debugger settings from this config.yaml path instead of the project default.",
+    )
+    parser.add_argument(
         "--list-backends",
         action="store_true",
         help="Print debugger backend availability and exit.",
@@ -2641,7 +2647,7 @@ def main() -> int:
     args = parse_args()
     backend = None if args.backend == "auto" else args.backend
     if args.list_backends:
-        payload = {"backends": _backend_status()}
+        payload = {"backends": _backend_status(args.config)}
         print(json.dumps(payload, indent=2))
         return 0
 
@@ -2652,13 +2658,14 @@ def main() -> int:
             backend,
             render=not args.no_render,
             dump_dir=args.dump_traces,
+            config_path=args.config,
         )
         for case in selected_cases
     ]
     payload = {
         "backend": args.backend,
         "render": not args.no_render,
-        "backends": _backend_status(),
+        "backends": _backend_status(args.config),
         "results": results,
     }
 
