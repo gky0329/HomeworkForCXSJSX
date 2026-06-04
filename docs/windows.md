@@ -92,6 +92,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case std_array
 python tools/native_debug_smoke.py --backend msvc-pdb --case stack_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case priority_queue_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_int
+python tools/native_debug_smoke.py --backend msvc-pdb --case vector_pointer_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case vector_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case map_string_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case control_flow_loop

@@ -353,6 +353,15 @@ v.push_back(20);
 ```
 预期: 堆 buffer `size=2 cap=N [10][20]`，扩容时 cap 变化
 
+### std::vector 指针元素测试
+```cpp
+int a = 1;
+int b = 2;
+std::vector<int*> ptrs = {&a, &b};
+*ptrs[1] = 9;
+```
+预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9
+
 ### 运算符重载测试
 ```cpp
 class Cents { int m_cents; };

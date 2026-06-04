@@ -1042,8 +1042,8 @@ class DebugExecutor:
             for parsed in parsed_frame.variables:
                 stack_addr = stack_addr_map[parsed.actual_addr]
                 value = parsed.value
-                is_reference = "&" in parsed.type and "*" not in parsed.type
-                is_pointer = "*" in parsed.type or (self._is_hex_addr(value) and not is_reference)
+                is_reference = self._is_reference_type(parsed.type)
+                is_pointer = self._is_pointer_type(parsed.type) or (self._is_hex_addr(value) and not is_reference)
                 is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
                 elements = (
                     parsed.elements
@@ -1111,7 +1111,7 @@ class DebugExecutor:
         for parsed in parsed_vars:
             if not parsed.pointee_addr or self._is_null(parsed.pointee_addr):
                 continue
-            if "&" in parsed.type and "*" not in parsed.type:
+            if self._is_reference_type(parsed.type):
                 continue
             source_addr = stack_addr_map.get(parsed.actual_addr)
             if source_addr is None:
@@ -1666,7 +1666,7 @@ class DebugExecutor:
                 name=name,
                 value=value,
             )
-            if self._is_hex_addr(value) and ("*" in type_text or "&" in type_text or self._is_smart_pointer_type(type_text)):
+            if self._is_hex_addr(value) and (self._is_pointer_like_type(type_text) or self._is_reference_type(type_text)):
                 var.pointee_addr = value
                 pending_pointer = var
             else:
@@ -1964,7 +1964,7 @@ class DebugExecutor:
             "    typ=type_of(value)\n"
             "    name=value.GetName() or ''\n"
             "    loc=value.GetLocation() or ''\n"
-            "    if loc == 'scalar' and '*' in typ:\n"
+            "    if loc == 'scalar' and is_pointer_type(typ):\n"
             "        return synthetic_addr(name, value_idx, frame_idx)\n"
             "    if loc.startswith('0x'):\n"
             "        return loc.split()[0]\n"
@@ -1978,6 +1978,22 @@ class DebugExecutor:
             "    return value.GetValue() or value.GetSummary() or ''\n"
             "def type_of(value):\n"
             "    return value.GetTypeName() or 'unknown'\n"
+            "def has_top_level_symbol(typ, symbol):\n"
+            "    depth=0\n"
+            "    for ch in typ:\n"
+            "        if ch == '<':\n"
+            "            depth += 1\n"
+            "            continue\n"
+            "        if ch == '>':\n"
+            "            depth=max(0, depth - 1)\n"
+            "            continue\n"
+            "        if ch == symbol and depth == 0:\n"
+            "            return True\n"
+            "    return False\n"
+            "def is_pointer_type(typ):\n"
+            "    return '[' not in typ and has_top_level_symbol(typ, '*')\n"
+            "def is_reference_type(typ):\n"
+            "    return has_top_level_symbol(typ, '&') and not is_pointer_type(typ)\n"
             "def is_std_string_type(typ):\n"
             "    compact=typ.replace(' ', '')\n"
             "    return compact in ('string', 'std::string', 'std::__1::string') or compact.startswith('std::basic_string<char') or compact.startswith('std::__1::basic_string<char')\n"
@@ -1995,10 +2011,10 @@ class DebugExecutor:
             "        child=value.GetChildAtIndex(child_idx)\n"
             "        child_typ=type_of(child)\n"
             "        raw=child.GetValue() or ''\n"
-            "        if not raw and '*' in child_typ:\n"
+            "        if not raw and is_pointer_type(child_typ):\n"
             "            raw_unsigned=child.GetValueAsUnsigned(0)\n"
             "            raw='0x%x' % raw_unsigned if raw_unsigned else ''\n"
-            "        if '*' in child_typ and raw and raw not in ('0x0', '0x0000000000000000'):\n"
+            "        if is_pointer_type(child_typ) and raw and raw not in ('0x0', '0x0000000000000000'):\n"
             "            return child, raw\n"
             "    return None, ''\n"
             "def flat_value(value, depth=0):\n"
@@ -2039,7 +2055,7 @@ class DebugExecutor:
             "    if is_std_string_type(typ) and val:\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
             "        return\n"
-            "    if '&' in typ and val and val not in ('0x0', '0x0000000000000000'):\n"
+            "    if is_reference_type(typ) and val and val not in ('0x0', '0x0000000000000000'):\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
             "        return\n"
             "    if is_smart_pointer_type(typ):\n"
@@ -2058,19 +2074,19 @@ class DebugExecutor:
             "            return\n"
             "        print('%s: (%s) %s = 0x0' % (addr, typ, name))\n"
             "        return\n"
-            "    if '*' in typ and not val:\n"
+            "    if is_pointer_type(typ) and not val:\n"
             "        raw=value.GetValueAsUnsigned(0)\n"
             "        val='0x%x' % raw\n"
-            "    if '*' in typ and val in ('0x0', '0x0000000000000000'):\n"
+            "    if is_pointer_type(typ) and val in ('0x0', '0x0000000000000000'):\n"
             "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
             "        return\n"
-            "    if '*' in typ and 'char' in typ and summary:\n"
+            "    if is_pointer_type(typ) and 'char' in typ and summary:\n"
             "        char_typ='const char[]' if 'const' in typ else 'char[]'\n"
             "        print('%s: (%s) %s = %s {' % (addr, typ, name, val))\n"
             "        print('%s:   (%s) *%s = %s' % (val, char_typ, name, summary))\n"
             "        print('}')\n"
             "        return\n"
-            "    if '*' in typ and val and val not in ('0x0', '0x0000000000000000'):\n"
+            "    if is_pointer_type(typ) and val and val not in ('0x0', '0x0000000000000000'):\n"
             "        print('%s: (%s) %s = %s {' % (addr, typ, name, val))\n"
             "        deref=value.Dereference()\n"
             "        if deref.IsValid():\n"
@@ -2234,7 +2250,7 @@ class DebugExecutor:
         heap_addr_map: dict[str, str],
     ) -> str:
         value = self._clean_value(member.value)
-        is_reference = "&" in member.type and "*" not in member.type
+        is_reference = self._is_reference_type(member.type)
         if (self._is_pointer_like_type(member.type) or is_reference) and self._is_null(value):
             return "nullptr"
         if (
@@ -2565,7 +2581,36 @@ class DebugExecutor:
 
     @staticmethod
     def _is_pointer_like_type(type_text: str) -> bool:
-        return "*" in type_text or DebugExecutor._is_smart_pointer_type(type_text)
+        return DebugExecutor._is_pointer_type(type_text) or DebugExecutor._is_smart_pointer_type(type_text)
+
+    @staticmethod
+    def _is_pointer_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        if re.search(r"\[[^\]]*\]", cleaned):
+            return False
+        return DebugExecutor._has_top_level_symbol(cleaned, "*")
+
+    @staticmethod
+    def _is_reference_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        return (
+            DebugExecutor._has_top_level_symbol(cleaned, "&")
+            and not DebugExecutor._is_pointer_type(cleaned)
+        )
+
+    @staticmethod
+    def _has_top_level_symbol(type_text: str, symbol: str) -> bool:
+        depth = 0
+        for ch in type_text:
+            if ch == "<":
+                depth += 1
+                continue
+            if ch == ">":
+                depth = max(0, depth - 1)
+                continue
+            if ch == symbol and depth == 0:
+                return True
+        return False
 
     @staticmethod
     def _is_smart_pointer_type(type_text: str) -> bool:

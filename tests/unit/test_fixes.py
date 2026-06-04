@@ -1069,6 +1069,21 @@ def test_debug_executor_lldb_script_expands_smart_pointers():
     assert "emit_child(deref, '*' + name" in script
 
 
+def test_debug_executor_lldb_script_uses_top_level_pointer_checks():
+    """LLDB snapshots should not treat template element pointers as owner pointers."""
+    from app.core.debug_executor import DebugExecutor
+
+    script = DebugExecutor._lldb_stack_snapshot_command()
+
+    assert "def is_pointer_type" in script
+    assert "def has_top_level_symbol" in script
+    assert "loc == 'scalar' and is_pointer_type(typ)" in script
+    assert "if is_pointer_type(typ) and not val:" in script
+    assert "if '*' in typ and not val:" not in script
+    assert "loc == 'scalar' and '*' in typ" not in script
+    assert "'*' in child_typ" not in script
+
+
 def test_debug_executor_parses_lambda_captures_as_function_object():
     """LLDB lambda closure members should become LambdaCapture rows."""
     from app.core.debug_executor import DebugExecutor
@@ -1328,6 +1343,52 @@ __CXXMV_FRAME__0__7__main
         (3, "4"),
     ]
     assert changed.value == "{[0]=1, [1]=8, [2]=3, [3]=4}"
+
+
+def test_debug_executor_parses_lldb_vector_of_pointers_as_array_not_pointer():
+    """A vector<int*> should keep container cells instead of becoming one pointer."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "vector<int*> ptrs = {&a, &b};\n"
+        "*ptrs[1] = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[6]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (int) a = 1
+0x000000016fdfe6b4: (int) b = 9
+0x000000016fdfe6c0: (std::__1::vector<int *, std::__1::allocator<int *> >) ptrs = {{
+0x000000010065c6a0:   (int *) [0] = 0x000000016fdfe6b0
+0x000000010065c6a8:   (int *) [1] = 0x000000016fdfe6b4
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    ptrs = values["ptrs"]
+
+    assert values["b"].value == "9"
+    assert ptrs.is_array is True
+    assert ptrs.is_pointer is False
+    assert ptrs.is_object is False
+    assert [(element.index, element.value) for element in ptrs.elements] == [
+        (0, "0x000000016fdfe6b0"),
+        (1, "0x000000016fdfe6b4"),
+    ]
+    assert step.heap == []
+    assert step.edges == []
 
 
 def test_debug_executor_parses_vector_string_elements_from_summaries():
@@ -2610,6 +2671,54 @@ __CXXMV_FRAMEDX__0
     assert var.value == "{[0]=1}"
     assert [(element.index, element.value) for element in var.elements] == [(0, "1")]
     assert var.members == []
+
+
+def test_debug_executor_parses_cdb_vector_of_pointers_as_array_not_pointer():
+    """CDB/PDB vector<int*> should keep NatVis elements instead of pointer styling."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <vector>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "vector<int*> ptrs = {&a, &b};\n"
+        "*ptrs[1] = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[6]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int a = 1
+000000aa`0000efd4 int b = 9
+000000aa`0000efe0 std::vector<int *> ptrs = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    ptrs : {{ size=2 }} [Type: std::vector<int *>]
+        [0] : 0x000000aa0000efd0 [Type: int *]
+        [1] : 0x000000aa0000efd4 [Type: int *]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    ptrs = values["ptrs"]
+
+    assert values["b"].value == "9"
+    assert ptrs.is_array is True
+    assert ptrs.is_pointer is False
+    assert ptrs.is_object is False
+    assert [(element.index, element.value) for element in ptrs.elements] == [
+        (0, "0x000000aa0000efd0"),
+        (1, "0x000000aa0000efd4"),
+    ]
+    assert step.heap == []
+    assert step.edges == []
 
 
 def test_debug_executor_parses_cdb_reference_as_non_pointer():
@@ -5087,6 +5196,61 @@ def test_native_debug_smoke_requires_container_adapter_elements():
     assert _validate_priority_queue_adapter(strong_pq) == []
 
 
+def test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container():
+    """Native smoke should prove vector<int*> stays a container, not a pointer var."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_vector_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*ptrs[1] = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="ptrs",
+                    type="vector<int*>",
+                    value="0xH001",
+                    address="0xS003",
+                    is_pointer=True,
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=6,
+            source_code="*ptrs[1] = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="ptrs",
+                    type="vector<int*>",
+                    value="{[0]=0xS001, [1]=0xS002}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, value="0xS001"),
+                        ArrayElement(index=1, value="0xS002"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+
+    weak_errors = _validate_vector_pointer(weak_trace)
+    assert "ptrs should be marked as an array/container" in weak_errors
+    assert "ptrs should not be marked as a pointer" in weak_errors
+    assert _validate_vector_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -5681,11 +5845,13 @@ if __name__ == "__main__":
         test_debug_executor_formats_std_string_summary_as_scalar,
         test_debug_executor_lldb_script_expands_string_keyed_containers,
         test_debug_executor_lldb_script_expands_smart_pointers,
+        test_debug_executor_lldb_script_uses_top_level_pointer_checks,
         test_debug_executor_parses_lambda_captures_as_function_object,
         test_debug_executor_parses_lldb_member_pointer_edges,
         test_debug_executor_parses_lldb_std_array_as_array_variable,
         test_debug_executor_parses_lldb_container_adapters_as_array_variables,
         test_debug_executor_parses_vector_elements_as_array_variable,
+        test_debug_executor_parses_lldb_vector_of_pointers_as_array_not_pointer,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
         test_debug_executor_preserves_nested_array_child_values,
@@ -5721,6 +5887,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_member_pointer_edges,
         test_debug_executor_parses_cdb_std_array_as_array_variable,
         test_debug_executor_parses_cdb_container_adapters_as_array_variables,
+        test_debug_executor_parses_cdb_vector_of_pointers_as_array_not_pointer,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -5772,6 +5939,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_stack_array_elements,
         test_native_debug_smoke_requires_std_array_elements,
         test_native_debug_smoke_requires_container_adapter_elements,
+        test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

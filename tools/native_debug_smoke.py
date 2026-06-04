@@ -303,6 +303,35 @@ def _validate_vector(trace: ExecutionTrace) -> list[str]:
     return []
 
 
+def _validate_vector_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "ptrs")
+    if match is None:
+        return ["missing vector pointer variable ptrs"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("ptrs should be marked as an array/container")
+    if var.is_pointer:
+        errors.append("ptrs should not be marked as a pointer")
+    if var.is_object:
+        errors.append("ptrs should not be marked as an object after element expansion")
+    if var.members:
+        errors.append("ptrs should show pointer elements instead of implementation members")
+    values = [element.value for element in var.elements]
+    if len(values) != 2:
+        errors.append(f"ptrs expected 2 pointer elements, got {values!r}")
+    elif not all(value.startswith("0x") for value in values):
+        errors.append(f"ptrs element values should be addresses, got {values!r}")
+    b_match = _last_var(trace, "b")
+    if b_match is None:
+        errors.append("missing b variable after *ptrs[1] write")
+    elif b_match[1].value != "9":
+        errors.append(f"b expected 9 after *ptrs[1] write, got {b_match[1].value!r}")
+    if any(edge.source_address == var.address for edge in state.edges):
+        errors.append("ptrs container itself should not own a pointer edge")
+    return errors
+
+
 def _validate_stack_adapter(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "s")
     if match is None:
@@ -1290,6 +1319,18 @@ CASES: dict[str, SmokeCase] = {
             "v[1] = 8;\n"
         ),
         validate=_validate_vector,
+    ),
+    "vector_pointer_stack": SmokeCase(
+        name="vector_pointer_stack",
+        code=(
+            "#include <vector>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "vector<int*> ptrs = {&a, &b};\n"
+            "*ptrs[1] = 9;\n"
+        ),
+        validate=_validate_vector_pointer,
     ),
     "vector_object": SmokeCase(
         name="vector_object",
