@@ -1561,6 +1561,43 @@ __CXXMV_FRAMEV__0
     assert step.edges[0].target_address == "0xH001"
 
 
+def test_debug_executor_parses_cdb_heap_array_from_pointer_summary():
+    """A PDB pointer summary with elements should render as a heap array block."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int main() {\n"
+        "    int* hp = new int[3]{1, 2, 3};\n"
+        "    hp[1] = 8;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 3]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ 4]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int * hp = 000001df`4e700000 {1, 8, 3}
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    pointer = step.stack[0].variables[0]
+    heap = step.heap[0]
+
+    assert pointer.value == "0xH001"
+    assert heap.is_array is True
+    assert heap.type == "int[]"
+    assert heap.value == "{[0]=1, [1]=8, [2]=3}"
+    assert [(element.index, element.value) for element in heap.elements] == [
+        (0, "1"),
+        (1, "8"),
+        (2, "3"),
+    ]
+    assert step.edges[0].target_address == "0xH001"
+
+
 def test_debug_executor_filters_future_locals_from_stack_snapshots():
     """Future loop/call locals should not appear before their source line completes."""
     from app.core.debug_executor import DebugExecutor
@@ -1927,6 +1964,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
         test_debug_executor_parses_cdb_arrays_and_objects,
         test_debug_executor_parses_cdb_heap_object_from_pointer_summary,
+        test_debug_executor_parses_cdb_heap_array_from_pointer_summary,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
         test_debug_executor_lldb_timeout_is_debug_execution_error,

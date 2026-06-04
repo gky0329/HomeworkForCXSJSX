@@ -560,6 +560,16 @@ class DebugExecutor:
                             var.pointee_type or self._pointee_type(var.type),
                             var.pointee_members,
                         )
+                    if var.pointee_elements and var.name != delete_name:
+                        element_type = var.pointee_type or self._pointee_type(var.type)
+                        heap_array_values[var.pointee_addr] = (
+                            element_type,
+                            var.pointee_elements,
+                        )
+                        heap_values[var.pointee_addr] = (
+                            f"{element_type}[]",
+                            self._format_elements(var.pointee_elements),
+                        )
 
             if delete_name and delete_name in pointer_targets:
                 freed_heap.add(pointer_targets[delete_name])
