@@ -1,26 +1,49 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional
 
 
-class ArrayElement(BaseModel):
+def _empty_list_if_none(value):
+    return [] if value is None else value
+
+
+def _empty_string_if_none(value):
+    return "" if value is None else value
+
+
+def _zero_if_none(value):
+    return 0 if value is None else value
+
+
+class MemoryBaseModel(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
+
+class ArrayElement(MemoryBaseModel):
     index: int = 0
     value: str = ""
 
+    _normalize_index = field_validator("index", mode="before")(_zero_if_none)
+    _normalize_text = field_validator("value", mode="before")(_empty_string_if_none)
 
-class StructMember(BaseModel):
+
+class StructMember(MemoryBaseModel):
     name: str = ""
     type: str = ""
     value: str = ""
 
+    _normalize_text = field_validator("name", "type", "value", mode="before")(_empty_string_if_none)
 
-class LambdaCapture(BaseModel):
+
+class LambdaCapture(MemoryBaseModel):
     name: str = ""
     type: str = ""
     value: str = ""
     by_ref: bool = False
 
+    _normalize_text = field_validator("name", "type", "value", mode="before")(_empty_string_if_none)
 
-class Variable(BaseModel):
+
+class Variable(MemoryBaseModel):
     name: str
     type: str
     value: str
@@ -41,13 +64,22 @@ class Variable(BaseModel):
     is_reference: bool = False
     is_temporary: bool = False
 
+    _normalize_text = field_validator("name", "type", "value", "address", mode="before")(_empty_string_if_none)
+    _normalize_lists = field_validator(
+        "elements", "members", "base_classes", "virtual_methods", "captures",
+        mode="before",
+    )(_empty_list_if_none)
 
-class StackFrame(BaseModel):
+
+class StackFrame(MemoryBaseModel):
     frame_name: str
     variables: List[Variable] = Field(default_factory=list)
 
+    _normalize_text = field_validator("frame_name", mode="before")(_empty_string_if_none)
+    _normalize_lists = field_validator("variables", mode="before")(_empty_list_if_none)
 
-class HeapBlock(BaseModel):
+
+class HeapBlock(MemoryBaseModel):
     address: str
     type: str
     value: str
@@ -65,14 +97,22 @@ class HeapBlock(BaseModel):
     is_constructed: bool = False
     is_destroyed: bool = False
 
+    _normalize_text = field_validator("address", "type", "value", "class_name", mode="before")(_empty_string_if_none)
+    _normalize_lists = field_validator(
+        "elements", "members", "base_classes", "virtual_methods",
+        mode="before",
+    )(_empty_list_if_none)
 
-class PointerEdge(BaseModel):
+
+class PointerEdge(MemoryBaseModel):
     source_address: str
     target_address: str
     is_dangling: bool = False
 
+    _normalize_text = field_validator("source_address", "target_address", mode="before")(_empty_string_if_none)
 
-class MemoryState(BaseModel):
+
+class MemoryState(MemoryBaseModel):
     line_number: int
     source_code: str
     explanation: str = ""
@@ -80,6 +120,11 @@ class MemoryState(BaseModel):
     heap: List[HeapBlock] = Field(default_factory=list)
     edges: List[PointerEdge] = Field(default_factory=list)
 
+    _normalize_text = field_validator("source_code", "explanation", mode="before")(_empty_string_if_none)
+    _normalize_lists = field_validator("stack", "heap", "edges", mode="before")(_empty_list_if_none)
 
-class ExecutionTrace(BaseModel):
+
+class ExecutionTrace(MemoryBaseModel):
     steps: List[MemoryState] = Field(default_factory=list)
+
+    _normalize_lists = field_validator("steps", mode="before")(_empty_list_if_none)

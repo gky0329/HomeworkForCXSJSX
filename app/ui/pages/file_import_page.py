@@ -20,6 +20,7 @@ from app.services.i18n import tr
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
 from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
+from app.ui.widgets.threading import retire_worker
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, ACCENT_HOVER, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
@@ -110,6 +111,7 @@ class FileImportPage(QWidget):
         self._file_text = ""
         self._worker: ProcessWorker | None = None
         self._quiz_worker: AIExplainWorker | None = None
+        self._retired_workers: list[QThread] = []
         self._kps_data: list[dict] = []
         self._setup_ui()
 
@@ -247,13 +249,14 @@ class FileImportPage(QWidget):
         self._status.setText(tr("Processing with AI..."))
 
         if self._worker is not None and self._worker.isRunning():
-            try:
-                self._worker.finished.disconnect(self._on_result)
-                self._worker.error.disconnect(self._on_error)
-            except Exception:
-                pass
-            self._worker.quit()
-            self._worker.wait(1000)
+            retire_worker(
+                self,
+                self._worker,
+                disconnect=[
+                    (self._worker.finished, self._on_result),
+                    (self._worker.error, self._on_error),
+                ],
+            )
 
         self._worker = ProcessWorker(self._file_text, self._config_path)
         self._worker.finished.connect(self._on_result)
@@ -520,13 +523,14 @@ class FileImportPage(QWidget):
 
         from app.services.ai_explain_worker import AIExplainWorker
         if hasattr(self, '_quiz_worker') and self._quiz_worker is not None and self._quiz_worker.isRunning():
-            try:
-                self._quiz_worker.finished.disconnect(self._on_quiz_result)
-                self._quiz_worker.error.disconnect(self._on_quiz_error)
-            except Exception:
-                pass
-            self._quiz_worker.quit()
-            self._quiz_worker.wait(1000)
+            retire_worker(
+                self,
+                self._quiz_worker,
+                disconnect=[
+                    (self._quiz_worker.finished, self._on_quiz_result),
+                    (self._quiz_worker.error, self._on_quiz_error),
+                ],
+            )
         self._quiz_worker = AIExplainWorker(quiz_prompt, msg)
         self._quiz_worker.finished.connect(self._on_quiz_result)
         self._quiz_worker.error.connect(self._on_quiz_error)
@@ -538,7 +542,13 @@ class FileImportPage(QWidget):
         if hasattr(self, '_gen_quiz_btn'):
             self._gen_quiz_btn.setEnabled(True)
         try:
-            data = json.loads(text.strip())
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                parts = cleaned.split("```")
+                cleaned = parts[1] if len(parts) > 1 else cleaned
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:].strip()
+            data = json.loads(cleaned)
         except json.JSONDecodeError:
             self._status.setText(tr("Quiz generation returned invalid JSON"))
             return

@@ -22,6 +22,7 @@ from app.services.prompt_templates import OJ_SYSTEM_PROMPT, OJ_USER_TEMPLATE, OJ
 from app.services.compile_runner import compile_and_run
 from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.error_dialog import show_error_dialog
+from app.ui.widgets.threading import retire_worker
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT, EDGE_DANGLING,
@@ -106,6 +107,7 @@ class OJPage(QWidget):
         super().__init__(parent)
         self._config_path = config_path
         self._worker: OJWorker | None = None
+        self._retired_workers: list[OJWorker] = []
         self._trace: ExecutionTrace | None = None
         self._current_index = -1
         self._autogen = False
@@ -232,22 +234,21 @@ class OJPage(QWidget):
         problem = self._problem_edit.toPlainText().strip()
         code = self._code_edit.toPlainText().strip()
         self._autogen = not code and bool(problem)
-        if not code:
-            code = problem
-        if not code:
+        if not code and not problem:
             return
 
         self._run_btn.setEnabled(False)
         self._run_btn.setText(tr("Analyzing..."))
 
         if self._worker is not None and self._worker.isRunning():
-            try:
-                self._worker.finished.disconnect(self._on_result)
-                self._worker.error.disconnect(self._on_error)
-            except Exception:
-                pass
-            self._worker.quit()
-            self._worker.wait(1000)
+            retire_worker(
+                self,
+                self._worker,
+                disconnect=[
+                    (self._worker.finished, self._on_result),
+                    (self._worker.error, self._on_error),
+                ],
+            )
 
         self._worker = OJWorker(problem, code, self._config_path)
         self._worker.finished.connect(self._on_result)

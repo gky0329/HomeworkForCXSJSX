@@ -63,6 +63,17 @@ class StateDiffEngine:
     def _build_edge_map(state: MemoryState) -> dict[tuple[str, str], PointerEdge]:
         return {(e.source_address, e.target_address): e for e in state.edges}
 
+    @staticmethod
+    def _changed(prev_item, curr_item) -> bool:
+        return prev_item.model_dump() != curr_item.model_dump()
+
+    @staticmethod
+    def _heap_content_changed(prev_block: HeapBlock, curr_block: HeapBlock) -> bool:
+        return (
+            prev_block.model_dump(exclude={"is_freed"})
+            != curr_block.model_dump(exclude={"is_freed"})
+        )
+
     def diff(self, prev: MemoryState | None, curr: MemoryState) -> DiffResult:
         if prev is None:
             return DiffResult(
@@ -79,7 +90,7 @@ class StateDiffEngine:
         for addr, var in curr_vars.items():
             if addr not in prev_vars:
                 result.added_vars.append(var)
-            elif prev_vars[addr].value != var.value:
+            elif self._changed(prev_vars[addr], var):
                 result.modified_vars.append(VarChange(
                     address=addr,
                     name=var.name,
@@ -97,7 +108,7 @@ class StateDiffEngine:
         for addr, block in curr_heap.items():
             if addr not in prev_heap:
                 result.added_heap.append(block)
-            elif prev_heap[addr].value != block.value:
+            elif self._heap_content_changed(prev_heap[addr], block):
                 result.modified_heap.append(HeapChange(
                     address=addr,
                     old_value=prev_heap[addr].value,

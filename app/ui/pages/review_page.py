@@ -10,6 +10,7 @@ from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
+from app.ui.widgets.threading import retire_worker
 import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -113,6 +114,7 @@ class ReviewPage(QWidget):
         self._pending_card_id: str = ""
         self._hint_worker: AIExplainWorker | None = None
         self._cls_worker: AIExplainWorker | None = None
+        self._retired_workers: list[AIExplainWorker] = []
         self._current_deck: str = ""
         self._card_frame: QFrame | None = None
         self._card_scroll: ReviewScrollArea | None = None
@@ -497,13 +499,14 @@ class ReviewPage(QWidget):
             btn.setEnabled(False)
             btn.setText(tr("Thinking..."))
             if self._hint_worker is not None and self._hint_worker.isRunning():
-                try:
-                    self._hint_worker.finished.disconnect()
-                    self._hint_worker.error.disconnect()
-                except Exception:
-                    pass
-                self._hint_worker.quit()
-                self._hint_worker.wait(1000)
+                retire_worker(
+                    self,
+                    self._hint_worker,
+                    disconnect=[
+                        (self._hint_worker.finished, None),
+                        (self._hint_worker.error, None),
+                    ],
+                )
             self._hint_worker = AIExplainWorker(
                 HINT_PROMPT,
                 f"知识点：{kp_text}\n题目：{q_text}\n请给提示",

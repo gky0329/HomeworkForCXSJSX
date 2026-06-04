@@ -18,6 +18,7 @@ from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
+from app.ui.widgets.threading import retire_worker
 import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
@@ -132,6 +133,7 @@ class KnowledgePage(QWidget):
         self._explain_worker: AIExplainWorker | None = None
         self._quiz_worker: AIExplainWorker | None = None
         self._auto_explain_worker: AIExplainWorker | None = None
+        self._retired_workers: list[AIExplainWorker] = []
         self._setup_ui()
         self._refresh()
 
@@ -415,13 +417,14 @@ class KnowledgePage(QWidget):
             btn.setEnabled(False)
             btn.setText(tr("Asking AI..."))
             if self._explain_worker is not None and self._explain_worker.isRunning():
-                try:
-                    self._explain_worker.finished.disconnect()
-                    self._explain_worker.error.disconnect()
-                except Exception:
-                    pass
-                self._explain_worker.quit()
-                self._explain_worker.wait(1000)
+                retire_worker(
+                    self,
+                    self._explain_worker,
+                    disconnect=[
+                        (self._explain_worker.finished, None),
+                        (self._explain_worker.error, None),
+                    ],
+                )
             self._explain_worker = AIExplainWorker(EXPLAIN_PROMPT, f"请解释 C++ 知识点：{concept_name}")
 
             def on_done(text):
@@ -605,11 +608,28 @@ class KnowledgePage(QWidget):
         btn.setEnabled(False)
         btn.setText(tr("Generating quiz..."))
         prompt = """你是 C++ 出题助手。根据以下知识点解释，出 2-3 道单选题。
-输出 JSON：["question","options":["A","B","C","D"],"answer":0,"explanation":"..."]
-直接输出 JSON 数组。"""
+输出 JSON 数组，每个元素都是对象：
+[
+  {
+    "question": "题目",
+    "options": ["选项A", "选项B", "选项C", "选项D"],
+    "answer": 0,
+    "explanation": "解析"
+  }
+]
+直接输出 JSON，不要输出 markdown 代码块或解释文字。"""
         msg = f"知识点：{name}\n\n解释：{desc[:1500]}"
 
         from app.services.ai_explain_worker import AIExplainWorker
+        if self._quiz_worker is not None and self._quiz_worker.isRunning():
+            retire_worker(
+                self,
+                self._quiz_worker,
+                disconnect=[
+                    (self._quiz_worker.finished, None),
+                    (self._quiz_worker.error, None),
+                ],
+            )
         self._quiz_worker = AIExplainWorker(prompt, msg)
 
         def on_done(text):
@@ -621,9 +641,10 @@ class KnowledgePage(QWidget):
             try:
                 text = text.strip()
                 if text.startswith("```"):
-                    text = text.split("```")[1]
+                    parts = text.split("```")
+                    text = parts[1] if len(parts) > 1 else text
                     if text.startswith("json"):
-                        text = text[4:]
+                        text = text[4:].strip()
                 quizzes = json.loads(text)
                 if isinstance(quizzes, dict):
                     quizzes = quizzes.get("quiz_questions", [quizzes])

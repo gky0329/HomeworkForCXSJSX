@@ -16,6 +16,12 @@ def mlabel(text: str, color: str, size: int = 12, bold: bool = False) -> QLabel:
 def clear_layout(layout: QBoxLayout):
     while layout.count():
         item = layout.takeAt(0)
+        child_layout = item.layout()
+        if child_layout is not None:
+            clear_layout(child_layout)
+            child_layout.deleteLater()
+            continue
+
         widget = item.widget()
         if widget is not None:
             widget.deleteLater()

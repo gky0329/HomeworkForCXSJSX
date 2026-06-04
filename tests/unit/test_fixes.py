@@ -8,46 +8,52 @@ Required env: project root in PYTHONPATH (or run from project root).
 import json
 import os
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+@contextmanager
+def _temporary_error_path():
+    from app.services import error_store
+
+    old_path = error_store.ERRORS_PATH
+    with tempfile.TemporaryDirectory() as tmpdir:
+        error_store.ERRORS_PATH = Path(tmpdir) / "errors.json"
+        try:
+            yield error_store.ERRORS_PATH
+        finally:
+            error_store.ERRORS_PATH = old_path
 
 
 # ── Phase 1: error_store lazy init + tmp fallback ──────────────────────
 
 def test_error_store_lazy_init():
     """_ensure_data_dir() is called on first save, not at import time."""
-    from app.services.error_store import _ensure_data_dir, _save, _load, ERRORS_PATH
+    from app.services.error_store import _save, _load
 
-    data = [{"id": "test1", "name": "test"}]
-    try:
-        _save(ERRORS_PATH, data)
-        loaded = _load(ERRORS_PATH)
+    with _temporary_error_path() as errors_path:
+        data = [{"id": "test1", "name": "test"}]
+        _save(errors_path, data)
+        loaded = _load(errors_path)
         assert len(loaded) == 1
         assert loaded[0]["name"] == "test"
-    finally:
-        # cleanup
-        if ERRORS_PATH.exists():
-            ERRORS_PATH.unlink()
-            tmp = ERRORS_PATH.with_suffix(ERRORS_PATH.suffix + ".tmp")
-            if tmp.exists():
-                tmp.unlink()
 
 
 def test_error_store_atomic_write():
     """_save writes to .tmp first, then os.replace."""
-    from app.services.error_store import _save, ERRORS_PATH
+    from app.services.error_store import _save
 
-    data = [{"id": "a"}]
-    _save(ERRORS_PATH, data)
-    tmp_path = ERRORS_PATH.with_suffix(ERRORS_PATH.suffix + ".tmp")
-    assert not tmp_path.exists(), "tmp file should be cleaned up after atomic rename"
-
-    # cleanup
-    if ERRORS_PATH.exists():
-        ERRORS_PATH.unlink()
+    with _temporary_error_path() as errors_path:
+        data = [{"id": "a"}]
+        _save(errors_path, data)
+        tmp_path = errors_path.with_suffix(errors_path.suffix + ".tmp")
+        assert not tmp_path.exists(), "tmp file should be cleaned up after atomic rename"
 
 
 # ── Phase 2: _pending guard ────────────────────────────────────────────
@@ -68,6 +74,193 @@ def test_canvas_animator_pending_guard():
         assert animator._pending == 0, "_pending should stay at 0"
     finally:
         pass  # don't exit the app, other tests may need it
+
+
+def test_memory_model_normalizes_llm_nulls_and_numbers():
+    """ExecutionTrace accepts common LLM slips: null lists and numeric values."""
+    from app.core.memory_model import ExecutionTrace
+
+    trace = ExecutionTrace.model_validate({
+        "steps": [{
+            "line_number": 1,
+            "source_code": "int a = 42;",
+            "stack": [{
+                "frame_name": "main",
+                "variables": [{
+                    "name": "a",
+                    "type": "int",
+                    "value": 42,
+                    "address": "0xS001",
+                    "is_pointer": False,
+                    "elements": None,
+                    "members": None,
+                }],
+            }],
+            "heap": None,
+            "edges": None,
+        }],
+    })
+
+    step = trace.steps[0]
+    assert step.stack[0].variables[0].value == "42"
+    assert step.stack[0].variables[0].elements == []
+    assert step.heap == []
+    assert step.edges == []
+
+
+def test_clear_layout_recurses_nested_layouts():
+    """clear_layout() deletes widgets inside child layouts too."""
+    from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.widgets.helpers import clear_layout
+
+    parent = QWidget()
+    outer = QVBoxLayout(parent)
+    inner = QHBoxLayout()
+    label = QLabel("nested")
+    inner.addWidget(label)
+    outer.addLayout(inner)
+
+    clear_layout(outer)
+    assert outer.count() == 0
+    assert inner.count() == 0
+
+
+def test_memory_canvas_does_not_remove_rekeyed_stack_item():
+    """Rendering a differently named frame should leave the new item in scene."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import MemoryState, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 800, 600)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    first = MemoryState(
+        line_number=1,
+        source_code="int a = 1;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+        ])],
+        heap=[],
+        edges=[],
+    )
+    second = MemoryState(
+        line_number=2,
+        source_code="foo();",
+        stack=[StackFrame(frame_name="foo", variables=[
+            Variable(name="b", type="int", value="2", address="0xS002", is_pointer=False),
+        ])],
+        heap=[],
+        edges=[],
+    )
+
+    canvas.render_state(first)
+    canvas.render_state(second)
+
+    stack_items = canvas.get_stack_items()
+    assert len(stack_items) == 1
+    assert stack_items[0].scene() is scene
+    assert stack_items[0].frame.frame_name == "foo"
+
+
+def test_state_diff_detects_member_changes():
+    """Nested struct/object member edits should count as value changes."""
+    from app.core.memory_model import MemoryState, StackFrame, StructMember, Variable
+    from app.core.state_diff import StateDiffEngine
+
+    prev = MemoryState(
+        line_number=1,
+        source_code="Point p{1, 2};",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(
+                name="p",
+                type="struct Point",
+                value="{x=1, y=2}",
+                address="0xS001",
+                is_pointer=False,
+                members=[
+                    StructMember(name="x", type="int", value="1"),
+                    StructMember(name="y", type="int", value="2"),
+                ],
+            ),
+        ])],
+        heap=[],
+        edges=[],
+    )
+    curr = MemoryState(
+        line_number=2,
+        source_code="p.x = 3;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(
+                name="p",
+                type="struct Point",
+                value="{x=1, y=2}",
+                address="0xS001",
+                is_pointer=False,
+                members=[
+                    StructMember(name="x", type="int", value="3"),
+                    StructMember(name="y", type="int", value="2"),
+                ],
+            ),
+        ])],
+        heap=[],
+        edges=[],
+    )
+
+    diff = StateDiffEngine().diff(prev, curr)
+    assert len(diff.modified_vars) == 1
+    assert diff.modified_vars[0].address == "0xS001"
+
+
+def test_oj_page_autogen_passes_empty_code_to_worker():
+    """When no reference code is provided, OJ analysis should use autogen mode."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    captured = {}
+
+    class FakeSignal:
+        def connect(self, slot):
+            self.slot = slot
+
+    class FakeWorker:
+        def __init__(self, problem, code, config_path=None):
+            captured["problem"] = problem
+            captured["code"] = code
+            captured["config_path"] = config_path
+            self.finished = FakeSignal()
+            self.error = FakeSignal()
+
+        def isRunning(self):
+            return False
+
+        def start(self):
+            captured["started"] = True
+
+    with patch("app.ui.pages.oj_page.OJWorker", new=FakeWorker):
+        from app.ui.pages.oj_page import OJPage
+
+        page = OJPage()
+        page._problem_edit.setPlainText("给定两个整数，输出它们的和")
+        page._code_edit.clear()
+        page._on_run()
+
+    assert captured["problem"] == "给定两个整数，输出它们的和"
+    assert captured["code"] == ""
+    assert captured["started"] is True
+    assert page._autogen is True
 
 
 # ── Phase 3: HeapItem _value_label for object and array ─────────────────
@@ -186,6 +379,11 @@ if __name__ == "__main__":
         test_error_store_lazy_init,
         test_error_store_atomic_write,
         test_canvas_animator_pending_guard,
+        test_memory_model_normalizes_llm_nulls_and_numbers,
+        test_clear_layout_recurses_nested_layouts,
+        test_memory_canvas_does_not_remove_rekeyed_stack_item,
+        test_state_diff_detects_member_changes,
+        test_oj_page_autogen_passes_empty_code_to_worker,
         test_heap_item_object_sets_value_label,
         test_heap_item_array_sets_value_label,
         test_ai_service_returns_raw_string,

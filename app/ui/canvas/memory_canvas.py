@@ -39,6 +39,9 @@ class MemoryCanvas:
         self._address_to_item.clear()
         self._edge_by_source.clear()
         self._edge_by_target.clear()
+        self._position_cache.clear()
+        self._heap_index_cache.clear()
+        self._next_layout_frame = 0
 
     def _clear_edges(self):
         for edge in self._edge_items:
@@ -93,8 +96,6 @@ class MemoryCanvas:
             stack_name_counts[frame.frame_name] = frame_index + 1
             key = ("stack", frame.frame_name, frame_index)
             item = existing_stack.pop(key, None)
-            if item is None and remaining_stack:
-                item = remaining_stack.pop(0)
             if item is None:
                 item = StackItem(frame, on_item_moved=self._on_item_moved)
                 preferred_pos = self._position_cache.get(key)
@@ -113,8 +114,6 @@ class MemoryCanvas:
         heap_y = START_Y
         for idx, block in enumerate(state.heap):
             item = existing_heap.pop(block.address, None)
-            if item is None and remaining_heap:
-                item = remaining_heap.pop(0)
             if item is None:
                 item = HeapItem(block, on_item_moved=self._on_item_moved)
                 preferred_pos = self._position_cache.get(("heap", block.address, 0))

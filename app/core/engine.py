@@ -15,6 +15,7 @@ from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
 from app.core.execution_worker import ExecutionWorker
 from app.ui.widgets import error_dialog
+from app.ui.widgets.threading import retire_worker
 from app.services import error_store
 from app.services.i18n import tr
 
@@ -59,6 +60,7 @@ class Engine:
         self._trace: ExecutionTrace | None = None
         self._current_index: int = -1
         self._worker: ExecutionWorker | None = None
+        self._retired_workers: list[ExecutionWorker] = []
         self._last_code: str = ""
         self._auto_play_timer = QTimer()
         self._auto_play_timer.timeout.connect(self._on_next)
@@ -78,13 +80,15 @@ class Engine:
 
     def cancel_current_run(self):
         if self._worker is not None and self._worker.isRunning():
-            try:
-                self._worker.finished.disconnect(self._on_trace_ready)
-                self._worker.error.disconnect(self._on_trace_error)
-            except Exception:
-                pass
-            self._worker.quit()
-            self._worker.wait(1000)
+            retire_worker(
+                self,
+                self._worker,
+                disconnect=[
+                    (self._worker.finished, self._on_trace_ready),
+                    (self._worker.error, self._on_trace_error),
+                ],
+            )
+            self._worker = None
         self._window.show_loading(False)
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
