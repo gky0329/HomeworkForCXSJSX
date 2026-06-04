@@ -1621,6 +1621,59 @@ __CXXMV_FRAME__0__{l8}__main
     ]
 
 
+def test_debug_executor_parses_lldb_map_pointer_values_as_entry_edges():
+    """map<string, int*> entries should point from each entry cell to the target."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "map<string, int*> m;\n"
+        'm["a"] = &a;\n'
+        'm["b"] = &b;\n'
+        '*m["b"] = 9;\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[9]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{line}:5
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{line + 1}:1
+__CXXMV_FRAME__0__{line + 1}__main
+0x000000016fdfe6b0: (int) a = 1
+0x000000016fdfe6b4: (int) b = 9
+0x000000016fdfe6c0: (std::__1::map<std::__1::string, int*, std::__1::less<std::__1::string>, std::__1::allocator<std::__1::pair<const std::__1::string, int*> > >) m = {{
+0x000000010065c6a0:   (std::__1::pair<const std::__1::string, int*>) [0] = {{first="a", second=0x000000016fdfe6b0}}
+0x000000010065c6d0:   (std::__1::pair<const std::__1::string, int*>) [1] = {{first="b", second=0x000000016fdfe6b4}}
+}}
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    m = values["m"]
+
+    assert values["b"].value == "9"
+    assert m.is_array is True
+    assert [(element.index, element.value, element.address) for element in m.elements] == [
+        (0, "{first=a, second=" + values["a"].address + "}", f"{m.address}[0]"),
+        (1, "{first=b, second=" + values["b"].address + "}", f"{m.address}[1]"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (m.elements[0].address, values["a"].address),
+        (m.elements[1].address, values["b"].address),
+    }
+    assert step.heap == []
+
+
 def test_debug_executor_preserves_nested_array_child_values():
     """Nested array child values should not be stripped to empty strings."""
     from app.core.debug_executor import DebugExecutor
@@ -4038,6 +4091,65 @@ __CXXMV_FRAMEDX__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_map_pointer_values_as_entry_edges():
+    """CDB/PDB map<string, int*> entries should point from entry cells to targets."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <map>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "map<string, int*> m;\n"
+        'm["a"] = &a;\n'
+        'm["b"] = &b;\n'
+        '*m["b"] = 9;\n'
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[9]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int a = 1
+000000aa`0000efd4 int b = 9
+000000aa`0000efe0 std::map<std::string,int *> m = size=2
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    m : {{ size=2 }} [Type: std::map<std::string,int *>]
+        [0] : {{first="a", second=0x000000aa0000efd0}} [Type: std::pair<const std::string,int *>]
+            first : "a" [Type: std::string]
+            second : 0x000000aa0000efd0 [Type: int *]
+        [1] : {{first="b", second=0x000000aa0000efd4}} [Type: std::pair<const std::string,int *>]
+            first : "b" [Type: std::string]
+            second : 0x000000aa0000efd4 [Type: int *]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    step = trace.steps[0]
+    values = {var.name: var for var in step.stack[0].variables}
+    m = values["m"]
+
+    assert values["b"].value == "9"
+    assert m.is_array is True
+    assert [(element.index, element.value, element.address) for element in m.elements] == [
+        (0, "{first=a, second=" + values["a"].address + "}", f"{m.address}[0]"),
+        (1, "{first=b, second=" + values["b"].address + "}", f"{m.address}[1]"),
+    ]
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in step.edges
+    } == {
+        (m.elements[0].address, values["a"].address),
+        (m.elements[1].address, values["b"].address),
+    }
+    assert step.heap == []
+
+
 def test_debug_executor_parses_cdb_dx_nested_map_pair_children():
     """Nested CDB dx pair rows should be folded into map array element values."""
     from app.core.debug_executor import DebugExecutor
@@ -5497,6 +5609,70 @@ def test_native_debug_smoke_requires_optional_pointer_member_edge():
     assert _validate_optional_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_map_pointer_entry_edges():
+    """Native smoke should prove map<string, int*> entries render pointer edges."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_map_pointer
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code='*m["b"] = 9;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="m",
+                    type="std::map<string,int*>",
+                    value="{[0]={first=a, second=0x000000aa0000efd0}, [1]={first=b, second=0x000000aa0000efd4}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="std::pair<string,int*>", value="{first=a, second=0x000000aa0000efd0}", address="0xS003[0]"),
+                        ArrayElement(index=1, type="std::pair<string,int*>", value="{first=b, second=0x000000aa0000efd4}", address="0xS003[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code='*m["b"] = 9;',
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="m",
+                    type="std::map<string,int*>",
+                    value="{[0]={first=a, second=0xS001}, [1]={first=b, second=0xS002}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="std::pair<string,int*>", value="{first=a, second=0xS001}", address="0xS003[0]"),
+                        ArrayElement(index=1, type="std::pair<string,int*>", value="{first=b, second=0xS002}", address="0xS003[1]"),
+                    ],
+                ),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS001"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS002"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_map_pointer(weak_trace)
+    assert any("m missing a pointer entry" in error for error in weak_errors)
+    assert any("m missing b pointer entry" in error for error in weak_errors)
+    assert any("missing map entry pointer edges" in error for error in weak_errors)
+    assert _validate_map_pointer(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_vector_object_elements():
     """Native smoke should prove STL containers can preserve object element members."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, Variable
@@ -6104,6 +6280,7 @@ if __name__ == "__main__":
         test_debug_executor_preserves_template_pointer_in_object_class_name,
         test_debug_executor_parses_vector_string_elements_from_summaries,
         test_debug_executor_parses_map_children_as_key_value_entries,
+        test_debug_executor_parses_lldb_map_pointer_values_as_entry_edges,
         test_debug_executor_preserves_nested_array_child_values,
         test_debug_executor_preserves_array_of_struct_child_values,
         test_debug_executor_parses_heap_object_members_from_pointer,
@@ -6161,6 +6338,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
         test_debug_executor_parses_cdb_dx_vector_object_children,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
+        test_debug_executor_parses_cdb_dx_map_pointer_values_as_entry_edges,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
@@ -6192,6 +6370,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_container_adapter_elements,
         test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container,
         test_native_debug_smoke_requires_optional_pointer_member_edge,
+        test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_vector_object_elements,
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,

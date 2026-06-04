@@ -2266,6 +2266,14 @@ class DebugExecutor:
         heap_addr_map: dict[str, str],
     ) -> str:
         value = self._clean_value(element.value)
+        formatted_structured = self._structured_array_element_display_value(
+            element,
+            actual_stack_lookup,
+            stack_addr_map,
+            heap_addr_map,
+        )
+        if formatted_structured:
+            return formatted_structured
         is_reference = self._is_reference_type(element.type)
         if (self._is_pointer_like_type(element.type) or is_reference) and self._is_null(value):
             return "nullptr"
@@ -2276,6 +2284,37 @@ class DebugExecutor:
             value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
             return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
         return value
+
+    def _structured_array_element_display_value(
+        self,
+        element: _ParsedElement,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> str:
+        if not self._pair_type_has_pointer_member(element.type):
+            return ""
+        payload = self._structured_payload(element.value)
+        if not payload:
+            return ""
+        members = self._parse_structured_members(payload)
+        if not members:
+            return ""
+        parts: list[str] = []
+        for member in members:
+            member_type = self._pair_member_type(element.type, member.name)
+            value = self._clean_value(member.value)
+            if (
+                self._is_pointer_like_type(member_type)
+                and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+                and not self._is_null(value)
+            ):
+                actual = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+                value = self._target_sim_addr(actual, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            elif self._is_pointer_like_type(member_type) and self._is_null(value):
+                value = "nullptr"
+            parts.append(f"{member.name}={value}")
+        return "{" + ", ".join(parts) + "}"
 
     @staticmethod
     def _array_element_sim_addr(owner_address: str, index: int) -> str:
@@ -2388,20 +2427,40 @@ class DebugExecutor:
         dangling_target_addrs: set[str],
     ):
         for element in elements:
-            if not element.address or not self._is_pointer_like_type(element.type):
+            if not element.address:
                 continue
-            target_addr = element.value
-            if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+            target_addrs: list[str] = []
+            if self._is_pointer_like_type(element.type):
+                target_addrs.append(element.value)
+            target_addrs.extend(self._structured_array_element_pointer_targets(element))
+            for target_addr in target_addrs:
+                if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                    continue
+                key = (element.address, target_addr)
+                if key in edge_keys:
+                    continue
+                pointer_edges.append(PointerEdge(
+                    source_address=element.address,
+                    target_address=target_addr,
+                    is_dangling=target_addr in dangling_target_addrs,
+                ))
+                edge_keys.add(key)
+
+    def _structured_array_element_pointer_targets(self, element: ArrayElement) -> list[str]:
+        if not self._pair_type_has_pointer_member(element.type):
+            return []
+        payload = self._structured_payload(element.value)
+        if not payload:
+            return []
+        targets: list[str] = []
+        for member in self._parse_structured_members(payload):
+            member_type = self._pair_member_type(element.type, member.name)
+            if not self._is_pointer_like_type(member_type):
                 continue
-            key = (element.address, target_addr)
-            if key in edge_keys:
-                continue
-            pointer_edges.append(PointerEdge(
-                source_address=element.address,
-                target_address=target_addr,
-                is_dangling=target_addr in dangling_target_addrs,
-            ))
-            edge_keys.add(key)
+            value = self._clean_value(member.value)
+            if value.startswith("0xS") or value.startswith("0xH"):
+                targets.append(value)
+        return targets
 
     def _target_sim_addr(
         self,
@@ -2637,6 +2696,57 @@ class DebugExecutor:
     def _is_variant_type(type_text: str) -> bool:
         compact = DebugExecutor._clean_type(type_text).replace(" ", "")
         return any(token in compact for token in ("variant<", "std::variant<", "std::__1::variant<"))
+
+    @staticmethod
+    def _is_pair_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("pair<", "std::pair<", "std::__1::pair<"))
+
+    @staticmethod
+    def _pair_type_has_pointer_member(type_text: str) -> bool:
+        if not DebugExecutor._is_pair_type(type_text):
+            return False
+        return any(DebugExecutor._is_pointer_like_type(arg) for arg in DebugExecutor._template_args(type_text)[:2])
+
+    @staticmethod
+    def _pair_member_type(type_text: str, member_name: str) -> str:
+        args = DebugExecutor._template_args(type_text)
+        if member_name == "first" and len(args) >= 1:
+            return DebugExecutor._clean_type(re.sub(r"\bconst\b", "", args[0]).strip())
+        if member_name == "second" and len(args) >= 2:
+            return DebugExecutor._clean_type(re.sub(r"\bconst\b", "", args[1]).strip())
+        return ""
+
+    @staticmethod
+    def _template_args(type_text: str) -> list[str]:
+        start = type_text.find("<")
+        if start < 0:
+            return []
+        args: list[str] = []
+        current: list[str] = []
+        depth = 0
+        for ch in type_text[start + 1:]:
+            if ch == "<":
+                depth += 1
+                current.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    item = "".join(current).strip()
+                    if item:
+                        args.append(DebugExecutor._clean_type(item))
+                    break
+                depth -= 1
+                current.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                item = "".join(current).strip()
+                if item:
+                    args.append(DebugExecutor._clean_type(item))
+                current = []
+                continue
+            current.append(ch)
+        return args
 
     @staticmethod
     def _is_optional_empty_summary(value: str) -> bool:

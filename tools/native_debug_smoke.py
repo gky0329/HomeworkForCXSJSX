@@ -457,6 +457,46 @@ def _validate_map(trace: ExecutionTrace) -> list[str]:
     return []
 
 
+def _validate_map_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "m")
+    if match is None:
+        return ["missing pointer map variable m"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("m should be marked as an array/container")
+    elements = list(var.elements)
+    if len(elements) != 2:
+        errors.append(f"m expected 2 key/value entries, got {[element.value for element in elements]!r}")
+        return errors
+    a_match = _last_var(trace, "a")
+    b_match = _last_var(trace, "b")
+    if a_match is None or b_match is None:
+        errors.append("missing a or b variable after map pointer write")
+        return errors
+    a = a_match[1]
+    b = b_match[1]
+    if b.value != "9":
+        errors.append(f"b expected 9 after *m[\"b\"] write, got {b.value!r}")
+    values = [element.value for element in elements]
+    if not any("first=a" in value and f"second={a.address}" in value for value in values):
+        errors.append(f"m missing a pointer entry: {values!r}")
+    if not any("first=b" in value and f"second={b.address}" in value for value in values):
+        errors.append(f"m missing b pointer entry: {values!r}")
+    expected_edges = {
+        (elements[0].address, a.address),
+        (elements[1].address, b.address),
+    }
+    actual_edges = {
+        (edge.source_address, edge.target_address)
+        for edge in state.edges
+    }
+    missing = expected_edges - actual_edges
+    if missing:
+        errors.append(f"missing map entry pointer edges: {sorted(missing)!r}")
+    return errors
+
+
 def _validate_heap_object(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     live_blocks = [block for step in trace.steps for block in step.heap if block.is_object]
@@ -1424,6 +1464,21 @@ CASES: dict[str, SmokeCase] = {
             'int got = m["a"];\n'
         ),
         validate=_validate_map,
+    ),
+    "map_string_pointer": SmokeCase(
+        name="map_string_pointer",
+        code=(
+            "#include <map>\n"
+            "#include <string>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "map<string, int*> m;\n"
+            'm["a"] = &a;\n'
+            'm["b"] = &b;\n'
+            '*m["b"] = 9;\n'
+        ),
+        validate=_validate_map_pointer,
     ),
     "stdin_sum": SmokeCase(
         name="stdin_sum",

@@ -362,6 +362,17 @@ std::vector<int*> ptrs = {&a, &b};
 ```
 预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9；`ptrs[0]` / `ptrs[1]` 单元格分别画出指向 `a` / `b` 的箭头
 
+### std::map 指针值测试
+```cpp
+int a = 1;
+int b = 2;
+std::map<std::string, int*> m;
+m["a"] = &a;
+m["b"] = &b;
+*m["b"] = 9;
+```
+预期: `m` 显示为 key/value entry 单元格，entry 中的 `second` 指针值映射为 `0xS...` 模拟地址；每个 entry cell 画出指向对应栈变量的箭头，`b` 的值变成 9
+
 ### std::optional 指针值测试
 ```cpp
 int a = 1;
