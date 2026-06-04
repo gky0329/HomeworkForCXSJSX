@@ -1647,10 +1647,10 @@ class DebugExecutor:
         pattern = re.compile(
             r"^\s*(?:const\s+|static\s+|volatile\s+)*"
             rf"{scalar_type}"
-            r"\s*[*&]?\s+([A-Za-z_]\w*)\b"
+            r"(?:\s+|(?=[*&]))[\s*&]*([A-Za-z_]\w*)\b"
         )
         for_pattern = re.compile(
-            rf"\bfor\s*\(\s*(?:const\s+)?{scalar_type}\s+([A-Za-z_]\w*)\b"
+            rf"\bfor\s*\(\s*(?:const\s+)?{scalar_type}(?:\s+|(?=[*&]))[\s*&]*([A-Za-z_]\w*)\b"
         )
         for idx, line in enumerate(lines, 1):
             stripped = line.strip()

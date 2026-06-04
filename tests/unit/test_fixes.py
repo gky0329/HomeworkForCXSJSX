@@ -615,6 +615,76 @@ __CXXMV_FRAME__0__{l3 + 1}__main
     ]
 
 
+def test_debug_executor_filters_future_double_pointer_locals():
+    """Pointer declarators with repeated stars should not appear before declaration."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 1;\n"
+        "int *p = &a;\n"
+        "int **pp = &p;\n"
+        "**pp = 7;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    output = f"""
+__CXXMV_BEFORE__0
+frame #0: 0x1 program`main at program.cpp:{l1}:9
+__CXXMV_AFTER__0
+frame #0: 0x2 program`main at program.cpp:{l2}:13
+__CXXMV_FRAME__0__{l2}__main
+0x000000016fdfe700: (int) a = 1
+0x000000016fdfe708: (int *) p = 0x000000016fdfe700
+0x000000016fdfe710: (int **) pp = 0x000000016fdfe708
+__CXXMV_BEFORE__1
+frame #0: 0x2 program`main at program.cpp:{l2}:13
+__CXXMV_AFTER__1
+frame #0: 0x3 program`main at program.cpp:{l3}:15
+__CXXMV_FRAME__0__{l3}__main
+0x000000016fdfe700: (int) a = 1
+0x000000016fdfe708: (int *) p = 0x000000016fdfe700
+0x000000016fdfe710: (int **) pp = 0x000000016fdfe708
+__CXXMV_BEFORE__2
+frame #0: 0x3 program`main at program.cpp:{l3}:15
+__CXXMV_AFTER__2
+frame #0: 0x4 program`main at program.cpp:{l4}:8
+__CXXMV_FRAME__0__{l4}__main
+0x000000016fdfe700: (int) a = 1
+0x000000016fdfe708: (int *) p = 0x000000016fdfe700
+0x000000016fdfe710: (int **) pp = 0x000000016fdfe708
+__CXXMV_BEFORE__3
+frame #0: 0x4 program`main at program.cpp:{l4}:8
+__CXXMV_AFTER__3
+frame #0: 0x5 program`main at program.cpp:{l4 + 1}:3
+__CXXMV_FRAME__0__{l4 + 1}__main
+0x000000016fdfe700: (int) a = 7
+0x000000016fdfe708: (int *) p = 0x000000016fdfe700
+0x000000016fdfe710: (int **) pp = 0x000000016fdfe708
+"""
+
+    trace = executor._parse_lldb_output(output, prepared)
+
+    assert [var.name for var in trace.steps[0].stack[0].variables] == ["a"]
+    assert [var.name for var in trace.steps[1].stack[0].variables] == ["a", "p"]
+    assert [var.name for var in trace.steps[2].stack[0].variables] == ["a", "p", "pp"]
+    values = {var.name: var for var in trace.steps[-1].stack[0].variables}
+    assert values["a"].value == "7"
+    assert values["p"].value == values["a"].address
+    assert values["pp"].value == values["p"].address
+    assert trace.steps[-1].heap == []
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in trace.steps[-1].edges
+    } == {
+        (values["p"].address, values["a"].address),
+        (values["pp"].address, values["p"].address),
+    }
+
+
 def test_debug_executor_parses_nullptr_pointer_value():
     """Null native pointers should render as nullptr, not an empty string."""
     from app.core.debug_executor import DebugExecutor
@@ -1729,6 +1799,76 @@ __CXXMV_FRAMEV__1
     assert step.stack[0].variables[0].value == step.stack[1].variables[0].address
     assert step.edges[0].target_address == step.stack[1].variables[0].address
     assert step.heap == []
+
+
+def test_debug_executor_parses_cdb_double_pointer_stack_edges():
+    """CDB/PDB should filter future double-pointer locals and keep stack edges."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "int a = 1;\n"
+        "int *p = &a;\n"
+        "int **pp = &p;\n"
+        "**pp = 7;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    l1 = generated_lines[1]
+    l2 = generated_lines[2]
+    l3 = generated_lines[3]
+    l4 = generated_lines[4]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l1}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int a = 1
+000000aa`0000efc8 int * p = 000000aa`0000efc0
+000000aa`0000efd0 int ** pp = 000000aa`0000efc8
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x1a [C:\tmp\program.cpp @ {l2}]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int a = 1
+000000aa`0000efc8 int * p = 000000aa`0000efc0
+000000aa`0000efd0 int ** pp = 000000aa`0000efc8
+__CXXMV_BEFORE__2
+00 000000aa`0000f000 program!main+0x22 [C:\tmp\program.cpp @ {l3}]
+__CXXMV_AFTER__2
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int a = 1
+000000aa`0000efc8 int * p = 000000aa`0000efc0
+000000aa`0000efd0 int ** pp = 000000aa`0000efc8
+__CXXMV_BEFORE__3
+00 000000aa`0000f000 program!main+0x2a [C:\tmp\program.cpp @ {l4}]
+__CXXMV_AFTER__3
+00 000000aa`0000f000 program!main+0x32 [C:\tmp\program.cpp @ {l4 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 int a = 7
+000000aa`0000efc8 int * p = 000000aa`0000efc0
+000000aa`0000efd0 int ** pp = 000000aa`0000efc8
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+
+    assert [var.name for var in trace.steps[0].stack[0].variables] == ["a"]
+    assert [var.name for var in trace.steps[1].stack[0].variables] == ["a", "p"]
+    assert [var.name for var in trace.steps[2].stack[0].variables] == ["a", "p", "pp"]
+    values = {var.name: var for var in trace.steps[-1].stack[0].variables}
+    assert values["a"].value == "7"
+    assert values["p"].value == values["a"].address
+    assert values["pp"].value == values["p"].address
+    assert trace.steps[-1].heap == []
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in trace.steps[-1].edges
+    } == {
+        (values["p"].address, values["a"].address),
+        (values["pp"].address, values["p"].address),
+    }
 
 
 def test_debug_executor_parses_cdb_reference_as_non_pointer():
@@ -3202,6 +3342,76 @@ def test_native_debug_smoke_requires_reference_and_stack_pointer_state():
     assert _validate_reference_stack_pointer(strong_trace) == []
 
 
+def test_native_debug_smoke_requires_double_pointer_stack_state():
+    """Native smoke should prove double pointers form stack-to-stack edge chains."""
+    from app.core.memory_model import ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
+    from tools.native_debug_smoke import _validate_double_pointer_stack
+
+    weak_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=1,
+            source_code="int a = 1;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="pp", type="int**", value="0xS002", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=4,
+            source_code="**pp = 7;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="7", address="0xS001", is_pointer=False),
+                Variable(name="p", type="int*", value="0xS001", address="0xS002", is_pointer=True),
+                Variable(name="pp", type="int**", value="0xS002", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xS001")],
+        ),
+    ])
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=1,
+            source_code="int a = 1;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+        MemoryState(
+            line_number=2,
+            source_code="int *p = &a;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="p", type="int*", value="0xS001", address="0xS002", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002", target_address="0xS001")],
+        ),
+        MemoryState(
+            line_number=4,
+            source_code="**pp = 7;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="7", address="0xS001", is_pointer=False),
+                Variable(name="p", type="int*", value="0xS001", address="0xS002", is_pointer=True),
+                Variable(name="pp", type="int**", value="0xS002", address="0xS003", is_pointer=True),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS002", target_address="0xS001"),
+                PointerEdge(source_address="0xS003", target_address="0xS002"),
+            ],
+        ),
+    ])
+
+    weak_errors = _validate_double_pointer_stack(weak_trace)
+    assert any("future pointer appeared on int a step" in error for error in weak_errors)
+    assert "missing pp -> p stack pointer edge" in weak_errors
+    assert _validate_double_pointer_stack(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_recursive_call_stack_state():
     """Native smoke should prove recursion exposes nested stack frames."""
     from app.core.memory_model import ExecutionTrace, MemoryState, StackFrame, Variable
@@ -3351,6 +3561,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_lldb_class_object_members,
         test_debug_executor_formats_double_values_for_display,
         test_debug_executor_filters_future_long_long_locals,
+        test_debug_executor_filters_future_double_pointer_locals,
         test_debug_executor_parses_nullptr_pointer_value,
         test_debug_executor_parses_c_string_pointer_summary,
         test_debug_executor_keeps_locals_on_wrapped_snippet_last_line,
@@ -3385,6 +3596,7 @@ if __name__ == "__main__":
         test_debug_executor_keeps_caller_assignment_after_user_function_returns,
         test_debug_executor_parses_multiple_user_stack_frames,
         test_debug_executor_parses_cdb_pdb_stack_snapshots,
+        test_debug_executor_parses_cdb_double_pointer_stack_edges,
         test_debug_executor_parses_cdb_reference_as_non_pointer,
         test_debug_executor_parses_cdb_recursive_stack_frames,
         test_debug_executor_parses_cdb_object_method_call_stack,
@@ -3423,6 +3635,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_forwards_stdin_to_debug_executor,
         test_native_debug_smoke_requires_call_stack_state,
         test_native_debug_smoke_requires_reference_and_stack_pointer_state,
+        test_native_debug_smoke_requires_double_pointer_stack_state,
         test_native_debug_smoke_requires_recursive_call_stack_state,
         test_native_debug_smoke_requires_object_method_call_state,
     ]

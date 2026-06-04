@@ -403,6 +403,51 @@ def _validate_reference_stack_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_double_pointer_stack(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    for state in trace.steps:
+        names = {var.name for var in _all_variables(state)}
+        if state.source_code.startswith("int a") and ({"p", "pp"} & names):
+            errors.append(f"future pointer appeared on int a step: {sorted(names)!r}")
+        if state.source_code.startswith("int *p") and "pp" in names:
+            errors.append(f"future double pointer appeared on p step: {sorted(names)!r}")
+
+    state = _last_observed_state(trace)
+    if state is None:
+        return errors + ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    a = values.get("a")
+    ptr = values.get("p")
+    double_ptr = values.get("pp")
+    if a is None:
+        errors.append("missing int variable a")
+    elif a.value != "7":
+        errors.append(f"a expected 7 after **pp write, got {a.value!r}")
+    if ptr is None:
+        errors.append("missing pointer variable p")
+    elif a is not None:
+        if not ptr.is_pointer:
+            errors.append("p should be marked as a pointer")
+        if ptr.value != a.address:
+            errors.append(f"p should target a address {a.address}, got {ptr.value!r}")
+    if double_ptr is None:
+        errors.append("missing double pointer variable pp")
+    elif ptr is not None:
+        if not double_ptr.is_pointer:
+            errors.append("pp should be marked as a pointer")
+        if double_ptr.value != ptr.address:
+            errors.append(f"pp should target p address {ptr.address}, got {double_ptr.value!r}")
+    if ptr is not None and a is not None:
+        if not any(edge.source_address == ptr.address and edge.target_address == a.address for edge in state.edges):
+            errors.append("missing p -> a stack pointer edge")
+    if double_ptr is not None and ptr is not None:
+        if not any(edge.source_address == double_ptr.address and edge.target_address == ptr.address for edge in state.edges):
+            errors.append("missing pp -> p stack pointer edge")
+    if state.heap:
+        errors.append(f"double pointer stack case should not create heap blocks, got {len(state.heap)}")
+    return errors
+
+
 def _validate_recursive_call_stack(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     recursive_state = None
@@ -547,6 +592,16 @@ CASES: dict[str, SmokeCase] = {
             "*p = 11;\n"
         ),
         validate=_validate_reference_stack_pointer,
+    ),
+    "double_pointer_stack": SmokeCase(
+        name="double_pointer_stack",
+        code=(
+            "int a = 1;\n"
+            "int *p = &a;\n"
+            "int **pp = &p;\n"
+            "**pp = 7;\n"
+        ),
+        validate=_validate_double_pointer_stack,
     ),
     "recursive_factorial": SmokeCase(
         name="recursive_factorial",
