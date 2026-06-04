@@ -1473,6 +1473,58 @@ def _validate_recursive_call_stack(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_recursive_tree_heap(trace: ExecutionTrace) -> list[str]:
+    errors: list[str] = []
+    recursive_state = None
+    for state in trace.steps:
+        frame_names = [frame.frame_name for frame in state.stack]
+        sum_frames = [name for name in frame_names if name.startswith("sum")]
+        if len(sum_frames) >= 3 and "main" in frame_names:
+            recursive_state = state
+            break
+    if recursive_state is None:
+        errors.append("missing observed recursive sum -> sum -> sum -> main call stack")
+
+    final_state = _last_observed_state(trace)
+    if final_state is None:
+        return errors + ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(final_state)}
+    root = values.get("root")
+    total = values.get("total")
+    if root is None:
+        errors.append("missing root pointer")
+        return errors
+    if total is None or total.value != "6":
+        errors.append(f"tree total expected 6, got {total.value if total else None!r}")
+
+    heaps = {block.address: block for block in final_state.heap}
+    root_heap = heaps.get(root.value)
+    if root_heap is None:
+        errors.append(f"missing root heap block {root.value!r}")
+        return errors
+    members = {member.name: member for member in root_heap.members}
+    left = members.get("left")
+    right = members.get("right")
+    if left is None or right is None:
+        errors.append(f"root should expose left/right members, got {list(members)}")
+        return errors
+    left_heap = heaps.get(left.value)
+    right_heap = heaps.get(right.value)
+    if left_heap is None:
+        errors.append(f"missing left child heap block {left.value!r}")
+    if right_heap is None:
+        errors.append(f"missing right child heap block {right.value!r}")
+    if left_heap is not None and _member_map(left_heap).get("value") != "2":
+        errors.append(f"left child value expected 2, got {_member_map(left_heap).get('value')!r}")
+    if right_heap is not None and _member_map(right_heap).get("value") != "3":
+        errors.append(f"right child value expected 3, got {_member_map(right_heap).get('value')!r}")
+    if not any(edge.source_address == left.address and edge.target_address == left.value for edge in final_state.edges):
+        errors.append("missing root.left -> left child heap edge")
+    if not any(edge.source_address == right.address and edge.target_address == right.value for edge in final_state.edges):
+        errors.append("missing root.right -> right child heap edge")
+    return errors
+
+
 def _validate_object_method_call(trace: ExecutionTrace) -> list[str]:
     errors: list[str] = []
     method_state = None
@@ -1853,6 +1905,21 @@ CASES: dict[str, SmokeCase] = {
             "int result = fact(3);\n"
         ),
         validate=_validate_recursive_call_stack,
+    ),
+    "recursive_binary_tree": SmokeCase(
+        name="recursive_binary_tree",
+        code=(
+            "struct Node { int value; Node* left; Node* right; };\n"
+            "int sum(Node* n) {\n"
+            "    if (!n) return 0;\n"
+            "    int left = sum(n->left);\n"
+            "    int right = sum(n->right);\n"
+            "    return n->value + left + right;\n"
+            "}\n"
+            "Node* root = new Node{1, new Node{2,nullptr,nullptr}, new Node{3,nullptr,nullptr}};\n"
+            "int total = sum(root);\n"
+        ),
+        validate=_validate_recursive_tree_heap,
     ),
     "object_method_call": SmokeCase(
         name="object_method_call",

@@ -1251,9 +1251,26 @@ class DebugExecutor:
             stack_addr_map,
             dangling_target_addrs,
         )
-        for block in heap_blocks_by_actual.values():
-            self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
-            self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+        for _ in range(32):
+            before_blocks = len(heap_blocks_by_actual)
+            before_edges = len(pointer_edges)
+            for block in list(heap_blocks_by_actual.values()):
+                self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs)
+                self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+            added_blocks = self._ensure_heap_blocks_for_edge_targets(
+                pointer_edges,
+                heap_blocks_by_actual,
+                heap_addr_map,
+                heap_values,
+                heap_array_values,
+                heap_object_values,
+                class_info,
+                actual_stack_lookup,
+                stack_addr_map,
+                dangling_target_addrs,
+            )
+            if not added_blocks and len(heap_blocks_by_actual) == before_blocks and len(pointer_edges) == before_edges:
+                break
 
         return MemoryState(
             line_number=original_line,
@@ -1460,9 +1477,10 @@ class DebugExecutor:
         actual_stack_lookup: dict[str, str],
         stack_addr_map: dict[str, str],
         dangling_target_addrs: set[str],
-    ):
+    ) -> bool:
         sim_to_actual = {sim: actual for actual, sim in heap_addr_map.items()}
         existing_targets = {block.address for block in heap_blocks_by_actual.values()}
+        added = False
         for edge in pointer_edges:
             target_addr = edge.target_address
             if not target_addr.startswith("0xH") or target_addr in existing_targets:
@@ -1485,6 +1503,8 @@ class DebugExecutor:
                 heap_addr_map=heap_addr_map,
             )
             existing_targets.add(target_addr)
+            added = True
+        return added
 
     @staticmethod
     def _frame_line(text: str) -> int | None:

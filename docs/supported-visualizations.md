@@ -248,6 +248,7 @@ bool gone = wp.expired();
 
 - Canvas: `.next: Node* = 0xS001` 这一行作为箭头起点，指向目标 `Node` 对象。
 - 适合链表、树、图节点等课堂/OJ 高频结构，例如 `second.next -> first`。
+- 当 heap 对象成员指针继续指向其他 heap 对象时，执行器会闭包补齐目标 heap block。例如二叉树 `root.left` / `root.right` 指向两个子节点时，画布会同时显示 root、left child、right child，而不只显示 root 上的两条悬空边。
 
 ---
 
