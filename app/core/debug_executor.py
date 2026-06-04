@@ -785,7 +785,7 @@ class DebugExecutor:
                     f".frame {frame_idx}",
                     "dv /t /v",
                     f".echo __CXXMV_FRAMEDX__{frame_idx}",
-                    "dx -r2 @$curframe.Locals",
+                    "dx -r3 @$curframe.Locals",
                 ])
         commands.append("q")
         return "\n".join(commands) + "\n"
@@ -1849,6 +1849,9 @@ class DebugExecutor:
         pending_element: _ParsedElement | None = None
         pending_element_indent = 0
         pending_element_members: list[_ParsedMember] = []
+        pending_member: _ParsedMember | None = None
+        pending_member_indent = 0
+        pending_member_members: list[_ParsedMember] = []
         pattern = re.compile(
             r"^(?P<indent>\s+)"
             r"(?P<name>\[\d+\]|[A-Za-z_]\w*)\s*:\s*"
@@ -1858,10 +1861,32 @@ class DebugExecutor:
 
         def flush_pending_element():
             nonlocal pending_element, pending_element_members
+            flush_pending_member()
             if pending_element is not None and pending_element_members:
                 pending_element.value = self._format_members(pending_element_members)
             pending_element = None
             pending_element_members = []
+
+        def flush_pending_member():
+            nonlocal pending_member, pending_member_members
+            if pending_member is not None and pending_member_members:
+                base_value = self._clean_value(pending_member.value)
+                payload = self._format_members(pending_member_members)
+                pending_member.value = f"{base_value} {payload}".strip()
+            pending_member = None
+            pending_member_members = []
+
+        def member_points_to_live_object(member_type: str, raw_member_value: str) -> bool:
+            member_value = self._clean_value(raw_member_value)
+            if self._is_cdb_addr(member_value):
+                member_value = self._normalize_cdb_addr(member_value)
+            elif self._is_hex_addr(member_value):
+                member_value = self._normalize_actual_addr(member_value)
+            return (
+                self._is_pointer_like_type(member_type)
+                and bool(member_value)
+                and not self._is_null(member_value)
+            )
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -1883,6 +1908,19 @@ class DebugExecutor:
             clean_value = self._clean_cdb_value(raw_value)
             if self._is_cdb_addr(clean_value):
                 clean_value = self._normalize_cdb_addr(clean_value)
+
+            if pending_member is not None and indent > pending_member_indent:
+                if self._array_index(name) is None:
+                    pending_member_members.append(_ParsedMember(
+                        name=name,
+                        type=clean_type,
+                        value=self._clean_value_preserving_payload(raw_value),
+                        actual_addr=f"{pending_member.actual_addr}:{name}",
+                    ))
+                    continue
+
+            if pending_member is not None and indent <= pending_member_indent:
+                flush_pending_member()
 
             if pending_element is not None and indent > pending_element_indent:
                 if self._array_index(name) is None:
@@ -1911,6 +1949,10 @@ class DebugExecutor:
                         value=self._clean_value_preserving_payload(raw_value),
                         actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
                     ))
+                    if member_points_to_live_object(clean_type, raw_value):
+                        pending_member = pending_element_members[-1]
+                        pending_member_indent = indent
+                        pending_member_members = []
                     pending_element.value = self._format_members(pending_element_members)
                     continue
 
@@ -1942,8 +1984,13 @@ class DebugExecutor:
                         value=self._clean_value_preserving_payload(raw_value),
                         actual_addr=f"{pending.actual_addr}:{name}",
                     ))
+                    if member_points_to_live_object(clean_type, raw_value):
+                        pending_member = target_members[-1]
+                        pending_member_indent = indent
+                        pending_member_members = []
                 continue
 
+            flush_pending_member()
             flush_pending_element()
             var = _ParsedVar(
                 actual_addr=f"cdbdx:{len(variables)}:{name}",

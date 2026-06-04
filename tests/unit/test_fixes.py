@@ -2814,7 +2814,7 @@ def test_debug_executor_cdb_script_uses_source_lines_and_local_vars():
     assert "bp main" in script
     assert "kP 8" in script
     assert "dv /t /v" in script
-    assert "dx -r2 @$curframe.Locals" in script
+    assert "dx -r3 @$curframe.Locals" in script
     assert "__CXXMV_FRAMEV__0" in script
     assert "__CXXMV_FRAMEDX__0" in script
 
@@ -4591,6 +4591,81 @@ __CXXMV_FRAMEDX__0
         ("x", "4"),
         ("y", "6.5"),
     ]
+
+
+def test_debug_executor_parses_cdb_dx_nested_member_pointer_object_values():
+    """CDB/PDB dx -r3 should materialize child objects under member pointers."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "struct Node { int value; Node* left; Node* right; };\n"
+        "int main() {\n"
+        "    Node* root = new Node{1, new Node{2,nullptr,nullptr}, new Node{3,nullptr,nullptr}};\n"
+        "    delete root;\n"
+        "    int after = 9;\n"
+        "}\n"
+    )
+    output = r"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ 3]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 4]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Node * root = 000001df`4e700000
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    root : 0x000001df4e700000 [Type: Node *]
+        value : 1 [Type: int]
+        left : 0x000001df4e700020 [Type: Node *]
+            value : 2 [Type: int]
+            left : 0x0000000000000000 [Type: Node *]
+            right : 0x0000000000000000 [Type: Node *]
+        right : 0x000001df4e700040 [Type: Node *]
+            value : 3 [Type: int]
+            left : 0x0000000000000000 [Type: Node *]
+            right : 0x0000000000000000 [Type: Node *]
+__CXXMV_BEFORE__1
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ 4]
+__CXXMV_AFTER__1
+00 000000aa`0000f000 program!main+0x34 [C:\tmp\program.cpp @ 5]
+__CXXMV_FRAMEV__0
+000000aa`0000efc0 Node * root = 000001df`4e700000
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    root : 0x000001df4e700000 [Type: Node *]
+        value : 1 [Type: int]
+        left : 0x000001df4e700020 [Type: Node *]
+            value : 2 [Type: int]
+            left : 0x0000000000000000 [Type: Node *]
+            right : 0x0000000000000000 [Type: Node *]
+        right : 0x000001df4e700040 [Type: Node *]
+            value : 3 [Type: int]
+            left : 0x0000000000000000 [Type: Node *]
+            right : 0x0000000000000000 [Type: Node *]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    alloc_step, delete_step = trace.steps
+    alloc_heaps = {block.address: block for block in alloc_step.heap}
+    delete_heaps = {block.address: block for block in delete_step.heap}
+
+    assert alloc_heaps["0xH001"].value == "{value=1, left=0xH002, right=0xH003}"
+    assert alloc_heaps["0xH002"].type == "Node"
+    assert alloc_heaps["0xH002"].value == "{value=2, left=nullptr, right=nullptr}"
+    assert alloc_heaps["0xH003"].type == "Node"
+    assert alloc_heaps["0xH003"].value == "{value=3, left=nullptr, right=nullptr}"
+    assert delete_heaps["0xH001"].is_freed is True
+    assert delete_heaps["0xH002"].is_freed is False
+    assert delete_heaps["0xH003"].is_freed is False
+    assert {
+        (edge.source_address, edge.target_address, edge.is_dangling)
+        for edge in delete_step.edges
+    } == {
+        ("0xS001", "0xH001", True),
+        ("0xH001.left", "0xH002", False),
+        ("0xH001.right", "0xH003", False),
+    }
 
 
 def test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer():
@@ -7965,6 +8040,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_heap_array_delete_state,
         test_debug_executor_parses_cdb_pointer_reset_null_state,
         test_debug_executor_parses_cdb_dx_heap_object_children_from_pointer,
+        test_debug_executor_parses_cdb_dx_nested_member_pointer_object_values,
         test_debug_executor_parses_cdb_dx_heap_array_children_from_pointer,
         test_debug_executor_parses_cdb_dx_vector_object_children,
         test_debug_executor_parses_cdb_dx_map_children_as_key_value_entries,
