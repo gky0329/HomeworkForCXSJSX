@@ -8,6 +8,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 from app.core.memory_model import (
     ArrayElement,
     ExecutionTrace,
@@ -116,20 +118,21 @@ class DebugExecutor:
     NATIVE_COMPLEXITY_LINE_LIMIT = 180
     NATIVE_COMPLEXITY_SCORE_LIMIT = 260
 
-    def __init__(self, preferred_backend: str | None = None):
+    def __init__(self, preferred_backend: str | None = None, config_path: Path | None = None):
         self._preferred_backend = preferred_backend
+        self._config_path = config_path
         self.last_backend_id = ""
         self.last_backend_label = ""
 
     @staticmethod
-    def is_available() -> bool:
-        return DebugExecutor.available_backend() is not None
+    def is_available(config_path: Path | None = None) -> bool:
+        return DebugExecutor.available_backend(config_path) is not None
 
     @staticmethod
-    def can_run_code_locally(code: str, stdin_text: str = "") -> bool:
+    def can_run_code_locally(code: str, stdin_text: str = "", config_path: Path | None = None) -> bool:
         if DebugExecutor.requires_stdin(code) and not stdin_text.strip():
             return False
-        return DebugExecutor.is_available()
+        return DebugExecutor.is_available(config_path)
 
     @staticmethod
     def should_prefer_ai_for_complex_code(code: str) -> bool:
@@ -152,14 +155,14 @@ class DebugExecutor:
         return control_flow_count >= 3 and score > DebugExecutor.NATIVE_COMPLEXITY_SCORE_LIMIT
 
     @staticmethod
-    def available_backend() -> str | None:
-        for status in DebugExecutor.backend_status():
+    def available_backend(config_path: Path | None = None) -> str | None:
+        for status in DebugExecutor.backend_status(config_path):
             if status.available and status.implemented:
                 return status.id
         return None
 
     @staticmethod
-    def backend_status() -> list[DebugBackendStatus]:
+    def backend_status(config_path: Path | None = None) -> list[DebugBackendStatus]:
         is_windows = platform.system() == "Windows"
         compiler = DebugExecutor._compiler()
         lldb = shutil.which("lldb")
@@ -181,7 +184,7 @@ class DebugExecutor:
             "vcvarsall": None,
         }
         msvc_tools_available = is_windows and bool(msvc["compiler"] and msvc["debugger"])
-        msvc_enabled = os.environ.get("CXXMV_ENABLE_EXPERIMENTAL_PDB") == "1"
+        msvc_enabled = DebugExecutor._experimental_pdb_enabled(config_path)
         msvc_available = msvc_tools_available and msvc_enabled
         if not is_windows:
             msvc_detail = "MSVC/PDB backend is Windows-only and not active on this platform"
@@ -200,7 +203,8 @@ class DebugExecutor:
         else:
             msvc_detail = (
                 "MSVC/PDB backend is experimental and disabled until local debugger "
-                "correctness is validated; set CXXMV_ENABLE_EXPERIMENTAL_PDB=1 to test it"
+                "correctness is validated; set CXXMV_ENABLE_EXPERIMENTAL_PDB=1 "
+                "or debugger.enable_experimental_pdb=true to test it"
             )
 
         lldb_status = DebugBackendStatus(
@@ -220,6 +224,39 @@ class DebugExecutor:
         if is_windows:
             return [msvc_status, lldb_status]
         return [lldb_status, msvc_status]
+
+    @staticmethod
+    def _default_config_path() -> Path:
+        return Path(__file__).parent.parent.parent / "config.yaml"
+
+    @staticmethod
+    def _truthy(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _experimental_pdb_enabled(config_path: Path | None = None) -> bool:
+        env_value = os.environ.get("CXXMV_ENABLE_EXPERIMENTAL_PDB")
+        if env_value is not None:
+            return DebugExecutor._truthy(env_value)
+
+        path = config_path or DebugExecutor._default_config_path()
+        try:
+            if not path.exists():
+                return False
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            logger.exception("Failed to read debugger config")
+            return False
+
+        debugger_cfg = cfg.get("debugger", {})
+        if not isinstance(debugger_cfg, dict):
+            return False
+        return DebugExecutor._truthy(debugger_cfg.get("enable_experimental_pdb"))
 
     @staticmethod
     def _compiler() -> str | None:
@@ -355,7 +392,7 @@ class DebugExecutor:
         raise DebugExecutionError("No supported debugger/compiler found")
 
     def _select_backend(self) -> str:
-        statuses = {status.id: status for status in self.backend_status()}
+        statuses = {status.id: status for status in self.backend_status(self._config_path)}
         if self._preferred_backend:
             status = statuses.get(self._preferred_backend)
             if status is None:
@@ -368,7 +405,7 @@ class DebugExecutor:
             self.last_backend_label = status.label
             return status.id
 
-        backend = self.available_backend()
+        backend = self.available_backend(self._config_path)
         if backend is None:
             details = "; ".join(status.detail for status in statuses.values())
             raise DebugExecutionError(f"No supported debugger/compiler found: {details}")

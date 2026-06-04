@@ -30,6 +30,15 @@ python main.py
 
 Do not advertise the MSVC/PDB backend as stable until the smoke tests below pass on a Windows machine.
 
+To enable the experimental MSVC/PDB path for teammate testing, use one of:
+
+- Settings -> AI Settings -> Enable experimental MSVC/PDB native debugger
+- `config.yaml`: set `debugger.enable_experimental_pdb: true`
+- PowerShell: set `$env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"`
+
+An explicit environment value of `0` or empty disables the PDB backend for that
+process, even if `config.yaml` enables it.
+
 When an API key is configured, very large control-flow-heavy programs are sent
 directly to the AI fallback instead of first waiting for LLDB/CDB to time out.
 Small and medium visual examples still prefer the native debugger path.

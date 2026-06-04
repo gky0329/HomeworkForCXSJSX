@@ -37,3 +37,6 @@ ui:
   font_size: 13
   language: en  # en | zh
   theme: dark
+debugger:
+  # Experimental Windows native debugger path. Keep false unless validating on Windows.
+  enable_experimental_pdb: false

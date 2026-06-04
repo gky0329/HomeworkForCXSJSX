@@ -50,16 +50,16 @@ def _has_api_key() -> bool:
     return False
 
 
-def _has_local_debugger() -> bool:
+def _has_local_debugger(config_path: Path | None = None) -> bool:
     try:
-        return DebugExecutor.is_available()
+        return DebugExecutor.is_available(config_path)
     except Exception:
         return False
 
 
-def _can_run_locally(code: str, stdin_text: str = "") -> bool:
+def _can_run_locally(code: str, stdin_text: str = "", config_path: Path | None = None) -> bool:
     try:
-        return DebugExecutor.can_run_code_locally(code, stdin_text)
+        return DebugExecutor.can_run_code_locally(code, stdin_text, config_path)
     except Exception:
         return False
 
@@ -116,10 +116,10 @@ class Engine:
             return
         stdin_text = self._window.get_stdin()
 
-        if not _has_api_key() and not _can_run_locally(code, stdin_text):
+        if not _has_api_key() and not _can_run_locally(code, stdin_text, self._config_path):
             from app.ui.widgets.api_key_dialog import show_api_key_dialog
             show_api_key_dialog(self._window)
-            if not _has_api_key() and not _can_run_locally(code, stdin_text):
+            if not _has_api_key() and not _can_run_locally(code, stdin_text, self._config_path):
                 self._window.statusBar().showMessage(
                     tr("API key not configured - click Settings or set provider API key")
                 )

@@ -398,6 +398,41 @@ def test_code_editor_status_shows_execution_diagnostics():
         window.close()
 
 
+def test_settings_dialog_saves_experimental_pdb_toggle():
+    """Settings should expose the experimental PDB flag without hand-editing YAML."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+    import yaml
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.widgets.api_key_dialog import ApiKeyDialog
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.yaml"
+        config_path.write_text(
+            "llm:\n"
+            "  provider: deepseek\n"
+            "  providers:\n"
+            "    deepseek:\n"
+            "      api_key: ''\n"
+            "      api_key_env: DEEPSEEK_API_KEY\n"
+            "      api_base: https://api.deepseek.com\n"
+            "      model: deepseek-chat\n",
+            encoding="utf-8",
+        )
+        dialog = ApiKeyDialog(config_path=config_path)
+        try:
+            dialog._pdb_check.setChecked(True)
+            dialog._save_and_accept()
+        finally:
+            dialog.close()
+
+        saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert saved["debugger"]["enable_experimental_pdb"] is True
+
+
 def test_memory_canvas_prepares_trace_wide_fit_bounds():
     """Trace layout planning should include later heap/object-heavy steps."""
     from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
@@ -2692,6 +2727,64 @@ def test_debug_executor_selects_msvc_pdb_backend_when_enabled_on_windows():
     assert status[DebugExecutor.MSVC_PDB_BACKEND].implemented is True
     assert status[DebugExecutor.MSVC_PDB_BACKEND].available is True
     assert "PDB" in status[DebugExecutor.MSVC_PDB_BACKEND].detail
+
+
+def test_debug_executor_selects_msvc_pdb_backend_from_config():
+    """config.yaml can enable the experimental PDB backend without an env var."""
+    from app.core.debug_executor import DebugExecutor
+
+    def fake_which(name):
+        return {
+            "cl": "C:/VS/VC/Tools/MSVC/bin/cl.exe",
+            "cdb": "C:/Windows Kits/Debuggers/x64/cdb.exe",
+            "vswhere": "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe",
+        }.get(name)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.yaml"
+        config_path.write_text("debugger:\n  enable_experimental_pdb: true\n", encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+                with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+                    status = {s.id: s for s in DebugExecutor.backend_status(config_path)}
+                    selected = DebugExecutor(
+                        preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
+                        config_path=config_path,
+                    )._select_backend()
+
+    assert selected == DebugExecutor.MSVC_PDB_BACKEND
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is True
+
+
+def test_debug_executor_env_can_disable_configured_pdb_backend():
+    """An explicit env value can temporarily override config.yaml."""
+    from app.core.debug_executor import DebugExecutor
+
+    def fake_which(name):
+        return {
+            "cl": "C:/VS/VC/Tools/MSVC/bin/cl.exe",
+            "cdb": "C:/Windows Kits/Debuggers/x64/cdb.exe",
+        }.get(name)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.yaml"
+        config_path.write_text("debugger:\n  enable_experimental_pdb: true\n", encoding="utf-8")
+        with patch.dict(os.environ, {"CXXMV_ENABLE_EXPERIMENTAL_PDB": "0"}, clear=False):
+            with patch("app.core.debug_executor.platform.system", return_value="Windows"):
+                with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
+                    status = {s.id: s for s in DebugExecutor.backend_status(config_path)}
+                    try:
+                        DebugExecutor(
+                            preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
+                            config_path=config_path,
+                        )._select_backend()
+                    except Exception as exc:
+                        message = str(exc)
+                    else:
+                        raise AssertionError("env override should disable MSVC/PDB")
+
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
+    assert "experimental" in message
 
 
 def test_debug_executor_msvc_pdb_backend_requires_cdb():
@@ -8828,6 +8921,7 @@ if __name__ == "__main__":
         test_canvas_view_uses_stable_fit_bounds,
         test_code_editor_auto_fit_defaults_to_initial_fit_only,
         test_code_editor_status_shows_execution_diagnostics,
+        test_settings_dialog_saves_experimental_pdb_toggle,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
@@ -8878,6 +8972,8 @@ if __name__ == "__main__":
         test_debug_executor_selects_lldb_backend_when_tools_exist,
         test_debug_executor_msvc_pdb_backend_is_experimental_by_default,
         test_debug_executor_selects_msvc_pdb_backend_when_enabled_on_windows,
+        test_debug_executor_selects_msvc_pdb_backend_from_config,
+        test_debug_executor_env_can_disable_configured_pdb_backend,
         test_debug_executor_msvc_pdb_backend_requires_cdb,
         test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits,
         test_debug_executor_msvc_shell_command_loads_vcvarsall,

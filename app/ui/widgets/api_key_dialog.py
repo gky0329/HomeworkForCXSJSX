@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
@@ -22,9 +22,9 @@ PROVIDER_LABELS = {
 
 
 class ApiKeyDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config_path: Path | None = None):
         super().__init__(parent)
-        self._config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+        self._config_path = config_path or Path(__file__).parent.parent.parent.parent / "config.yaml"
         self._config = self._load_config()
         load_language(self._config_path)
 
@@ -157,6 +157,16 @@ class ApiKeyDialog(QDialog):
         self._font_spin.setStyleSheet(input_style.replace("QLineEdit", "QSpinBox"))
         self._add_labeled_widget(layout, tr("Code Font Size"), self._font_spin, label_style)
 
+        debugger_cfg = self._config.get("debugger", {})
+        self._pdb_check = QCheckBox(tr("Enable experimental MSVC/PDB native debugger"))
+        self._pdb_check.setChecked(bool(debugger_cfg.get("enable_experimental_pdb", False)))
+        self._pdb_check.setStyleSheet("color: #D4D4D4; font-size: 12px; margin-top: 8px;")
+        layout.addWidget(self._pdb_check)
+        pdb_hint = QLabel(tr("Requires Windows, Visual Studio Build Tools, and Windows Debugging Tools."))
+        pdb_hint.setWordWrap(True)
+        pdb_hint.setStyleSheet(hint_style)
+        layout.addWidget(pdb_hint)
+
         btn_layout = QHBoxLayout()
         cancel_btn = QPushButton(tr("Cancel"))
         cancel_btn.clicked.connect(self.reject)
@@ -238,6 +248,9 @@ class ApiKeyDialog(QDialog):
             ui_cfg = cfg.setdefault("ui", {})
             ui_cfg["code_font_size"] = font_size
             ui_cfg["language"] = language
+
+            debugger_cfg = cfg.setdefault("debugger", {})
+            debugger_cfg["enable_experimental_pdb"] = self._pdb_check.isChecked()
 
             with open(self._config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)

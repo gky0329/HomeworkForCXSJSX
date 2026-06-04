@@ -68,6 +68,8 @@ TRANSLATIONS = {
         "Skip (Offline)": "跳过（离线）",
         "API key can also be set with {env}.": "也可以通过环境变量 {env} 设置 API key。",
         "Leave empty if no proxy.": "没有代理可留空。",
+        "Enable experimental MSVC/PDB native debugger": "启用实验性 MSVC/PDB 本地调试器",
+        "Requires Windows, Visual Studio Build Tools, and Windows Debugging Tools.": "需要 Windows、Visual Studio Build Tools 和 Windows Debugging Tools。",
         "Settings saved.": "设置已保存。",
         "Settings saved. Restart the app to update every page.": "设置已保存。重启应用后所有页面都会更新。",
         "Failed to save settings: {error}": "保存设置失败：{error}",

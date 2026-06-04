@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AIExecutor:
     def __init__(self, config_path: Path | None = None):
         self._ai_service = AIService(config_path)
-        self._debug_executor = DebugExecutor()
+        self._debug_executor = DebugExecutor(config_path=config_path)
         self.execution_summary = ""
 
     async def run_code(self, code: str, stdin_text: str = "") -> ExecutionTrace:
