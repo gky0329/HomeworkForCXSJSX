@@ -305,6 +305,26 @@ def test_canvas_view_uses_stable_fit_bounds():
     assert abs(first_center.y() - second_center.y()) < 0.000001
 
 
+def test_code_editor_defaults_to_roadshow_demo():
+    """Mac demo recording should open with the strongest example already loaded."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.demo_examples import ROADSHOW_DEMO_CODE
+    from app.ui.main_window import DEFAULT_EXAMPLE_KEY, MainWindow
+
+    window = MainWindow()
+    try:
+        assert DEFAULT_EXAMPLE_KEY == "Roadshow Demo"
+        assert window._example_combo.currentData() == "Roadshow Demo"
+        assert window.get_code() == ROADSHOW_DEMO_CODE.strip()
+        assert "background-color: #1E1E1E" in window.code_editor.styleSheet()
+    finally:
+        window.close()
+
+
 def test_code_editor_auto_fit_defaults_to_initial_fit_only():
     """The code editor should fit a new trace once, then preserve the view while stepping."""
     from PySide6.QtWidgets import QApplication
@@ -9415,6 +9435,7 @@ if __name__ == "__main__":
         test_memory_canvas_registers_member_pointer_edge_sources,
         test_memory_canvas_registers_array_element_pointer_edge_sources,
         test_canvas_view_uses_stable_fit_bounds,
+        test_code_editor_defaults_to_roadshow_demo,
         test_code_editor_auto_fit_defaults_to_initial_fit_only,
         test_code_editor_status_shows_execution_diagnostics,
         test_settings_dialog_does_not_write_debugger_config,

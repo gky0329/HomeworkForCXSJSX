@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent
 
-from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT, TEXT_PRIMARY, ACCENT
+from app.ui.theme.colors import (
+    ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BORDER, CANVAS_BG, EDITOR_BG,
+    EDITOR_SELECTION, HIGHLIGHT, SURFACE, TEXT_PRIMARY, TEXT_SECONDARY,
+)
 from app.ui.pages.file_import_page import FileImportPage
 from app.ui.pages.oj_page import OJPage
 from app.ui.pages.review_page import ReviewPage
@@ -116,6 +119,7 @@ EXAMPLE_CODES = {
         "delete a;\n"
     ),
 }
+DEFAULT_EXAMPLE_KEY = "Roadshow Demo"
 
 
 class CanvasView(QGraphicsView):
@@ -325,7 +329,7 @@ class MainWindow(QMainWindow):
         self._example_combo = QComboBox()
         for key in EXAMPLE_CODES:
             self._example_combo.addItem(tr(key), key)
-        self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
+        self._example_combo.setCurrentIndex(self._example_combo.findData(DEFAULT_EXAMPLE_KEY))
         self._example_combo.currentIndexChanged.connect(self._on_example_changed)
         self._example_combo.setStyleSheet(
             f"QComboBox {{ padding: 3px 6px; font-size: 12px; border: none; "
@@ -380,10 +384,14 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(2)
 
         self.code_editor = QPlainTextEdit()
-        self.code_editor.setPlainText(EXAMPLE_CODES["Pointers"])
+        self.code_editor.setPlainText(EXAMPLE_CODES[DEFAULT_EXAMPLE_KEY])
         font_size = self._read_config_font_size()
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
+        self.code_editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
+            f"selection-background-color: {EDITOR_SELECTION}; border: none; padding: 6px; }}"
+        )
 
         left_pane = QWidget()
         left_layout = QVBoxLayout(left_pane)
