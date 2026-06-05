@@ -5393,6 +5393,78 @@ __CXXMV_FRAMEDX__0
     ]
 
 
+def test_debug_executor_parses_cdb_dx_pair_tuple_composites():
+    """CDB/PDB should render pair members and tuple elements without duplicate summary rows."""
+    from app.core.debug_executor import DebugExecutor
+
+    executor = DebugExecutor()
+    prepared = executor._prepare_source(
+        "#include <tuple>\n"
+        "#include <utility>\n"
+        "#include <string>\n"
+        "using namespace std;\n"
+        "struct Node { int value; Node* next; };\n"
+        "Node head{3, nullptr};\n"
+        'pair<Node*, string> link = {&head, "head"};\n'
+        "link.first->value = 8;\n"
+        'tuple<int, string, double> stats = {2, "ok", 4.5};\n'
+        "int count = get<0>(stats);\n"
+    )
+    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    line = generated_lines[10]
+    output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {line}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {line + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 Node head = {{value=8, next=0x0000000000000000}}
+000000aa`0000efe0 std::pair<Node *,std::string> link = {{first=000000aa`0000efd0 {{value=8, next=0x0000000000000000}}, second="head"}}
+000000aa`0000eff0 std::tuple<int,std::string,double> stats = {{[0]=2, [1]="ok", [2]=4.5}}
+000000aa`0000f020 int count = 2
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    head : {{value=8, next=0x0000000000000000}} [Type: Node]
+        value : 8 [Type: int]
+        next : 0x0000000000000000 [Type: Node *]
+    link : {{first=000000aa`0000efd0 {{value=8, next=0x0000000000000000}}, second="head"}} [Type: std::pair<Node *,std::string>]
+        first : 000000aa`0000efd0 {{value=8, next=0x0000000000000000}} [Type: Node *]
+        second : "head" [Type: std::string]
+    stats : {{[0]=2, [1]="ok", [2]=4.5}} [Type: std::tuple<int,std::string,double>]
+        [0] : 2 [Type: int]
+        [1] : "ok" [Type: std::string]
+        [2] : 4.5 [Type: double]
+    count : 2 [Type: int]
+"""
+
+    trace = executor._parse_cdb_output(output, prepared)
+    values = {var.name: var for var in trace.steps[0].stack[0].variables}
+    head = values["head"]
+    link = values["link"]
+    stats = values["stats"]
+
+    assert head.is_object is True
+    assert [(member.name, member.value) for member in head.members] == [
+        ("value", "8"),
+        ("next", "nullptr"),
+    ]
+    assert link.is_object is True
+    assert link.value == "{first=0xS001, second=head}"
+    assert [(member.name, member.type, member.value) for member in link.members] == [
+        ("first", "Node*", "0xS001"),
+        ("second", "std::string", "head"),
+    ]
+    assert any(edge.source_address == "0xS002.first" and edge.target_address == "0xS001" for edge in trace.steps[0].edges)
+    assert stats.is_array is True
+    assert stats.value == "{[0]=2, [1]=ok, [2]=4.5}"
+    assert [(element.index, element.type, element.value) for element in stats.elements] == [
+        (0, "int", "2"),
+        (1, "std::string", "ok"),
+        (2, "double", "4.5"),
+    ]
+    assert len(stats.elements) == 3
+
+
 def test_debug_executor_parses_cdb_dx_stl_container_breadth():
     """CDB/PDB dx output should cover common STL sequence/set/hash containers."""
     from app.core.debug_executor import DebugExecutor
@@ -7873,6 +7945,73 @@ def test_native_debug_smoke_requires_stl_container_breadth():
     assert _validate_vector_string(strong_vector_string) == []
 
 
+def test_native_debug_smoke_requires_pair_tuple_composites():
+    """Native smoke should prove pair member pointers and tuple elements render cleanly."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import CASES, _validate_pair_tuple_composite
+
+    assert "pair_tuple_composite" in CASES
+
+    strong_trace = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="int count = get<0>(stats);",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(
+                    name="head",
+                    type="Node",
+                    value="{value=8, next=nullptr}",
+                    address="0xS001",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="value", type="int", value="8", address="0xS001.value"),
+                        StructMember(name="next", type="Node*", value="nullptr", address="0xS001.next"),
+                    ],
+                ),
+                Variable(
+                    name="link",
+                    type="pair<Node*, string>",
+                    value="{first=0xS001, second=head}",
+                    address="0xS002",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[
+                        StructMember(name="first", type="Node*", value="0xS001", address="0xS002.first"),
+                        StructMember(name="second", type="string", value="head", address="0xS002.second"),
+                    ],
+                ),
+                Variable(
+                    name="stats",
+                    type="tuple<int, string, double>",
+                    value="{[0]=2, [1]=ok, [2]=4.5}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="int", value="2", address="0xS003[0]"),
+                        ArrayElement(index=1, type="string", value="ok", address="0xS003[1]"),
+                        ArrayElement(index=2, type="double", value="4.5", address="0xS003[2]"),
+                    ],
+                ),
+                Variable(name="count", type="int", value="2", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS002.first", target_address="0xS001")],
+        )
+    ])
+    weak_trace = strong_trace.model_copy(deep=True)
+    weak_trace.steps[0].edges = []
+    weak_trace.steps[0].stack[0].variables[2].elements.append(
+        ArrayElement(index=0, type="tuple<int,string,double>", value="2", address="0xS003[0]")
+    )
+
+    weak_errors = _validate_pair_tuple_composite(weak_trace)
+    assert "missing link.first -> head pointer edge" in weak_errors
+    assert any("stats tuple should have exactly 3 elements" in error for error in weak_errors)
+    assert _validate_pair_tuple_composite(strong_trace) == []
+
+
 def test_native_debug_smoke_requires_map_pointer_entry_edges():
     """Native smoke should prove map<string, int*> entries render pointer edges."""
     from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, Variable
@@ -9128,6 +9267,7 @@ if __name__ == "__main__":
         test_debug_executor_parses_cdb_dx_map_unique_ptr_object_heap_members,
         test_debug_executor_parses_cdb_dx_map_polymorphic_shared_ptr_dynamic_heap_type,
         test_debug_executor_parses_cdb_dx_nested_map_pair_children,
+        test_debug_executor_parses_cdb_dx_pair_tuple_composites,
         test_debug_executor_parses_cdb_dx_stl_container_breadth,
         test_debug_executor_filters_future_locals_from_stack_snapshots,
         test_ai_executor_falls_back_to_ai_for_stdin_programs,
@@ -9170,6 +9310,7 @@ if __name__ == "__main__":
         test_native_debug_smoke_requires_optional_variant_object_member_edges,
         test_native_debug_smoke_requires_roadshow_native_demo_state,
         test_native_debug_smoke_requires_stl_container_breadth,
+        test_native_debug_smoke_requires_pair_tuple_composites,
         test_native_debug_smoke_requires_map_pointer_entry_edges,
         test_native_debug_smoke_requires_map_unique_ptr_heap_entry,
         test_native_debug_smoke_requires_map_unique_ptr_object_heap_entry,

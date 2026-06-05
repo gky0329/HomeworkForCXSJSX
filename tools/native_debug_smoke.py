@@ -376,6 +376,60 @@ def _validate_vector_string(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_pair_tuple_composite(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    head = values.get("head")
+    link = values.get("link")
+    stats = values.get("stats")
+    count = values.get("count")
+    errors: list[str] = []
+    if head is None:
+        errors.append("missing head object")
+    elif not head.is_object:
+        errors.append("head should be marked as an object")
+    elif _member_map(head).get("value") != "8":
+        errors.append(f"head.value expected 8 after link.first write, got {_member_map(head).get('value')!r}")
+
+    if link is None:
+        errors.append("missing pair variable link")
+    else:
+        if not link.is_object:
+            errors.append("link pair should be marked as an object with first/second members")
+        if link.is_array:
+            errors.append("link pair should not be marked as an array")
+        members = _member_map(link)
+        if head is not None and members.get("first") != head.address:
+            errors.append(f"link.first expected {head.address}, got {members.get('first')!r}")
+        if members.get("second") != "head":
+            errors.append(f"link.second expected head, got {members.get('second')!r}")
+        if head is not None and not any(
+            edge.source_address == f"{link.address}.first" and edge.target_address == head.address
+            for edge in state.edges
+        ):
+            errors.append("missing link.first -> head pointer edge")
+
+    if stats is None:
+        errors.append("missing tuple variable stats")
+    else:
+        if not stats.is_array:
+            errors.append("stats tuple should be marked as an array/container")
+        if stats.is_object:
+            errors.append("stats tuple should render as indexed elements, not object members")
+        element_values = [element.value for element in stats.elements]
+        if element_values != ["2", "ok", "4.5"]:
+            errors.append(f"stats elements expected ['2', 'ok', '4.5'], got {element_values!r}")
+        if len(stats.elements) != 3:
+            errors.append(f"stats tuple should have exactly 3 elements, got {len(stats.elements)}")
+    if count is None:
+        errors.append("missing count variable")
+    elif count.value != "2":
+        errors.append(f"count expected 2, got {count.value!r}")
+    return errors
+
+
 def _validate_vector_pointer(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "ptrs")
     if match is None:
@@ -2380,6 +2434,22 @@ CASES: dict[str, SmokeCase] = {
             "int length = words[1].size();\n"
         ),
         validate=_validate_vector_string,
+    ),
+    "pair_tuple_composite": SmokeCase(
+        name="pair_tuple_composite",
+        code=(
+            "#include <string>\n"
+            "#include <tuple>\n"
+            "#include <utility>\n"
+            "using namespace std;\n"
+            "struct Node { int value; Node* next; };\n"
+            "Node head{3, nullptr};\n"
+            'pair<Node*, string> link = {&head, "head"};\n'
+            "link.first->value = 8;\n"
+            'tuple<int, string, double> stats = {2, "ok", 4.5};\n'
+            "int count = get<0>(stats);\n"
+        ),
+        validate=_validate_pair_tuple_composite,
     ),
     "vector_pointer_stack": SmokeCase(
         name="vector_pointer_stack",

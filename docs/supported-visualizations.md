@@ -95,6 +95,8 @@ STL 容器适配器（如 `std::stack<T>`、`std::priority_queue<T>`）会解包
 
 字符串容器会把调试器展开出的字符数组和实现字段折叠成业务可读的字符串元素。例如 `vector<string>{"one", "three", "two"}` 应显示为三个 cell：`one`、`three`、`two`，而不是 `_Mypair` / `_Bx` / 字符 buffer 等实现细节。
 
+`std::pair<A, B>` 会按对象成员展示 `first` / `second`。如果某个成员是指针，例如 `pair<Node*, string>`，`first` 成员行会作为箭头起点指向对应对象。`std::tuple<T...>` 会按 `[0]` / `[1]` / `[2]` 这类索引 cell 渲染；当调试器同时输出 tuple 摘要和子元素行时，执行器以子元素行为准，避免重复 cell。
+
 ---
 
 ## 2.1 智能指针

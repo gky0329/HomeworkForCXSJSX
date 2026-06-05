@@ -2072,7 +2072,7 @@ class DebugExecutor:
                         else pending.elements
                     )
                     element = self._parsed_element_from_raw(element_index, clean_type, raw_value)
-                    target_elements.append(element)
+                    self._upsert_parsed_element(target_elements, element)
                     pending_element = element
                     pending_element_indent = indent
                     pending_element_elements = []
@@ -3478,6 +3478,14 @@ class DebugExecutor:
                 elif not nested_elements:
                     element.pointee_value = DebugExecutor._clean_value(payload)
         return element
+
+    @staticmethod
+    def _upsert_parsed_element(elements: list[_ParsedElement], element: _ParsedElement):
+        for idx, existing in enumerate(elements):
+            if existing.index == element.index:
+                elements[idx] = element
+                return
+        elements.append(element)
 
     @staticmethod
     def _parse_structured_members(payload: str) -> list[_ParsedMember]:
