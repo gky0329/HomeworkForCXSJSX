@@ -810,6 +810,46 @@ def _validate_set_pointer(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_unordered_set_pointer(trace: ExecutionTrace) -> list[str]:
+    match = _last_var(trace, "xs")
+    if match is None:
+        return ["missing unordered_set pointer variable xs"]
+    state, var = match
+    errors: list[str] = []
+    if not var.is_array:
+        errors.append("unordered_set xs should be marked as an array/container")
+    if var.is_object:
+        errors.append("unordered_set xs should not be marked as an object")
+    if var.members:
+        errors.append(f"unordered_set xs should not expose implementation members: {var.members!r}")
+    a_match = _last_var(trace, "a")
+    b_match = _last_var(trace, "b")
+    count_match = _last_var(trace, "count")
+    if a_match is None or b_match is None or count_match is None:
+        errors.append("missing a, b, or count variable for unordered_set pointer entries")
+        return errors
+    a = a_match[1]
+    b = b_match[1]
+    count = count_match[1]
+    if a.value != "1":
+        errors.append(f"a expected 1 after unordered_set write, got {a.value!r}")
+    if b.value != "9":
+        errors.append(f"b expected 9 after unordered_set iterator write, got {b.value!r}")
+    if count.value != "2":
+        errors.append(f"count expected 2, got {count.value!r}")
+    targets = {a.address, b.address}
+    elements = list(var.elements)
+    values = {element.value for element in elements}
+    if len(elements) != 2 or values != targets:
+        errors.append(f"unordered_set pointer elements expected {sorted(targets)!r}, got {sorted(values)!r}")
+        return errors
+    actual_edges = {(edge.source_address, edge.target_address) for edge in state.edges}
+    for element in elements:
+        if (element.address, element.value) not in actual_edges:
+            errors.append(f"missing unordered_set element edge {element.address!r} -> {element.value!r}")
+    return errors
+
+
 def _validate_vector_object(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "nodes")
     if match is None:
@@ -2162,6 +2202,21 @@ CASES: dict[str, SmokeCase] = {
             "int count = xs.size();\n"
         ),
         validate=_validate_set_pointer,
+    ),
+    "unordered_set_pointer": SmokeCase(
+        name="unordered_set_pointer",
+        code=(
+            "#include <unordered_set>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "unordered_set<int*> xs;\n"
+            "xs.insert(&a);\n"
+            "xs.insert(&b);\n"
+            "**xs.find(&b) = 9;\n"
+            "int count = xs.size();\n"
+        ),
+        validate=_validate_unordered_set_pointer,
     ),
     "heap_object": SmokeCase(
         name="heap_object",

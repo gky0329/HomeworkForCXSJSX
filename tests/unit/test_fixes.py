@@ -5624,6 +5624,46 @@ __CXXMV_FRAMEDX__0
         for element in set_xs.elements
     }
 
+    unordered_set_step = parse_step(
+        "#include <unordered_set>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "unordered_set<int*> xs;\n"
+        "xs.insert(&a);\n"
+        "xs.insert(&b);\n"
+        "**xs.find(&b) = 9;\n"
+        "int count = xs.size();\n",
+        9,
+        "000000aa`0000efd0 int a = 1\n"
+        "000000aa`0000efd4 int b = 9\n"
+        "000000aa`0000efe0 std::unordered_set<int *> xs = size=2\n"
+        "000000aa`0000f010 int count = 2",
+        "    xs : { size=2 } [Type: std::unordered_set<int *>]\n"
+        "        [0] : 0x000000aa0000efd4 [Type: int *]\n"
+        "        [1] : 0x000000aa0000efd0 [Type: int *]\n"
+        "    count : 2 [Type: int]",
+    )
+    unordered_set_values = {var.name: var for var in unordered_set_step.stack[0].variables}
+    unordered_set_xs = unordered_set_values["xs"]
+    assert unordered_set_values["a"].value == "1"
+    assert unordered_set_values["b"].value == "9"
+    assert unordered_set_values["count"].value == "2"
+    assert unordered_set_xs.is_array is True
+    assert unordered_set_xs.is_object is False
+    assert unordered_set_xs.members == []
+    assert {element.value for element in unordered_set_xs.elements} == {
+        unordered_set_values["a"].address,
+        unordered_set_values["b"].address,
+    }
+    assert {
+        (edge.source_address, edge.target_address)
+        for edge in unordered_set_step.edges
+    } == {
+        (element.address, element.value)
+        for element in unordered_set_xs.elements
+    }
+
     unordered_step = parse_step(
         "#include <string>\n"
         "#include <unordered_map>\n"
@@ -7850,6 +7890,7 @@ def test_native_debug_smoke_requires_stl_container_breadth():
         _validate_list_pointer,
         _validate_set_pointer,
         _validate_unordered_map_pointer,
+        _validate_unordered_set_pointer,
         _validate_vector_string,
     )
 
@@ -7857,6 +7898,7 @@ def test_native_debug_smoke_requires_stl_container_breadth():
         "deque_int",
         "list_pointer_stack",
         "set_pointer_stack",
+        "unordered_set_pointer",
         "unordered_map_pointer",
         "vector_string",
     ):
@@ -7962,6 +8004,42 @@ def test_native_debug_smoke_requires_stl_container_breadth():
     weak_set.steps[0].stack[0].variables[-1].elements = []
     assert any("set pointer elements expected" in error for error in _validate_set_pointer(weak_set))
     assert _validate_set_pointer(strong_set) == []
+
+    strong_unordered_set = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=9,
+            source_code="int count = xs.size();",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="1", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="xs",
+                    type="unordered_set<int*>",
+                    value="{[0]=0xS002, [1]=0xS001}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[
+                        ArrayElement(index=0, type="int*", value="0xS002", address="0xS003[0]"),
+                        ArrayElement(index=1, type="int*", value="0xS001", address="0xS003[1]"),
+                    ],
+                ),
+                Variable(name="count", type="int", value="2", address="0xS004", is_pointer=False),
+            ])],
+            heap=[],
+            edges=[
+                PointerEdge(source_address="0xS003[0]", target_address="0xS002"),
+                PointerEdge(source_address="0xS003[1]", target_address="0xS001"),
+            ],
+        )
+    ])
+    weak_unordered_set = strong_unordered_set.model_copy(deep=True)
+    weak_unordered_set.steps[0].edges = []
+    assert any(
+        "missing unordered_set element edge" in error
+        for error in _validate_unordered_set_pointer(weak_unordered_set)
+    )
+    assert _validate_unordered_set_pointer(strong_unordered_set) == []
 
     strong_unordered_map = ExecutionTrace(steps=[
         MemoryState(

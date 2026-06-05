@@ -105,6 +105,7 @@ python tools/native_debug_smoke.py --backend msvc-pdb --case heap_object
 python tools/native_debug_smoke.py --backend msvc-pdb --case deque_int
 python tools/native_debug_smoke.py --backend msvc-pdb --case list_pointer_stack
 python tools/native_debug_smoke.py --backend msvc-pdb --case set_pointer_stack
+python tools/native_debug_smoke.py --backend msvc-pdb --case unordered_set_pointer
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_polymorphic_delete
 python tools/native_debug_smoke.py --backend msvc-pdb --case heap_leak_overwrite
 python tools/native_debug_smoke.py --backend msvc-pdb --case unique_ptr_heap
