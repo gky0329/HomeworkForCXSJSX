@@ -7,6 +7,11 @@ from app.ui.theme.colors import (
     HEAP_BORDER, HEAP_BG, HEAP_TEXT, EDGE_DANGLING, CANVAS_BG,
     STACK_VAR_TEXT,
 )
+from app.ui.canvas.object_layout import (
+    base_subobjects,
+    derived_object_members,
+    vtable_rows,
+)
 from app.ui.widgets.helpers import text_width
 
 
@@ -29,6 +34,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_value_labels: list[QGraphicsTextItem] = []
         self._array_index_labels: list[QGraphicsTextItem] = []
         self._text_items: list[QGraphicsTextItem] = []
+        self._object_sections: list[dict[str, object]] = []
         self.member_items: dict[str, QGraphicsTextItem] = {}
         self.element_items: dict[str, QGraphicsRectItem] = {}
 
@@ -55,6 +61,7 @@ class HeapItem(QGraphicsRectItem):
         self._array_value_labels.clear()
         self._array_index_labels.clear()
         self._text_items.clear()
+        self._object_sections.clear()
         self.member_items.clear()
         self.element_items.clear()
         for child in list(self.childItems()):
@@ -263,23 +270,35 @@ class HeapItem(QGraphicsRectItem):
 
         self._refresh_geometry()
 
+    def _make_object_section(self, color: str, items: list[QGraphicsTextItem]):
+        rect = QGraphicsRectItem(self)
+        rect.setPen(QPen(QColor(color), 1, Qt.PenStyle.DashLine))
+        fill = QColor(color)
+        fill.setAlpha(24)
+        rect.setBrush(QBrush(fill))
+        rect.setZValue(-0.75)
+        self._object_sections.append({"rect": rect, "items": items})
+
+    def _layout_object_sections(self):
+        for section in self._object_sections:
+            rect = section.get("rect")
+            items = section.get("items")
+            if not isinstance(rect, QGraphicsRectItem) or not isinstance(items, list) or not items:
+                continue
+            top = min(item.pos().y() for item in items)
+            bottom = max(item.pos().y() + item.boundingRect().height() for item in items)
+            left = min(item.pos().x() for item in items) - 4.0
+            right = self.rect().width() - 6.0
+            rect.setRect(left, top - 2.0, max(36.0, right - left), max(18.0, bottom - top + 4.0))
+
     def _build_object(self, block: HeapBlock):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
         title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
-        members = [m for m in block.members if m.name != "_vptr"]
         body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
         member_h = QFontMetricsF(member_font).lineSpacing() + 6
-        extra_lines = 0
-        if block.is_destroyed:
-            extra_lines += 1
-        elif block.is_constructed:
-            extra_lines += 1
-        if block.base_classes:
-            extra_lines += 1
-        if block.virtual_methods:
-            extra_lines += 1
-        n_members = len(members)
+        derived_members = derived_object_members(block.base_classes, block.members)
+        vtable = vtable_rows(block.class_name, block.type, block.base_classes, block.virtual_methods)
         width_candidates = [
             _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
@@ -287,14 +306,28 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width("  💀 destroyed", body_font))
         elif block.is_constructed:
             width_candidates.append(_text_width("  ⚡ constructed", body_font))
-        if block.base_classes:
-            width_candidates.append(_text_width(f"  ⬆ extends {', '.join(block.base_classes)}", body_font))
-        if block.virtual_methods:
-            width_candidates.append(_text_width(f"  [vtable] {' '.join(block.virtual_methods)}", body_font))
-        for m in members:
+        for base, member in base_subobjects(block.base_classes, block.members):
+            width_candidates.append(_text_width(f"  base subobject: {base}", body_font))
+            state = member.value if member is not None and member.value else "<base layout>"
+            width_candidates.append(_text_width(f"    contains {base} = {state}", body_font))
+        if vtable:
+            width_candidates.append(_text_width(f"  vptr -> {(block.class_name or block.type)} vtable", body_font))
+            for row in vtable:
+                width_candidates.append(_text_width(f"    {row}", body_font))
+        if block.base_classes and derived_members:
+            width_candidates.append(_text_width(f"  derived fields: {block.class_name or block.type}", body_font))
+        for m in derived_members:
             width_candidates.append(_text_width(f"  .{m.name}: {m.type} = {m.value}", member_font))
         w = max(width_candidates) + 12
-        h = 26 + extra_lines * body_line_h + max(1, n_members) * member_h + 6
+        extra_height = 0.0
+        if block.is_destroyed or block.is_constructed:
+            extra_height += body_line_h
+        extra_height += len(base_subobjects(block.base_classes, block.members)) * body_line_h * 2
+        if vtable:
+            extra_height += body_line_h * (1 + len(vtable))
+        if block.base_classes and derived_members:
+            extra_height += body_line_h
+        h = 26 + extra_height + max(1, len(derived_members)) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, w), h)
 
@@ -317,25 +350,63 @@ class HeapItem(QGraphicsRectItem):
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(6, y)
             y += body_line_h
-        if block.base_classes:
-            bl = self._keep_text(QGraphicsTextItem(f"  ⬆ extends {', '.join(block.base_classes)}", self))
-            bl.setDefaultTextColor(QColor("#CE9178"))
-            bl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
-            bl.setPos(6, y)
+
+        for base, member in base_subobjects(block.base_classes, block.members):
+            section_items: list[QGraphicsTextItem] = []
+            base_label = self._keep_text(QGraphicsTextItem(f"  base subobject: {base}", self))
+            base_label.setDefaultTextColor(QColor("#CE9178"))
+            base_label.setFont(body_font)
+            base_label.setPos(6, y)
+            section_items.append(base_label)
             y += body_line_h
 
-        if block.virtual_methods:
-            vl = self._keep_text(QGraphicsTextItem(f"  [vtable] {' '.join(block.virtual_methods)}", self))
+            state = member.value if member is not None and member.value else "<base layout>"
+            state_label = self._keep_text(QGraphicsTextItem(f"    contains {base} = {state}", self))
+            state_label.setDefaultTextColor(QColor("#CE9178"))
+            state_label.setFont(body_font)
+            state_label.setPos(14, y)
+            section_items.append(state_label)
+            if member is not None and member.address:
+                self.member_items[member.address] = state_label
+            self._value_label = state_label
+            y += body_line_h
+            self._make_object_section("#CE9178", section_items)
+
+        if vtable:
+            section_items = []
+            vl = self._keep_text(QGraphicsTextItem(f"  vptr -> {(block.class_name or block.type)} vtable", self))
             vl.setDefaultTextColor(QColor("#DCDCAA"))
-            vl.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            vl.setFont(body_font)
             vl.setPos(6, y)
+            section_items.append(vl)
             y += body_line_h
+            for row in vtable:
+                slot_label = self._keep_text(QGraphicsTextItem(f"    {row}", self))
+                slot_label.setDefaultTextColor(QColor("#DCDCAA"))
+                slot_label.setFont(body_font)
+                slot_label.setPos(14, y)
+                section_items.append(slot_label)
+                self._value_label = slot_label
+                y += body_line_h
+            self._make_object_section("#DCDCAA", section_items)
 
-        for m in members:
+        derived_section_items: list[QGraphicsTextItem] = []
+        if block.base_classes and derived_members:
+            derived_label = self._keep_text(QGraphicsTextItem(f"  derived fields: {block.class_name or block.type}", self))
+            derived_label.setDefaultTextColor(QColor("#9CDCFE"))
+            derived_label.setFont(body_font)
+            derived_label.setPos(6, y)
+            derived_section_items.append(derived_label)
+            y += body_line_h
+            self._make_object_section("#9CDCFE", derived_section_items)
+
+        for m in derived_members:
             label = self._keep_text(QGraphicsTextItem(f"  .{m.name}: {m.type} = {m.value}", self))
             label.setDefaultTextColor(QColor("#9CDCFE"))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, y)
+            if derived_section_items:
+                derived_section_items.append(label)
             if m.address:
                 self.member_items[m.address] = label
             self._value_label = label
@@ -426,9 +497,10 @@ class HeapItem(QGraphicsRectItem):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
         title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
-        members = [m for m in block.members if m.name != "_vptr"]
         body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
         member_h = QFontMetricsF(member_font).lineSpacing() + 6
+        derived_members = derived_object_members(block.base_classes, block.members)
+        vtable = vtable_rows(block.class_name, block.type, block.base_classes, block.virtual_methods)
         width_candidates = [
             _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
@@ -436,24 +508,31 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width("  💀 destroyed", body_font))
         elif block.is_constructed:
             width_candidates.append(_text_width("  ⚡ constructed", body_font))
-        if block.base_classes:
-            width_candidates.append(_text_width(f"  ⬆ extends {', '.join(block.base_classes)}", body_font))
-        if block.virtual_methods:
-            width_candidates.append(_text_width(f"  [vtable] {' '.join(block.virtual_methods)}", body_font))
-        for m in members:
+        for base, member in base_subobjects(block.base_classes, block.members):
+            width_candidates.append(_text_width(f"  base subobject: {base}", body_font))
+            state = member.value if member is not None and member.value else "<base layout>"
+            width_candidates.append(_text_width(f"    contains {base} = {state}", body_font))
+        if vtable:
+            width_candidates.append(_text_width(f"  vptr -> {(block.class_name or block.type)} vtable", body_font))
+            for row in vtable:
+                width_candidates.append(_text_width(f"    {row}", body_font))
+        if block.base_classes and derived_members:
+            width_candidates.append(_text_width(f"  derived fields: {block.class_name or block.type}", body_font))
+        for m in derived_members:
             width_candidates.append(_text_width(f"  .{m.name}: {m.type} = {m.value}", member_font))
         width = max(width_candidates) + 12
-        n_members = len(members)
-        extra_lines = 0
+        extra_height = 0.0
         if block.is_destroyed or block.is_constructed:
-            extra_lines += 1
-        if block.base_classes:
-            extra_lines += 1
-        if block.virtual_methods:
-            extra_lines += 1
-        height = 26 + extra_lines * body_line_h + max(1, n_members) * member_h + 6
+            extra_height += body_line_h
+        extra_height += len(base_subobjects(block.base_classes, block.members)) * body_line_h * 2
+        if vtable:
+            extra_height += body_line_h * (1 + len(vtable))
+        if block.base_classes and derived_members:
+            extra_height += body_line_h
+        height = 26 + extra_height + max(1, len(derived_members)) * member_h + 6
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, width), height)
+        self._layout_object_sections()
 
     def paint(self, painter: QPainter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

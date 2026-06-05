@@ -6016,6 +6016,90 @@ def test_stack_item_object_draws_member_labels():
     assert any(".extra: int = 13" in text for text in texts)
 
 
+def test_stack_item_object_draws_inheritance_and_vtable_layout():
+    """Stack objects should show base subobjects and dynamic vtable dispatch."""
+    from PySide6.QtWidgets import QApplication, QGraphicsTextItem
+    import sys
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import StackFrame, StructMember, Variable
+    from app.ui.canvas.stack_item import StackItem
+
+    item = StackItem(StackFrame(frame_name="main", variables=[
+        Variable(
+            name="d",
+            type="Dog",
+            value="{Animal={age=3}, bones=4}",
+            address="0xS001",
+            is_pointer=False,
+            is_object=True,
+            class_name="Dog",
+            base_classes=["Animal"],
+            virtual_methods=["speak()"],
+            members=[
+                StructMember(name="Animal", type="Animal", value="{age=3}", address="0xS001.Animal"),
+                StructMember(name="bones", type="int", value="4", address="0xS001.bones"),
+            ],
+        ),
+    ]))
+    texts = [
+        child.toPlainText()
+        for child in item.childItems()
+        if isinstance(child, QGraphicsTextItem)
+    ]
+
+    assert any("base subobject: Animal" in text for text in texts)
+    assert any("contains Animal = {age=3}" in text for text in texts)
+    assert any("vptr -> Dog vtable" in text for text in texts)
+    assert any("slot[0] speak() -> Dog::speak()" in text for text in texts)
+    assert any("Animal* dispatch uses Dog vtable" in text for text in texts)
+    assert any("derived fields: Dog" in text for text in texts)
+    assert any(".bones: int = 4" in text for text in texts)
+    assert "0xS001.Animal" in item.member_items
+    assert "0xS001.bones" in item.member_items
+    assert len(item._object_sections) == 3
+
+
+def test_heap_item_object_draws_inheritance_and_vtable_layout():
+    """Heap objects should render the same inheritance and vtable model."""
+    from PySide6.QtWidgets import QApplication, QGraphicsTextItem
+    import sys
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, StructMember
+    from app.ui.canvas.heap_item import HeapItem
+
+    item = HeapItem(HeapBlock(
+        address="0xH001",
+        type="Dog",
+        value="{Animal={age=3}, bones=4}",
+        is_object=True,
+        class_name="Dog",
+        base_classes=["Animal"],
+        virtual_methods=["speak()"],
+        members=[
+            StructMember(name="Animal", type="Animal", value="{age=3}", address="0xH001.Animal"),
+            StructMember(name="bones", type="int", value="4", address="0xH001.bones"),
+        ],
+    ))
+    texts = [
+        child.toPlainText()
+        for child in item.childItems()
+        if isinstance(child, QGraphicsTextItem)
+    ]
+
+    assert any("base subobject: Animal" in text for text in texts)
+    assert any("contains Animal = {age=3}" in text for text in texts)
+    assert any("vptr -> Dog vtable" in text for text in texts)
+    assert any("slot[0] speak() -> Dog::speak()" in text for text in texts)
+    assert any("Animal* dispatch uses Dog vtable" in text for text in texts)
+    assert any("derived fields: Dog" in text for text in texts)
+    assert any(".bones: int = 4" in text for text in texts)
+    assert "0xH001.Animal" in item.member_items
+    assert "0xH001.bones" in item.member_items
+    assert len(item._object_sections) == 3
+
+
 # ── Phase 3: No double JSON serialize ──────────────────────────────────
 
 def test_ai_service_returns_raw_string():

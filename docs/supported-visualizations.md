@@ -220,7 +220,7 @@ variant<int, Node> either = Node{3, &first};
 }
 ```
 
-- Canvas: Class header `a: Animal` → `[vtable] speak()` → `.name: string = Tom`
+- Canvas: Class header `a: Animal` 下方显示 `vptr -> Animal vtable` 分区；虚函数以 `slot[0] speak() -> Animal::speak()` 形式列出，再显示对象字段 `.name: string = Tom`。
 
 ### 7.2 继承 (base_classes)
 
@@ -235,20 +235,23 @@ variant<int, Node> either = Node{3, &first};
   "virtual_methods": ["speak()"],
   "members": [
     {"name": "_vptr", "type": "vtable*", "value": "&Dog::vtable"},
-    {"name": "name", "type": "string", "value": "Buddy"},
+    {"name": "Animal", "type": "Animal", "value": "{name=Buddy}"},
     {"name": "breed", "type": "string", "value": "Golden"}
   ]
 }
 ```
 
-- Canvas: 橙色 `⬆ extends Animal` 提示 + 所有成员（含继承的 name）
+- Canvas: 对象卡片内部按 C++ 对象布局分区：
+  - `base subobject: Animal` 区显示父类子对象，例如 `contains Animal = {name=Buddy}`，表达“派生类对象包含父类子对象”。
+  - `vptr -> Dog vtable` 区显示虚函数表入口，例如 `slot[0] speak() -> Dog::speak()`；若存在基类，会附加 `Animal* dispatch uses Dog vtable`，表达基类指针虚调用会经由派生类 vtable 动态派发。
+  - `derived fields: Dog` 区显示派生类新增字段，例如 `.breed: string = Golden`。
 
 ### 7.3 多态指针
 
 基类指针 `Animal* p` 指向派生类对象 `Dog`：
 - `p` 的 type 为 `"Animal*"`，value = target_address
 - Edge 指向的堆块 class_name 为 `"Dog"`，包含 Dog 全部成员
-- Canvas 通过观察指针箭头指向的实际 class_name 理解多态
+- Canvas 通过 `p -> Dog object` 的箭头、对象标题 `Dog`、内部 `base subobject: Animal` 和 `vptr -> Dog vtable` 分区共同表达多态：静态类型是 `Animal*`，动态对象和虚函数表属于 `Dog`。
 
 ### 7.4 对象成员指针
 
