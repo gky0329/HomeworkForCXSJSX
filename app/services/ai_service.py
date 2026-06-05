@@ -304,7 +304,25 @@ class AIService:
 
     @staticmethod
     def _normalize_json(text: str) -> str:
-        cleaned = text.strip()
+        cleaned = AIService.extract_json_text(text)
+        try:
+            json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            context = AIService._json_error_context(cleaned, e)
+            raise RuntimeError(
+                "AI returned invalid JSON. This usually means the model response was "
+                "truncated or mixed with non-JSON text. "
+                f"{e.msg} at line {e.lineno}, column {e.colno}.\n"
+                f"{context}\n\n---RAW RESPONSE---\n{text[:4000]}"
+            ) from e
+        return cleaned
+
+    @staticmethod
+    def extract_json_text(text: str) -> str:
+        cleaned = (text or "").strip().lstrip("\ufeff")
+        if not cleaned:
+            return cleaned
+
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
             if lines and lines[0].strip().startswith("```"):
@@ -313,5 +331,57 @@ class AIService:
                 lines = lines[:-1]
             cleaned = "\n".join(lines).strip()
 
-        json.loads(cleaned)
-        return cleaned
+        candidate = AIService._first_balanced_json(cleaned)
+        return candidate or cleaned
+
+    @staticmethod
+    def load_json_text(text: str):
+        normalized = AIService._normalize_json(text)
+        return json.loads(normalized)
+
+    @staticmethod
+    def _first_balanced_json(text: str) -> str:
+        start = -1
+        for i, ch in enumerate(text):
+            if ch in "{[":
+                start = i
+                break
+        if start < 0:
+            return ""
+
+        stack: list[str] = []
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+            elif ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]":
+                if not stack or ch != stack[-1]:
+                    return text[start:i + 1].strip()
+                stack.pop()
+                if not stack:
+                    return text[start:i + 1].strip()
+
+        return text[start:].strip()
+
+    @staticmethod
+    def _json_error_context(text: str, error: json.JSONDecodeError) -> str:
+        lines = text.splitlines()
+        if not lines:
+            return "No JSON content was returned."
+        line_index = max(0, min(error.lineno - 1, len(lines) - 1))
+        line = lines[line_index]
+        pointer = " " * max(error.colno - 1, 0) + "^"
+        return f"Near JSON line {error.lineno}:\n{line[:240]}\n{pointer[:240]}"

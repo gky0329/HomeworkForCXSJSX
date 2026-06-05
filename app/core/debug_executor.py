@@ -1,0 +1,4011 @@
+import logging
+import os
+import platform
+import re
+import shutil
+import subprocess
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from app.core.memory_model import (
+    ArrayElement,
+    ExecutionTrace,
+    HeapBlock,
+    LambdaCapture,
+    MemoryState,
+    PointerEdge,
+    StackFrame,
+    StructMember,
+    Variable,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class DebugExecutionError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class DebugBackendStatus:
+    id: str
+    label: str
+    available: bool
+    implemented: bool
+    detail: str
+
+
+@dataclass
+class _ClassInfo:
+    base_classes: list[str] = field(default_factory=list)
+    virtual_methods: list[str] = field(default_factory=list)
+    member_types: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class _PreparedSource:
+    source: str
+    original_lines: list[str]
+    line_map: dict[int, int]
+    heap_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
+    std_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
+    declared_types: dict[str, str] = field(default_factory=dict)
+    step_in_lines: set[int] = field(default_factory=set)
+    class_info: dict[str, _ClassInfo] = field(default_factory=dict)
+    source_path: str = ""
+
+
+@dataclass
+class _ParsedElement:
+    index: int
+    type: str
+    value: str
+    pointee_addr: str = ""
+    pointee_type: str = ""
+    pointee_value: str = ""
+    pointee_members: list["_ParsedMember"] = field(default_factory=list)
+
+
+@dataclass
+class _ParsedMember:
+    name: str
+    type: str
+    value: str
+    actual_addr: str = ""
+
+
+@dataclass
+class _ParsedVar:
+    actual_addr: str
+    type: str
+    name: str
+    value: str
+    pointee_addr: str = ""
+    pointee_type: str = ""
+    pointee_value: str = ""
+    pointee_elements: list[_ParsedElement] = field(default_factory=list)
+    pointee_members: list[_ParsedMember] = field(default_factory=list)
+    elements: list[_ParsedElement] = field(default_factory=list)
+    members: list[_ParsedMember] = field(default_factory=list)
+
+
+@dataclass
+class _ParsedFrame:
+    name: str
+    original_line: int
+    variables: list[_ParsedVar]
+
+
+@dataclass(frozen=True)
+class _FrameLocation:
+    file: str
+    line: int
+    function: str
+
+
+class DebugExecutor:
+    """Build and inspect C++ with native debug symbols before falling back to AI."""
+
+    LLDB_DWARF_BACKEND = "lldb-dwarf"
+    MSVC_PDB_BACKEND = "msvc-pdb"
+    MAX_STEPS = 120
+    COMPILE_TIMEOUT_SECONDS = 30
+    LLDB_TIMEOUT_SECONDS = 20
+    CDB_TIMEOUT_SECONDS = 25
+    VSWHERE_TIMEOUT_SECONDS = 5
+    NATIVE_COMPLEXITY_LINE_LIMIT = 180
+    NATIVE_COMPLEXITY_SCORE_LIMIT = 260
+
+    def __init__(self, preferred_backend: str | None = None, config_path: Path | None = None):
+        self._preferred_backend = preferred_backend
+        self._config_path = config_path
+        self.last_backend_id = ""
+        self.last_backend_label = ""
+
+    @staticmethod
+    def is_available(config_path: Path | None = None) -> bool:
+        return DebugExecutor.available_backend(config_path) is not None
+
+    @staticmethod
+    def can_run_code_locally(code: str, stdin_text: str = "", config_path: Path | None = None) -> bool:
+        if DebugExecutor.requires_stdin(code) and not stdin_text.strip():
+            return False
+        return DebugExecutor.is_available(config_path)
+
+    @staticmethod
+    def should_prefer_ai_for_complex_code(code: str) -> bool:
+        lines = [
+            line for line in code.splitlines()
+            if line.strip() and not line.strip().startswith("//")
+        ]
+        if len(lines) > DebugExecutor.NATIVE_COMPLEXITY_LINE_LIMIT:
+            return True
+
+        control_flow_count = len(re.findall(r"\b(?:for|while|do|switch)\b", code))
+        function_count = len(DebugExecutor._user_function_names(code.splitlines()))
+        class_count = len(DebugExecutor._class_names(code.splitlines()))
+        score = (
+            len(lines)
+            + control_flow_count * 12
+            + function_count * 8
+            + class_count * 6
+        )
+        return control_flow_count >= 3 and score > DebugExecutor.NATIVE_COMPLEXITY_SCORE_LIMIT
+
+    @staticmethod
+    def available_backend(config_path: Path | None = None) -> str | None:
+        for status in DebugExecutor.backend_status(config_path):
+            if status.available and status.implemented:
+                return status.id
+        return None
+
+    @staticmethod
+    def backend_status(config_path: Path | None = None) -> list[DebugBackendStatus]:
+        compiler = DebugExecutor._compiler()
+        lldb = shutil.which("lldb")
+        lldb_available = bool(lldb and compiler)
+        if lldb_available:
+            lldb_detail = f"Using {Path(lldb).name} with {Path(compiler).name} debug symbols"
+        else:
+            missing = []
+            if not lldb:
+                missing.append("lldb")
+            if not compiler:
+                missing.append("clang++/g++")
+            lldb_detail = "Missing " + ", ".join(missing)
+
+        lldb_status = DebugBackendStatus(
+            id=DebugExecutor.LLDB_DWARF_BACKEND,
+            label="LLDB / DWARF",
+            available=lldb_available,
+            implemented=True,
+            detail=lldb_detail,
+        )
+        return [lldb_status]
+
+    @staticmethod
+    def _compiler() -> str | None:
+        return shutil.which("clang++") or shutil.which("g++")
+
+    @staticmethod
+    def _msvc_tools() -> dict[str, str | None]:
+        compiler = shutil.which("cl") or shutil.which("cl.exe")
+        debugger = shutil.which("cdb") or shutil.which("cdb.exe")
+        vswhere = shutil.which("vswhere") or shutil.which("vswhere.exe")
+        vcvarsall = None
+
+        if platform.system() == "Windows":
+            vswhere = vswhere or DebugExecutor._default_vswhere()
+            install_dir = DebugExecutor._vs_installation_path(vswhere) if vswhere else None
+            if install_dir:
+                compiler = compiler or DebugExecutor._find_msvc_compiler(install_dir)
+                vcvarsall = DebugExecutor._existing_file(
+                    Path(install_dir) / "VC" / "Auxiliary" / "Build" / "vcvarsall.bat"
+                )
+            debugger = debugger or DebugExecutor._find_windows_cdb()
+
+        return {
+            "compiler": compiler,
+            "debugger": debugger,
+            "vswhere": vswhere,
+            "vcvarsall": vcvarsall,
+        }
+
+    @staticmethod
+    def _existing_file(path: Path | str) -> str | None:
+        candidate = Path(path)
+        try:
+            return str(candidate) if candidate.is_file() else None
+        except OSError:
+            return None
+
+    @staticmethod
+    def _default_vswhere() -> str | None:
+        roots = [
+            os.environ.get("ProgramFiles(x86)", ""),
+            os.environ.get("ProgramFiles", ""),
+        ]
+        for root in roots:
+            if not root:
+                continue
+            found = DebugExecutor._existing_file(
+                Path(root) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+            )
+            if found:
+                return found
+        return None
+
+    @staticmethod
+    def _vs_installation_path(vswhere: str) -> str | None:
+        try:
+            proc = subprocess.run(
+                [
+                    vswhere,
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationPath",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=DebugExecutor.VSWHERE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        path = (proc.stdout or "").strip().splitlines()
+        return path[0].strip() if path and path[0].strip() else None
+
+    @staticmethod
+    def _find_msvc_compiler(install_dir: str) -> str | None:
+        tools_root = Path(install_dir) / "VC" / "Tools" / "MSVC"
+        try:
+            versions = sorted(tools_root.iterdir(), key=lambda path: path.name, reverse=True)
+        except OSError:
+            return None
+        for version_dir in versions:
+            for rel in (
+                Path("bin") / "Hostx64" / "x64" / "cl.exe",
+                Path("bin") / "Hostx86" / "x64" / "cl.exe",
+                Path("bin") / "Hostx64" / "x86" / "cl.exe",
+            ):
+                found = DebugExecutor._existing_file(version_dir / rel)
+                if found:
+                    return found
+        return None
+
+    @staticmethod
+    def _find_windows_cdb() -> str | None:
+        roots = [
+            os.environ.get("WindowsSdkDir", ""),
+            os.environ.get("ProgramFiles(x86)", ""),
+            os.environ.get("ProgramFiles", ""),
+        ]
+        candidates: list[Path] = []
+        for root in roots:
+            if not root:
+                continue
+            base = Path(root)
+            if base.name.lower() == "10":
+                candidates.append(base / "Debuggers" / "x64" / "cdb.exe")
+            candidates.extend([
+                base / "Windows Kits" / "10" / "Debuggers" / "x64" / "cdb.exe",
+                base / "Windows Kits" / "10" / "Debuggers" / "x86" / "cdb.exe",
+            ])
+        for candidate in candidates:
+            found = DebugExecutor._existing_file(candidate)
+            if found:
+                return found
+        return None
+
+    def run_code(self, code: str, stdin_text: str = "") -> ExecutionTrace:
+        if self.requires_stdin(code) and not stdin_text.strip():
+            raise DebugExecutionError(
+                "Native debugger skipped code that reads from stdin; "
+                "paste sample input into Program Input (stdin) to run it locally"
+            )
+
+        backend = self._select_backend()
+        if backend == self.LLDB_DWARF_BACKEND:
+            return self._run_lldb_dwarf(code, stdin_text)
+        if backend == self.MSVC_PDB_BACKEND:
+            return self._run_msvc_pdb(code, stdin_text)
+        raise DebugExecutionError("No supported debugger/compiler found")
+
+    def _select_backend(self) -> str:
+        statuses = {status.id: status for status in self.backend_status(self._config_path)}
+        if self._preferred_backend:
+            status = statuses.get(self._preferred_backend)
+            if status is None:
+                raise DebugExecutionError(f"Unknown debugger backend: {self._preferred_backend}")
+            if not status.implemented:
+                raise DebugExecutionError(f"{status.label} backend is not implemented yet")
+            if not status.available:
+                raise DebugExecutionError(status.detail)
+            self.last_backend_id = status.id
+            self.last_backend_label = status.label
+            return status.id
+
+        backend = self.available_backend(self._config_path)
+        if backend is None:
+            details = "; ".join(status.detail for status in statuses.values())
+            raise DebugExecutionError(f"No supported debugger/compiler found: {details}")
+        status = statuses.get(backend)
+        self.last_backend_id = backend
+        self.last_backend_label = status.label if status is not None else backend
+        return backend
+
+    def _run_lldb_dwarf(self, code: str, stdin_text: str = "") -> ExecutionTrace:
+        prepared = self._prepare_source(code)
+        with tempfile.TemporaryDirectory(prefix="cxx_visualizer_debug_") as tmpdir:
+            tmp = Path(tmpdir)
+            src = tmp / "program.cpp"
+            binary = tmp / ("program.exe" if platform.system() == "Windows" else "program")
+            commands = tmp / "lldb_commands.txt"
+            input_file = tmp / "stdin.txt"
+            src.write_text(prepared.source, encoding="utf-8")
+            prepared.source_path = str(src)
+            if stdin_text.strip():
+                input_file.write_text(stdin_text, encoding="utf-8")
+
+            self._compile(src, binary)
+            commands.write_text(
+                self._lldb_script(
+                    prepared,
+                    input_path=input_file if stdin_text.strip() else None,
+                ),
+                encoding="utf-8",
+            )
+            output = self._run_lldb(binary, commands)
+
+        trace = self._parse_lldb_output(output, prepared)
+        if not trace.steps:
+            raise DebugExecutionError("Debugger produced no executable snapshots")
+        return trace
+
+    def _run_msvc_pdb(self, code: str, stdin_text: str = "") -> ExecutionTrace:
+        prepared = self._prepare_source(code)
+        with tempfile.TemporaryDirectory(prefix="cxx_visualizer_pdb_") as tmpdir:
+            tmp = Path(tmpdir)
+            src = tmp / "program.cpp"
+            binary = tmp / "program.exe"
+            pdb = tmp / "program.pdb"
+            commands = tmp / "cdb_commands.txt"
+            input_file = tmp / "stdin.txt"
+            src.write_text(prepared.source, encoding="utf-8")
+            prepared.source_path = str(src)
+            if stdin_text.strip():
+                input_file.write_text(stdin_text, encoding="utf-8")
+
+            self._compile_msvc(src, binary, pdb)
+            commands.write_text(self._cdb_script(prepared), encoding="utf-8")
+            output = self._run_cdb(
+                binary,
+                commands,
+                input_path=input_file if stdin_text.strip() else None,
+            )
+
+        trace = self._parse_cdb_output(output, prepared)
+        if not trace.steps:
+            raise DebugExecutionError("MSVC/PDB debugger produced no executable snapshots")
+        return trace
+
+    @staticmethod
+    def requires_stdin(code: str) -> bool:
+        patterns = (
+            r"\bcin\s*>>",
+            r"\bstd::cin\s*>>",
+            r"\bscanf\s*\(",
+            r"\bfscanf\s*\(",
+            r"\bgetline\s*\(\s*cin\s*,",
+            r"\bgetline\s*\(\s*std::cin\s*,",
+        )
+        return any(re.search(pattern, code) for pattern in patterns)
+
+    def _prepare_source(self, code: str) -> _PreparedSource:
+        original_lines = code.splitlines()
+        class_info = self._class_metadata(original_lines)
+        declared_types = self._declaration_types(original_lines)
+        if re.search(r"\bmain\s*\(", code):
+            line_map = {i: i for i in range(1, len(original_lines) + 1)}
+            return _PreparedSource(
+                source=code,
+                original_lines=original_lines,
+                line_map=line_map,
+                heap_arrays=self._heap_array_declarations(original_lines),
+                std_arrays=self._std_array_declarations(original_lines),
+                declared_types=declared_types,
+                step_in_lines=self._step_in_lines(original_lines, line_map),
+                class_info=class_info,
+            )
+
+        source, line_map = self._wrap_snippet_source(original_lines)
+        return _PreparedSource(
+            source=source,
+            original_lines=original_lines,
+            line_map=line_map,
+            heap_arrays=self._heap_array_declarations(original_lines),
+            std_arrays=self._std_array_declarations(original_lines),
+            declared_types=declared_types,
+            step_in_lines=self._step_in_lines(source.splitlines(), line_map),
+            class_info=class_info,
+        )
+
+    def _wrap_snippet_source(self, original_lines: list[str]) -> tuple[str, dict[int, int]]:
+        prefix = [
+            "#include <algorithm>",
+            "#include <cmath>",
+            "#include <cstdlib>",
+            "#include <iostream>",
+            "#include <map>",
+            "#include <memory>",
+            "#include <set>",
+            "#include <string>",
+            "#include <unordered_map>",
+            "#include <utility>",
+            "#include <vector>",
+            "using namespace std;",
+        ]
+        hoisted: list[tuple[int, str]] = []
+        body: list[tuple[int, str]] = []
+
+        idx = 0
+        while idx < len(original_lines):
+            line = original_lines[idx]
+            stripped = self._strip_line_comment(line).strip()
+            if self._is_hoisted_single_line(stripped):
+                hoisted.append((idx + 1, line))
+                idx += 1
+                continue
+
+            if self._starts_hoisted_block(original_lines, idx):
+                depth = 0
+                saw_brace = False
+                while idx < len(original_lines):
+                    block_line = original_lines[idx]
+                    hoisted.append((idx + 1, block_line))
+                    clean = self._strip_line_comment(block_line)
+                    depth += clean.count("{") - clean.count("}")
+                    saw_brace = saw_brace or "{" in clean
+                    idx += 1
+                    if saw_brace and depth <= 0:
+                        break
+                    if not saw_brace and clean.rstrip().endswith(";"):
+                        break
+                continue
+
+            body.append((idx + 1, line))
+            idx += 1
+
+        generated_lines: list[str] = []
+        line_map: dict[int, int] = {}
+
+        for line in prefix:
+            generated_lines.append(line)
+        for original_line, line in hoisted:
+            generated_lines.append(line)
+            line_map[len(generated_lines)] = original_line
+
+        generated_lines.append("int main() {")
+        for original_line, line in body:
+            generated_lines.append(f"  {line}")
+            line_map[len(generated_lines)] = original_line
+        suffix = ["  return 0;", "}"]
+        generated_lines.extend(suffix)
+        return "\n".join(generated_lines) + "\n", line_map
+
+    @staticmethod
+    def _is_hoisted_single_line(stripped: str) -> bool:
+        if not stripped:
+            return False
+        return (
+            stripped.startswith("#")
+            or stripped.startswith("using ")
+            or (
+                stripped.endswith(";")
+                and DebugExecutor._looks_like_function_signature(stripped[:-1].strip())
+            )
+        )
+
+    @staticmethod
+    def _starts_hoisted_block(lines: list[str], index: int) -> bool:
+        line = DebugExecutor._strip_line_comment(lines[index]).strip()
+        if not line:
+            return False
+        if re.match(r"^(?:template\s*<[^>]+>\s*)?(?:class|struct|enum|namespace)\b", line):
+            return True
+        if DebugExecutor._looks_like_function_definition_start(line):
+            return True
+        if (
+            index + 1 < len(lines)
+            and DebugExecutor._looks_like_function_signature(line)
+            and DebugExecutor._strip_line_comment(lines[index + 1]).strip().startswith("{")
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_function_definition_start(line: str) -> bool:
+        if "{" not in line or ";" in line.split("{", 1)[0]:
+            return False
+        return DebugExecutor._looks_like_function_signature(line.split("{", 1)[0].strip())
+
+    @staticmethod
+    def _looks_like_function_signature(line: str) -> bool:
+        if not line or "=" in line:
+            return False
+        if re.match(r"^(?:if|for|while|switch|catch)\b", line):
+            return False
+        pattern = re.compile(
+            r"^(?:template\s*<[^>]+>\s*)?"
+            r"(?:(?:inline|static|virtual|explicit|constexpr|friend)\s+)*"
+            r"(?:[A-Za-z_]\w*(?:::\w+)?|~?[A-Za-z_]\w*|operator\s*\S+)"
+            r"(?:<[^;{}()]*>)?[\s*&]+"
+            r"(?P<name>~?[A-Za-z_]\w*)\s*\((?P<params>[^;{}]*)\)\s*"
+            r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^:{]+)?\s*$"
+        )
+        match = pattern.match(line)
+        return bool(
+            match
+            and match.group("name") not in {"if", "for", "while", "switch", "catch"}
+            and DebugExecutor._looks_like_parameter_list(match.group("params"))
+        )
+
+    @staticmethod
+    def _looks_like_parameter_list(params: str) -> bool:
+        text = params.strip()
+        if not text or text == "void":
+            return True
+        if any(token in text for token in ('"', "'", "{", "}", "+", "/", "%")):
+            return False
+        if re.search(r"(?<![A-Za-z_])\d", text):
+            return False
+
+        for part in DebugExecutor._split_parameter_list(text):
+            clean = part.strip()
+            if not clean or "=" in clean:
+                return False
+            clean = re.sub(r"\b(?:const|volatile|constexpr|typename|class)\b", "", clean).strip()
+            clean = clean.lstrip("*&").strip()
+            first = clean.split(None, 1)[0] if clean else ""
+            first = first.lstrip("*&")
+            first = first.rstrip("*&")
+            if not first:
+                return False
+            if "<" in first or "::" in first:
+                continue
+            if first in {
+                "auto",
+                "bool",
+                "char",
+                "double",
+                "float",
+                "int",
+                "long",
+                "short",
+                "signed",
+                "size_t",
+                "string",
+                "unsigned",
+                "wchar_t",
+            }:
+                continue
+            if first[:1].isupper():
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _split_parameter_list(params: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        angle_depth = 0
+        paren_depth = 0
+        for ch in params:
+            if ch == "<":
+                angle_depth += 1
+            elif ch == ">" and angle_depth > 0:
+                angle_depth -= 1
+            elif ch == "(":
+                paren_depth += 1
+            elif ch == ")" and paren_depth > 0:
+                paren_depth -= 1
+            if ch == "," and angle_depth == 0 and paren_depth == 0:
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(ch)
+        parts.append("".join(current))
+        return parts
+
+    def _compile(self, src: Path, binary: Path):
+        compiler = self._compiler()
+        if compiler is None:
+            raise DebugExecutionError("No C++ compiler found")
+
+        try:
+            proc = subprocess.run(
+                [compiler, "-std=c++17", "-g", "-O0", str(src), "-o", str(binary)],
+                capture_output=True,
+                text=True,
+                timeout=self.COMPILE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise DebugExecutionError(
+                f"Compile timed out after {self.COMPILE_TIMEOUT_SECONDS} seconds"
+            ) from e
+        if proc.returncode != 0:
+            raise DebugExecutionError(f"Compile failed:\n{proc.stderr.strip()}")
+
+    def _compile_msvc(self, src: Path, binary: Path, pdb: Path):
+        tools = self._msvc_tools()
+        compiler = tools["compiler"]
+        if compiler is None:
+            raise DebugExecutionError("cl.exe not found. Run from a Visual Studio Developer Command Prompt.")
+
+        cmd = self._msvc_compile_args(compiler, src, binary, pdb)
+        run_cmd = self._msvc_shell_command(cmd, tools.get("vcvarsall"))
+        try:
+            proc = subprocess.run(
+                run_cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.COMPILE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise DebugExecutionError(
+                f"MSVC compile timed out after {self.COMPILE_TIMEOUT_SECONDS} seconds"
+            ) from e
+        if proc.returncode != 0:
+            output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            raise DebugExecutionError(f"MSVC compile failed:\n{output}")
+
+    @staticmethod
+    def _msvc_compile_args(compiler: str, src: Path, binary: Path, pdb: Path) -> list[str]:
+        return [
+            compiler,
+            "/nologo",
+            "/std:c++17",
+            "/EHsc",
+            "/Zi",
+            "/Od",
+            "/MDd",
+            f"/Fe:{binary}",
+            f"/Fd:{pdb}",
+            str(src),
+        ]
+
+    @staticmethod
+    def _msvc_shell_command(cmd: list[str], vcvarsall: str | None = None) -> list[str]:
+        if platform.system() != "Windows" or not vcvarsall:
+            return cmd
+        return [
+            "cmd",
+            "/s",
+            "/c",
+            f'call "{vcvarsall}" x64 >nul && {subprocess.list2cmdline(cmd)}',
+        ]
+
+    def _lldb_script(self, prepared: _PreparedSource, input_path: Path | None = None) -> str:
+        step_count = min(
+            self.MAX_STEPS,
+            max(20, len(prepared.original_lines) * 4 + 8),
+        )
+        commands = [
+            "settings set target.process.thread.step-avoid-regexp ^std::|^__",
+        ]
+        if input_path is not None:
+            commands.append(f"settings set target.input-path {input_path}")
+        commands.extend([
+            "breakpoint set --name main",
+            "run",
+        ])
+        for i in range(step_count):
+            commands.extend([
+                f'script print("__CXXMV_BEFORE__{i}")',
+                "frame info",
+                self._lldb_step_command(
+                    prepared.step_in_lines,
+                    Path(prepared.source_path).name or "program.cpp",
+                ),
+                f'script print("__CXXMV_AFTER__{i}")',
+                "frame info",
+                self._lldb_stack_snapshot_command(Path(prepared.source_path).name or "program.cpp"),
+            ])
+            for pointer_name, (_, count) in prepared.heap_arrays.items():
+                for index in range(count):
+                    commands.append(self._lldb_array_probe_command(i, pointer_name, index))
+            for array_name, (_, count) in prepared.std_arrays.items():
+                for index in range(count):
+                    element_type = prepared.std_arrays[array_name][0]
+                    commands.append(self._lldb_std_array_probe_command(i, array_name, index, element_type))
+        return "\n".join(commands) + "\n"
+
+    def _run_lldb(self, binary: Path, commands: Path) -> str:
+        try:
+            proc = subprocess.run(
+                ["lldb", "-b", "-s", str(commands), str(binary)],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=self.LLDB_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise DebugExecutionError(
+                f"LLDB timed out after {self.LLDB_TIMEOUT_SECONDS} seconds. Programs waiting for stdin "
+                "or very long simulations should use AI fallback or a future input-aware runner."
+            ) from e
+        output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        benign_exit_after_snapshots = (
+            "__CXXMV_BEFORE__" in output
+            and "Process " in output
+            and " exited with status" in output
+            and "Command requires a process" in output
+        )
+        if (
+            proc.returncode != 0
+            and "error: process exited" not in output
+            and not benign_exit_after_snapshots
+        ):
+            raise DebugExecutionError(f"LLDB failed:\n{output.strip()[:2000]}")
+        return output
+
+    def _cdb_script(self, prepared: _PreparedSource) -> str:
+        step_count = min(
+            self.MAX_STEPS,
+            max(20, len(prepared.original_lines) * 4 + 8),
+        )
+        commands = [
+            ".lines",
+            "l+t",
+            "bp main",
+            "g",
+        ]
+        for i in range(step_count):
+            commands.extend([
+                f".echo __CXXMV_BEFORE__{i}",
+                "kP 1",
+                "t",
+                f".echo __CXXMV_AFTER__{i}",
+                "kP 8",
+            ])
+            for frame_idx in range(8):
+                commands.extend([
+                    f".echo __CXXMV_FRAMEV__{frame_idx}",
+                    f".frame {frame_idx}",
+                    "dv /t /v",
+                    f".echo __CXXMV_FRAMEDX__{frame_idx}",
+                    "dx -r3 @$curframe.Locals",
+                ])
+        commands.append("q")
+        return "\n".join(commands) + "\n"
+
+    def _run_cdb(
+        self,
+        binary: Path,
+        commands: Path,
+        input_path: Path | None = None,
+    ) -> str:
+        debugger = self._msvc_tools()["debugger"]
+        if debugger is None:
+            raise DebugExecutionError("cdb.exe not found. Install Windows Debugging Tools.")
+
+        stdin_handle = None
+        try:
+            if input_path is not None:
+                stdin_handle = open(input_path, "r", encoding="utf-8")
+            proc = subprocess.run(
+                [debugger, "-lines", "-cf", str(commands), str(binary)],
+                capture_output=True,
+                text=True,
+                stdin=stdin_handle if stdin_handle is not None else subprocess.DEVNULL,
+                timeout=self.CDB_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise DebugExecutionError(
+                f"CDB timed out after {self.CDB_TIMEOUT_SECONDS} seconds"
+            ) from e
+        finally:
+            if stdin_handle is not None:
+                stdin_handle.close()
+
+        output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        benign_exit_after_snapshots = (
+            "__CXXMV_BEFORE__" in output
+            and ("exited with code" in output.lower() or "quit:" in output.lower())
+        )
+        if proc.returncode not in (0, 1) and not benign_exit_after_snapshots:
+            raise DebugExecutionError(f"CDB failed:\n{output.strip()[:2000]}")
+        return output
+
+    def _parse_cdb_output(self, output: str, prepared: _PreparedSource) -> ExecutionTrace:
+        marker_re = re.compile(r"^__CXXMV_BEFORE__(\d+)$", re.MULTILINE)
+        matches = list(marker_re.finditer(output))
+        states: list[MemoryState] = []
+        stack_addr_map: dict[str, str] = {}
+        stack_name_addr_map: dict[str, str] = {}
+        heap_addr_map: dict[str, str] = {}
+        pointer_targets: dict[str, str] = {}
+        heap_values: dict[str, tuple[str, str]] = {}
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]] = {}
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]] = {}
+        allocated_heap: set[str] = set()
+        freed_heap: set[str] = set()
+        declarations = self._declaration_lines(prepared.original_lines)
+
+        for idx, match in enumerate(matches):
+            chunk_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(output)
+            chunk = output[match.end():chunk_end]
+            after_match = re.search(rf"^__CXXMV_AFTER__{match.group(1)}$", chunk, re.MULTILINE)
+            if after_match is None:
+                continue
+
+            before_chunk = chunk[:after_match.start()]
+            after_chunk = chunk[after_match.end():]
+            location = self._cdb_frame_location(before_chunk, prepared)
+            if location is None:
+                continue
+            after_location = self._cdb_frame_location(after_chunk, prepared)
+            if self._is_step_in_transition(location, after_location, prepared):
+                continue
+            original_line = prepared.line_map.get(location.line)
+            if original_line is None:
+                continue
+            source_code = self._source_line(prepared.original_lines, original_line)
+            if not source_code:
+                continue
+
+            delete_name = self._deleted_pointer_name(source_code)
+            new_name = self._new_pointer_name(source_code)
+            parsed_frames = self._parse_cdb_stack_snapshots(
+                after_chunk,
+                prepared,
+                declarations,
+                fallback_location=location,
+                fallback_original_line=original_line,
+            )
+            parsed_vars = [var for frame in parsed_frames for var in frame.variables]
+            for var in parsed_vars:
+                if var.pointee_addr:
+                    pointer_targets[var.name] = var.pointee_addr
+                    skip_heap_refresh = var.name == delete_name or var.pointee_addr in freed_heap
+                    if var.pointee_value and not skip_heap_refresh:
+                        heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
+                    if var.pointee_members and not skip_heap_refresh:
+                        pointee_type = self._dynamic_object_type_from_members(
+                            var.pointee_type or self._pointee_type(var.type),
+                            var.pointee_members,
+                            prepared.class_info,
+                        )
+                        heap_object_values[var.pointee_addr] = (
+                            pointee_type,
+                            self._typed_members_for_owner(var.pointee_members, pointee_type, prepared.class_info),
+                        )
+                    if var.pointee_elements and not skip_heap_refresh:
+                        element_type = var.pointee_type or self._pointee_type(var.type)
+                        heap_array_values[var.pointee_addr] = (
+                            element_type,
+                            var.pointee_elements,
+                        )
+                        heap_values[var.pointee_addr] = (
+                            f"{element_type}[]",
+                            self._format_elements(var.pointee_elements),
+                        )
+                    if new_name and var.name == new_name:
+                        allocated_heap.add(var.pointee_addr)
+            self._record_element_pointee_values(
+                parsed_vars,
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                prepared.class_info,
+            )
+
+            if delete_name and delete_name in pointer_targets:
+                freed_heap.add(pointer_targets[delete_name])
+
+            states.append(self._build_state(
+                original_line=original_line,
+                source_code=source_code,
+                parsed_frames=parsed_frames,
+                stack_addr_map=stack_addr_map,
+                stack_name_addr_map=stack_name_addr_map,
+                heap_addr_map=heap_addr_map,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                allocated_heap=allocated_heap,
+                freed_heap=freed_heap,
+                class_info=prepared.class_info,
+                declared_types=prepared.declared_types,
+            ))
+
+        return ExecutionTrace(steps=states)
+
+    def _parse_lldb_output(self, output: str, prepared: _PreparedSource) -> ExecutionTrace:
+        marker_re = re.compile(r"^__CXXMV_BEFORE__(\d+)$", re.MULTILINE)
+        matches = list(marker_re.finditer(output))
+        states: list[MemoryState] = []
+        stack_addr_map: dict[str, str] = {}
+        stack_name_addr_map: dict[str, str] = {}
+        heap_addr_map: dict[str, str] = {}
+        pointer_targets: dict[str, str] = {}
+        heap_values: dict[str, tuple[str, str]] = {}
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]] = {}
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]] = {}
+        allocated_heap: set[str] = set()
+        freed_heap: set[str] = set()
+        declarations = self._declaration_lines(prepared.original_lines)
+
+        for idx, match in enumerate(matches):
+            chunk_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(output)
+            chunk = output[match.end():chunk_end]
+            after_match = re.search(rf"^__CXXMV_AFTER__{match.group(1)}$", chunk, re.MULTILINE)
+            if after_match is None:
+                continue
+
+            before_chunk = chunk[:after_match.start()]
+            after_chunk = chunk[after_match.end():]
+            location = self._frame_location(before_chunk)
+            if location is None:
+                continue
+            if prepared.source_path and Path(location.file).name != Path(prepared.source_path).name:
+                continue
+
+            after_location = self._frame_location(after_chunk)
+            if self._is_step_in_transition(location, after_location, prepared):
+                continue
+
+            original_line = prepared.line_map.get(location.line)
+            if original_line is None:
+                continue
+            source_code = self._source_line(prepared.original_lines, original_line)
+            if not source_code:
+                continue
+
+            delete_name = self._deleted_pointer_name(source_code)
+            new_name = self._new_pointer_name(source_code)
+            parsed_frames = self._parse_stack_snapshots(
+                after_chunk,
+                prepared,
+                declarations,
+                fallback_location=location,
+                fallback_original_line=original_line,
+            )
+            parsed_vars = [var for frame in parsed_frames for var in frame.variables]
+            array_exprs = self._parse_array_expressions(after_chunk)
+            self._apply_std_array_expression_elements(parsed_vars, array_exprs)
+            for var in parsed_vars:
+                if var.pointee_addr:
+                    pointer_targets[var.name] = var.pointee_addr
+                    skip_heap_refresh = var.name == delete_name or var.pointee_addr in freed_heap
+                    if var.pointee_value and not skip_heap_refresh:
+                        heap_values[var.pointee_addr] = (var.pointee_type, var.pointee_value)
+                    if var.pointee_members and not skip_heap_refresh:
+                        pointee_type = self._dynamic_object_type_from_members(
+                            var.pointee_type or self._pointee_type(var.type),
+                            var.pointee_members,
+                            prepared.class_info,
+                        )
+                        heap_object_values[var.pointee_addr] = (
+                            pointee_type,
+                            self._typed_members_for_owner(var.pointee_members, pointee_type, prepared.class_info),
+                        )
+                    if var.name in array_exprs and not skip_heap_refresh:
+                        element_type = prepared.heap_arrays.get(var.name, (self._pointee_type(var.type), 0))[0]
+                        heap_array_values[var.pointee_addr] = (element_type, array_exprs[var.name])
+                        heap_values[var.pointee_addr] = (
+                            f"{element_type}[]",
+                            self._format_elements(array_exprs[var.name]),
+                        )
+                    if new_name and var.name == new_name:
+                        allocated_heap.add(var.pointee_addr)
+            self._record_element_pointee_values(
+                parsed_vars,
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                prepared.class_info,
+            )
+
+            if delete_name and delete_name in pointer_targets:
+                freed_heap.add(pointer_targets[delete_name])
+
+            state = self._build_state(
+                original_line=original_line,
+                source_code=source_code,
+                parsed_frames=parsed_frames,
+                stack_addr_map=stack_addr_map,
+                stack_name_addr_map=stack_name_addr_map,
+                heap_addr_map=heap_addr_map,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                allocated_heap=allocated_heap,
+                freed_heap=freed_heap,
+                class_info=prepared.class_info,
+                declared_types=prepared.declared_types,
+            )
+            states.append(state)
+
+        return ExecutionTrace(steps=states)
+
+    def _build_state(
+        self,
+        original_line: int,
+        source_code: str,
+        parsed_frames: list[_ParsedFrame],
+        stack_addr_map: dict[str, str],
+        stack_name_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        heap_values: dict[str, tuple[str, str]],
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        allocated_heap: set[str],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
+        declared_types: dict[str, str] | None = None,
+    ) -> MemoryState:
+        class_info = class_info or {}
+        declared_types = declared_types or {}
+        actual_stack_lookup: dict[str, str] = {}
+        frame_variables: list[tuple[str, list[Variable]]] = []
+        pointer_edges: list[PointerEdge] = []
+        heap_blocks_by_actual: dict[str, HeapBlock] = {}
+
+        for parsed_frame in parsed_frames:
+            for parsed in parsed_frame.variables:
+                logical_key = f"{parsed_frame.name}:{parsed.name}"
+                if parsed.actual_addr not in stack_addr_map:
+                    if logical_key in stack_name_addr_map:
+                        stack_addr_map[parsed.actual_addr] = stack_name_addr_map[logical_key]
+                    else:
+                        stack_name_addr_map[logical_key] = self._sim_addr(
+                            stack_addr_map,
+                            parsed.actual_addr,
+                            "S",
+                        )
+                actual_stack_lookup[parsed.actual_addr] = stack_addr_map[parsed.actual_addr]
+
+        for parsed_frame in parsed_frames:
+            variables: list[Variable] = []
+            frame_vars_by_name = {var.name: var for var in parsed_frame.variables}
+            for parsed in parsed_frame.variables:
+                stack_addr = stack_addr_map[parsed.actual_addr]
+                value = parsed.value
+                display_type = self._display_type_for_parsed(
+                    parsed.type,
+                    parsed.name,
+                    declared_types,
+                    class_info,
+                )
+                is_reference = self._is_reference_type(display_type)
+                is_pointer = self._is_pointer_type(display_type) or (self._is_hex_addr(value) and not is_reference)
+                is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
+                elements = (
+                    parsed.elements
+                    or self._wrapped_std_array_elements(parsed)
+                    or self._wrapped_container_adapter_elements(parsed)
+                )
+                element_models = self._array_elements_from_parsed(
+                    elements,
+                    owner_address=stack_addr,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
+                    class_info=class_info,
+                )
+                member_models = [] if is_function_object or elements else self._struct_members_from_parsed(
+                    parsed.members,
+                    owner_type=parsed.type,
+                    owner_address=stack_addr,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
+                    class_info=class_info,
+                )
+                if is_pointer and self._is_hex_addr(value) and not self._is_null(value):
+                    value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+                elif is_reference and self._is_hex_addr(value) and not self._is_null(value):
+                    value = self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+                elif (is_pointer or is_reference) and self._is_null(value):
+                    value = "nullptr"
+                elif self._is_optional_type(parsed.type) and self._is_optional_empty_summary(value):
+                    value = "empty"
+                elif element_models:
+                    value = self._format_array_element_models(element_models)
+                elif member_models:
+                    value = self._format_struct_members(member_models)
+                captures = [
+                    LambdaCapture(
+                        name=member.name,
+                        type=self._clean_type(member.type),
+                        value=(
+                            stack_addr_map[frame_vars_by_name[member.name].actual_addr]
+                            if "&" in member.type and member.name in frame_vars_by_name
+                            else self._target_sim_addr(member.value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+                            if "&" in member.type and self._is_hex_addr(member.value) and not self._is_null(member.value)
+                            else self._clean_value(member.value)
+                        ),
+                        by_ref="&" in member.type,
+                    )
+                    for member in parsed.members
+                ] if is_function_object else []
+                object_class = self._object_class_name(parsed.type)
+                object_info = class_info.get(object_class, _ClassInfo())
+                variables.append(Variable(
+                    name=parsed.name,
+                    type="lambda" if is_function_object else display_type,
+                    value="<lambda>" if is_function_object else value,
+                    address=stack_addr,
+                    is_pointer=is_pointer,
+                    is_array=bool(element_models),
+                    element_count=len(element_models) or None,
+                    elements=element_models,
+                    members=member_models,
+                    is_object=bool(member_models),
+                    class_name=object_class if member_models else "",
+                    base_classes=object_info.base_classes if member_models else [],
+                    virtual_methods=object_info.virtual_methods if member_models else [],
+                    is_function_object=is_function_object,
+                    captures=captures,
+                    is_reference=is_reference,
+                ))
+            frame_variables.append((parsed_frame.name, variables))
+
+        parsed_vars = [var for parsed_frame in parsed_frames for var in parsed_frame.variables]
+        shared_owner_targets = {
+            var.pointee_addr
+            for var in parsed_vars
+            if var.pointee_addr
+            and not self._is_null(var.pointee_addr)
+            and self._is_shared_pointer_type(var.type)
+        }
+        expired_weak_targets = {
+            var.pointee_addr
+            for var in parsed_vars
+            if var.pointee_addr
+            and not self._is_null(var.pointee_addr)
+            and self._is_weak_pointer_type(var.type)
+            and var.pointee_addr not in shared_owner_targets
+        }
+        for parsed in parsed_vars:
+            if not parsed.pointee_addr or self._is_null(parsed.pointee_addr):
+                continue
+            if self._is_reference_type(parsed.type):
+                continue
+            source_addr = stack_addr_map.get(parsed.actual_addr)
+            if source_addr is None:
+                continue
+            target_addr = self._target_sim_addr(
+                parsed.pointee_addr,
+                actual_stack_lookup,
+                stack_addr_map,
+                heap_addr_map,
+            )
+            is_dead_stack_target = (
+                parsed.pointee_addr in stack_addr_map
+                and parsed.pointee_addr not in actual_stack_lookup
+            )
+            is_dangling = parsed.pointee_addr in freed_heap or parsed.pointee_addr in expired_weak_targets or is_dead_stack_target
+            pointer_edges.append(PointerEdge(
+                source_address=source_addr,
+                target_address=target_addr,
+                is_dangling=is_dangling,
+            ))
+
+            if parsed.pointee_addr not in actual_stack_lookup and parsed.pointee_addr not in stack_addr_map:
+                heap_blocks_by_actual[parsed.pointee_addr] = self._heap_block_from_history(
+                    actual_addr=parsed.pointee_addr,
+                    target_addr=target_addr,
+                    default_type=self._pointee_type(parsed.type),
+                    default_value=parsed.pointee_value,
+                    is_freed=is_dangling,
+                    heap_values=heap_values,
+                    heap_array_values=heap_array_values,
+                    heap_object_values=heap_object_values,
+                    class_info=class_info,
+                    actual_stack_lookup=actual_stack_lookup,
+                    stack_addr_map=stack_addr_map,
+                    heap_addr_map=heap_addr_map,
+                )
+
+        for actual_addr in sorted(allocated_heap):
+            if actual_addr in heap_blocks_by_actual or actual_addr in freed_heap:
+                continue
+            target_addr = self._sim_addr(heap_addr_map, actual_addr, "H")
+            heap_blocks_by_actual[actual_addr] = self._heap_block_from_history(
+                actual_addr=actual_addr,
+                target_addr=target_addr,
+                default_type="unknown",
+                default_value="",
+                is_freed=False,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                class_info=class_info,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+            )
+
+        freed_target_addrs = {
+            self._target_sim_addr(addr, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            for addr in (freed_heap | expired_weak_targets)
+        }
+        dead_stack_target_addrs = set(stack_addr_map.values()) - set(actual_stack_lookup.values())
+        dangling_target_addrs = freed_target_addrs | dead_stack_target_addrs
+        edge_keys = {(edge.source_address, edge.target_address) for edge in pointer_edges}
+        for _, variables in frame_variables:
+            for var in variables:
+                self._append_member_pointer_edges(var.members, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+                self._append_array_pointer_edges(var.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+        self._ensure_heap_blocks_for_edge_targets(
+            pointer_edges,
+            heap_blocks_by_actual,
+            heap_addr_map,
+            heap_values,
+            heap_array_values,
+            heap_object_values,
+            class_info,
+            actual_stack_lookup,
+            stack_addr_map,
+            dangling_target_addrs,
+        )
+        for _ in range(32):
+            before_blocks = len(heap_blocks_by_actual)
+            before_edges = len(pointer_edges)
+            for block in list(heap_blocks_by_actual.values()):
+                self._append_member_pointer_edges(block.members, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+                self._append_array_pointer_edges(block.elements, pointer_edges, edge_keys, dangling_target_addrs, class_info)
+            added_blocks = self._ensure_heap_blocks_for_edge_targets(
+                pointer_edges,
+                heap_blocks_by_actual,
+                heap_addr_map,
+                heap_values,
+                heap_array_values,
+                heap_object_values,
+                class_info,
+                actual_stack_lookup,
+                stack_addr_map,
+                dangling_target_addrs,
+            )
+            if not added_blocks and len(heap_blocks_by_actual) == before_blocks and len(pointer_edges) == before_edges:
+                break
+
+        return MemoryState(
+            line_number=original_line,
+            source_code=source_code,
+            stack=[
+                StackFrame(frame_name=frame_name or "main", variables=variables)
+                for frame_name, variables in frame_variables
+            ],
+            heap=list(heap_blocks_by_actual.values()),
+            edges=pointer_edges,
+        )
+
+    def _record_element_pointee_values(
+        self,
+        parsed_vars: list[_ParsedVar],
+        heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
+    ):
+        for var in parsed_vars:
+            self._record_member_pointee_values(
+                [*var.members, *var.pointee_members],
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                class_info,
+            )
+            elements = (
+                var.elements
+                or self._wrapped_std_array_elements(var)
+                or self._wrapped_container_adapter_elements(var)
+            )
+            all_elements = [*elements, *var.pointee_elements]
+            for element in [*elements, *var.pointee_elements]:
+                if (
+                    not element.pointee_addr
+                    or self._is_null(element.pointee_addr)
+                    or element.pointee_addr in freed_heap
+                ):
+                    continue
+                pointee_type = element.pointee_type or self._pointee_type(element.type)
+                if element.pointee_members:
+                    pointee_type = self._dynamic_object_type_from_members(
+                        pointee_type,
+                        element.pointee_members,
+                        class_info,
+                    )
+                    heap_object_values[element.pointee_addr] = (
+                        pointee_type,
+                        self._typed_members_for_owner(element.pointee_members, pointee_type, class_info),
+                    )
+                elif element.pointee_value:
+                    heap_values[element.pointee_addr] = (
+                        pointee_type,
+                        element.pointee_value,
+                    )
+                if element.pointee_members:
+                    self._record_member_pointee_values(
+                        element.pointee_members,
+                        heap_values,
+                        heap_object_values,
+                        freed_heap,
+                        class_info,
+                    )
+            self._record_structured_element_pointee_values(
+                all_elements,
+                heap_values,
+                heap_object_values,
+                freed_heap,
+                class_info,
+            )
+
+    def _record_member_pointee_values(
+        self,
+        members: list[_ParsedMember],
+        heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
+    ):
+        for member in members:
+            member_type = self._clean_type(member.type)
+            if not self._is_pointer_like_type(member_type):
+                continue
+            value = self._clean_value(member.value)
+            if self._is_cdb_addr(value):
+                value = self._normalize_cdb_addr(value)
+            elif self._is_hex_addr(value):
+                value = self._normalize_actual_addr(value)
+            if not value or self._is_null(value) or value in freed_heap:
+                continue
+            payload = self._structured_payload(member.value)
+            if not payload:
+                continue
+            pointee_type = self._pointee_type(member_type)
+            pointee_members = self._parse_structured_members(payload)
+            if pointee_members:
+                pointee_type = self._dynamic_object_type_from_members(
+                    pointee_type,
+                    pointee_members,
+                    class_info,
+                )
+                heap_object_values[value] = (
+                    pointee_type,
+                    self._typed_members_for_owner(pointee_members, pointee_type, class_info),
+                )
+            else:
+                heap_values[value] = (
+                    pointee_type,
+                    self._clean_value(payload),
+                )
+
+    def _record_structured_element_pointee_values(
+        self,
+        elements: list[_ParsedElement],
+        heap_values: dict[str, tuple[str, str]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        freed_heap: set[str],
+        class_info: dict[str, _ClassInfo],
+    ):
+        for element in elements:
+            member_types = self._structured_array_element_member_types(element.type, class_info)
+            if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+                continue
+            payload = self._structured_payload(element.value)
+            if not payload:
+                continue
+            for item in self._split_structured_items(payload):
+                match = re.match(r"^(?:\.|this->)?(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<value>.*)$", item)
+                if not match:
+                    continue
+                member_type = member_types.get(match.group("name"), "")
+                if not self._is_pointer_like_type(member_type):
+                    continue
+                raw_value = match.group("value")
+                value = self._clean_value(raw_value)
+                if self._is_cdb_addr(value):
+                    value = self._normalize_cdb_addr(value)
+                elif self._is_hex_addr(value):
+                    value = self._normalize_actual_addr(value)
+                if not value or self._is_null(value) or value in freed_heap:
+                    continue
+                pointee_type = self._pointee_type(member_type)
+                pointee_payload = self._structured_payload(raw_value)
+                if not pointee_payload:
+                    continue
+                pointee_members = self._parse_structured_members(pointee_payload)
+                if pointee_members:
+                    pointee_type = self._dynamic_object_type_from_members(
+                        pointee_type,
+                        pointee_members,
+                        class_info,
+                    )
+                    heap_object_values[value] = (
+                        pointee_type,
+                        self._typed_members_for_owner(pointee_members, pointee_type, class_info),
+                    )
+                else:
+                    heap_values[value] = (
+                        pointee_type,
+                        self._clean_value(pointee_payload),
+                    )
+
+    @staticmethod
+    def _typed_members_for_owner(
+        members: list[_ParsedMember],
+        owner_type: str,
+        class_info: dict[str, _ClassInfo],
+    ) -> list[_ParsedMember]:
+        object_class = DebugExecutor._object_class_name(owner_type)
+        owner_info = class_info.get(object_class, _ClassInfo())
+        declared_types = owner_info.member_types
+        typed_members: list[_ParsedMember] = []
+        for member in members:
+            member_name = DebugExecutor._semantic_member_name(owner_type, member)
+            typed_members.append(_ParsedMember(
+                name=member.name,
+                type=(
+                    member.type
+                    or declared_types.get(member_name, "")
+                    or declared_types.get(member.name, "")
+                    or (member.name if member.name in owner_info.base_classes else "")
+                ),
+                value=member.value,
+                actual_addr=member.actual_addr,
+            ))
+        return typed_members
+
+    @staticmethod
+    def _dynamic_object_type_from_members(
+        static_type: str,
+        members: list[_ParsedMember],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        static_class = DebugExecutor._object_class_name(static_type)
+        if not static_class or static_class not in class_info:
+            return static_type
+
+        member_names = {
+            DebugExecutor._semantic_member_name(static_type, member)
+            for member in members
+        }
+
+        def inherits(candidate: str, target: str, seen: set[str] | None = None) -> bool:
+            seen = seen or set()
+            if candidate in seen:
+                return False
+            seen.add(candidate)
+            bases = class_info.get(candidate, _ClassInfo()).base_classes
+            if target in bases:
+                return True
+            return any(inherits(base, target, seen) for base in bases)
+
+        best_class = static_class
+        best_score = 0
+        for candidate, info in class_info.items():
+            if candidate == static_class or not inherits(candidate, static_class):
+                continue
+            score = 0
+            if static_class in member_names:
+                score += 2
+            score += len(set(info.member_types) & member_names)
+            score += len(set(info.base_classes) & member_names)
+            if score > best_score:
+                best_class = candidate
+                best_score = score
+
+        return best_class if best_score > 0 else static_type
+
+    def _apply_std_array_expression_elements(
+        self,
+        parsed_vars: list[_ParsedVar],
+        array_exprs: dict[str, list[_ParsedElement]],
+    ):
+        if not array_exprs:
+            return
+        for var in parsed_vars:
+            elements = array_exprs.get(var.name)
+            if not elements or not self._is_std_array_type(var.type):
+                continue
+            wrapped_elements = self._wrapped_std_array_elements(var)
+            if wrapped_elements:
+                continue
+            if not any(element.value for element in elements):
+                continue
+            var.elements = elements
+            var.members = []
+
+    def _ensure_heap_blocks_for_edge_targets(
+        self,
+        pointer_edges: list[PointerEdge],
+        heap_blocks_by_actual: dict[str, HeapBlock],
+        heap_addr_map: dict[str, str],
+        heap_values: dict[str, tuple[str, str]],
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        class_info: dict[str, _ClassInfo],
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        dangling_target_addrs: set[str],
+    ) -> bool:
+        sim_to_actual = {sim: actual for actual, sim in heap_addr_map.items()}
+        existing_targets = {block.address for block in heap_blocks_by_actual.values()}
+        added = False
+        for edge in pointer_edges:
+            target_addr = edge.target_address
+            if not target_addr.startswith("0xH") or target_addr in existing_targets:
+                continue
+            actual_addr = sim_to_actual.get(target_addr)
+            if not actual_addr:
+                continue
+            heap_blocks_by_actual[actual_addr] = self._heap_block_from_history(
+                actual_addr=actual_addr,
+                target_addr=target_addr,
+                default_type="unknown",
+                default_value="",
+                is_freed=edge.is_dangling or target_addr in dangling_target_addrs,
+                heap_values=heap_values,
+                heap_array_values=heap_array_values,
+                heap_object_values=heap_object_values,
+                class_info=class_info,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+            )
+            existing_targets.add(target_addr)
+            added = True
+        return added
+
+    @staticmethod
+    def _frame_line(text: str) -> int | None:
+        location = DebugExecutor._frame_location(text)
+        return location.line if location else None
+
+    @staticmethod
+    def _frame_location(text: str) -> _FrameLocation | None:
+        matches = re.findall(
+            r"frame #0: .*?`(?P<function>.*?) at (?P<file>.*):(?P<line>\d+):\d+",
+            text,
+        )
+        if not matches:
+            return None
+        function, file_path, line = matches[0]
+        return _FrameLocation(file=file_path.strip(), line=int(line), function=function.strip())
+
+    @staticmethod
+    def _is_step_in_transition(
+        before: _FrameLocation,
+        after: _FrameLocation | None,
+        prepared: _PreparedSource,
+    ) -> bool:
+        if after is None:
+            return False
+        if prepared.source_path and Path(after.file).name != Path(prepared.source_path).name:
+            return True
+        return (
+            DebugExecutor._clean_frame_name(before.function)
+            != DebugExecutor._clean_frame_name(after.function)
+        )
+
+    def _parse_stack_snapshots(
+        self,
+        text: str,
+        prepared: _PreparedSource,
+        declarations: dict[str, int],
+        fallback_location: _FrameLocation,
+        fallback_original_line: int,
+    ) -> list[_ParsedFrame]:
+        frame_re = re.compile(
+            r"^__CXXMV_FRAME__(?P<index>\d+)__(?P<line>\d+)__(?P<name>.*)$",
+            re.MULTILINE,
+        )
+        matches = list(frame_re.finditer(text))
+        if not matches:
+            variables = [
+                var for var in self._parse_variables(text)
+                if declarations.get(var.name, 0) <= fallback_original_line
+            ]
+            return [_ParsedFrame(
+                name=self._clean_frame_name(fallback_location.function),
+                original_line=fallback_original_line,
+                variables=variables,
+            )]
+
+        frames: list[_ParsedFrame] = []
+        seen_names: dict[str, int] = {}
+        for idx, match in enumerate(matches):
+            chunk_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+            frame_chunk = text[match.end():chunk_end]
+            generated_line = int(match.group("line"))
+            frame_index = int(match.group("index"))
+            raw_name = match.group("name").strip()
+            frame_name = self._clean_frame_name(raw_name)
+            fallback_name = self._clean_frame_name(fallback_location.function)
+            same_top_frame = frame_index == 0 and frame_name == fallback_name
+            original_line = prepared.line_map.get(generated_line)
+            if original_line is None:
+                if not same_top_frame:
+                    continue
+                original_line = fallback_original_line
+            if same_top_frame:
+                declaration_cutoff = fallback_original_line
+            elif generated_line in prepared.step_in_lines:
+                declaration_cutoff = max(0, original_line - 1)
+            else:
+                declaration_cutoff = original_line
+            seen_names[frame_name] = seen_names.get(frame_name, 0) + 1
+            if seen_names[frame_name] > 1:
+                frame_name = f"{frame_name}({seen_names[frame_name]})"
+            variables = [
+                var for var in self._parse_variables(frame_chunk)
+                if declarations.get(var.name, 0) <= declaration_cutoff
+            ]
+            frames.append(_ParsedFrame(
+                name=frame_name,
+                original_line=original_line,
+                variables=variables,
+            ))
+
+        return frames or [_ParsedFrame(
+            name=self._clean_frame_name(fallback_location.function),
+            original_line=fallback_original_line,
+            variables=[],
+        )]
+
+    def _parse_cdb_stack_snapshots(
+        self,
+        text: str,
+        prepared: _PreparedSource,
+        declarations: dict[str, int],
+        fallback_location: _FrameLocation,
+        fallback_original_line: int,
+    ) -> list[_ParsedFrame]:
+        locations = self._cdb_stack_locations(text, prepared)
+        marker_re = re.compile(r"^__CXXMV_FRAMEV__(?P<index>\d+)$", re.MULTILINE)
+        matches = list(marker_re.finditer(text))
+        if not matches:
+            variables = [
+                var for var in self._parse_cdb_frame_variables(text)
+                if declarations.get(var.name, 0) <= fallback_original_line
+            ]
+            return [_ParsedFrame(
+                name=self._clean_frame_name(fallback_location.function),
+                original_line=fallback_original_line,
+                variables=variables,
+            )]
+
+        frames: list[_ParsedFrame] = []
+        seen_names: dict[str, int] = {}
+        for idx, match in enumerate(matches):
+            frame_index = int(match.group("index"))
+            location = locations.get(frame_index)
+            if location is None:
+                continue
+            chunk_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+            frame_chunk = text[match.end():chunk_end]
+
+            frame_name = self._clean_frame_name(location.function)
+            fallback_name = self._clean_frame_name(fallback_location.function)
+            same_top_frame = frame_index == 0 and frame_name == fallback_name
+            original_line = prepared.line_map.get(location.line)
+            if original_line is None:
+                if not same_top_frame:
+                    continue
+                original_line = fallback_original_line
+            if same_top_frame:
+                declaration_cutoff = fallback_original_line
+            elif location.line in prepared.step_in_lines:
+                declaration_cutoff = max(0, original_line - 1)
+            else:
+                declaration_cutoff = original_line
+
+            seen_names[frame_name] = seen_names.get(frame_name, 0) + 1
+            if seen_names[frame_name] > 1:
+                frame_name = f"{frame_name}({seen_names[frame_name]})"
+            variables = [
+                var for var in self._parse_cdb_frame_variables(frame_chunk)
+                if declarations.get(var.name, 0) <= declaration_cutoff
+            ]
+            frames.append(_ParsedFrame(
+                name=frame_name,
+                original_line=original_line,
+                variables=variables,
+            ))
+
+        return frames or [_ParsedFrame(
+            name=self._clean_frame_name(fallback_location.function),
+            original_line=fallback_original_line,
+            variables=[],
+        )]
+
+    @classmethod
+    def _cdb_frame_location(
+        cls,
+        text: str,
+        prepared: _PreparedSource | None = None,
+    ) -> _FrameLocation | None:
+        locations = cls._cdb_stack_locations(text, prepared)
+        if not locations:
+            return None
+        return locations.get(0) or locations[min(locations)]
+
+    @staticmethod
+    def _cdb_stack_locations(
+        text: str,
+        prepared: _PreparedSource | None = None,
+    ) -> dict[int, _FrameLocation]:
+        frame_re = re.compile(
+            r"^\s*(?P<index>[0-9a-fA-F]+)\s+"
+            r"[0-9a-fA-F`]+\s+"
+            r"(?P<symbol>.+?)\s+"
+            r"\[(?P<file>.+?)\s*@\s*(?P<line>\d+)\]",
+            re.MULTILINE,
+        )
+        locations: dict[int, _FrameLocation] = {}
+        source_name = Path(prepared.source_path).name if prepared and prepared.source_path else "program.cpp"
+        for match in frame_re.finditer(text):
+            file_path = match.group("file").strip()
+            if source_name and DebugExecutor._path_name(file_path) != source_name:
+                continue
+            try:
+                index = int(match.group("index"), 16)
+            except ValueError:
+                index = int(match.group("index"))
+            symbol = match.group("symbol").strip()
+            locations[index] = _FrameLocation(
+                file=file_path,
+                line=int(match.group("line")),
+                function=symbol,
+            )
+        return locations
+
+    def _parse_cdb_frame_variables(self, text: str) -> list[_ParsedVar]:
+        variables = self._parse_cdb_variables(text)
+        dx_variables = self._parse_cdb_dx_variables(text)
+        by_name = {var.name: var for var in variables}
+
+        for dx_var in dx_variables:
+            existing = by_name.get(dx_var.name)
+            if existing is None:
+                variables.append(dx_var)
+                by_name[dx_var.name] = dx_var
+                continue
+            if dx_var.elements:
+                existing.elements = dx_var.elements
+            if dx_var.members and not dx_var.elements:
+                existing.members = dx_var.members
+            if dx_var.pointee_addr and not existing.pointee_addr:
+                existing.pointee_addr = dx_var.pointee_addr
+            if dx_var.pointee_elements:
+                existing.pointee_elements = dx_var.pointee_elements
+            if dx_var.pointee_members:
+                existing.pointee_members = dx_var.pointee_members
+            if dx_var.value and not self._is_hex_addr(existing.value):
+                existing.value = dx_var.value
+            if self._is_std_string_type(dx_var.type):
+                existing.elements = []
+                existing.members = []
+
+        return variables
+
+    def _parse_cdb_variables(self, text: str) -> list[_ParsedVar]:
+        variables: list[_ParsedVar] = []
+        pattern = re.compile(
+            r"^\s*(?:(?P<addr>(?:0x)?[0-9a-fA-F`]{4,})\s+)?"
+            r"(?P<type>.+?)\s+"
+            r"(?P<name>[*&]?[A-Za-z_]\w*)\s+=\s+"
+            r"(?P<value>.+?)\s*$"
+        )
+        for line in text.splitlines():
+            stripped = line.strip()
+            if (
+                not stripped
+                or stripped.startswith("__CXXMV_")
+                or stripped.startswith((".", "#", "Child-SP", "RetAddr"))
+                or "[" in stripped and "@" in stripped
+            ):
+                continue
+            match = pattern.match(line)
+            if match is None:
+                continue
+
+            raw_addr = match.group("addr") or f"cdb:{len(variables)}:{match.group('name')}"
+            raw_value_text = match.group("value")
+            raw_value = self._clean_cdb_value(raw_value_text)
+            value = self._normalize_cdb_addr(raw_value) if self._is_cdb_addr(raw_value) else raw_value
+            clean_type = self._clean_type(match.group("type"))
+            var = _ParsedVar(
+                actual_addr=self._normalize_cdb_addr(raw_addr),
+                type=clean_type,
+                name=match.group("name").lstrip("*&"),
+                value=value,
+            )
+            payload = self._structured_payload(raw_value_text)
+            if payload and not self._is_std_string_type(clean_type):
+                element_type = self._array_element_type(clean_type)
+                elements = self._parse_structured_elements(payload, element_type)
+                members = [] if elements else self._parse_structured_members(payload)
+                if self._is_pointer_like_type(var.type) and self._is_hex_addr(value) and not self._is_null(value):
+                    var.pointee_type = self._pointee_type(var.type)
+                    var.pointee_elements = elements
+                    var.pointee_members = members
+                    if not elements and not members:
+                        var.pointee_value = self._clean_value(payload)
+                elif elements:
+                    var.elements = elements
+                elif members:
+                    var.members = members
+            if self._is_pointer_like_type(var.type) and self._is_hex_addr(value) and not self._is_null(value):
+                var.pointee_addr = value
+            variables.append(var)
+        return variables
+
+    def _parse_cdb_dx_variables(self, text: str) -> list[_ParsedVar]:
+        variables: list[_ParsedVar] = []
+        pending: _ParsedVar | None = None
+        pending_indent = 0
+        pending_element: _ParsedElement | None = None
+        pending_element_indent = 0
+        pending_element_elements: list[_ParsedElement] = []
+        pending_element_members: list[_ParsedMember] = []
+        pending_member: _ParsedMember | None = None
+        pending_member_indent = 0
+        pending_member_elements: list[_ParsedElement] = []
+        pending_member_members: list[_ParsedMember] = []
+        pattern = re.compile(
+            r"^(?P<indent>\s+)"
+            r"(?P<name>\[\d+\]|[A-Za-z_]\w*)\s*:\s*"
+            r"(?P<value>.*?)\s*"
+            r"\[Type:\s*(?P<type>.*)\]\s*$"
+        )
+
+        def flush_pending_element():
+            nonlocal pending_element, pending_element_elements, pending_element_members
+            flush_pending_member()
+            if pending_element is not None:
+                if pending_element_elements and self._is_std_string_type(pending_element.type):
+                    string_value = self._string_from_char_elements(pending_element_elements)
+                    if string_value is not None:
+                        pending_element.value = string_value
+                elif pending_element_elements:
+                    pending_element.value = self._format_elements(pending_element_elements)
+                elif pending_element_members:
+                    pending_element.value = self._format_members(pending_element_members)
+            pending_element = None
+            pending_element_elements = []
+            pending_element_members = []
+
+        def flush_pending_member():
+            nonlocal pending_member, pending_member_elements, pending_member_members
+            if pending_member is not None:
+                if pending_member_elements and self._is_std_string_type(pending_member.type):
+                    string_value = self._string_from_char_elements(pending_member_elements)
+                    if string_value is not None:
+                        pending_member.value = string_value
+                elif pending_member_elements:
+                    pending_member.value = self._format_elements(pending_member_elements)
+                elif pending_member_members:
+                    base_value = self._clean_value(pending_member.value)
+                    payload = self._format_members(pending_member_members)
+                    pending_member.value = f"{base_value} {payload}".strip()
+            pending_member = None
+            pending_member_elements = []
+            pending_member_members = []
+
+        def member_points_to_live_object(member_type: str, raw_member_value: str) -> bool:
+            member_value = self._clean_value(raw_member_value)
+            if self._is_cdb_addr(member_value):
+                member_value = self._normalize_cdb_addr(member_value)
+            elif self._is_hex_addr(member_value):
+                member_value = self._normalize_actual_addr(member_value)
+            return (
+                self._is_pointer_like_type(member_type)
+                and bool(member_value)
+                and not self._is_null(member_value)
+            )
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if (
+                not stripped
+                or stripped.startswith("__CXXMV_")
+                or stripped.startswith("@$curframe")
+                or stripped.startswith("[<")
+            ):
+                continue
+            match = pattern.match(line)
+            if match is None:
+                continue
+
+            indent = len(match.group("indent"))
+            name = match.group("name")
+            raw_value = match.group("value").strip()
+            clean_type = self._clean_type(match.group("type"))
+            clean_value = self._clean_cdb_value(raw_value)
+            if self._is_cdb_addr(clean_value):
+                clean_value = self._normalize_cdb_addr(clean_value)
+
+            if pending_member is not None and indent > pending_member_indent:
+                element_index = self._array_index(name)
+                if element_index is not None:
+                    pending_member_elements.append(
+                        self._parsed_element_from_raw(element_index, clean_type, raw_value)
+                    )
+                    continue
+                pending_member_members.append(_ParsedMember(
+                    name=name,
+                    type=clean_type,
+                    value=self._clean_value_preserving_payload(raw_value),
+                    actual_addr=f"{pending_member.actual_addr}:{name}",
+                ))
+                continue
+
+            if pending_member is not None and indent <= pending_member_indent:
+                flush_pending_member()
+
+            if pending_element is not None and indent > pending_element_indent:
+                child_index = self._array_index(name)
+                if child_index is not None:
+                    pending_element_elements.append(
+                        self._parsed_element_from_raw(child_index, clean_type, raw_value)
+                    )
+                    continue
+                member_value = self._clean_value(raw_value)
+                if self._is_cdb_addr(member_value):
+                    member_value = self._normalize_cdb_addr(member_value)
+                elif self._is_hex_addr(member_value):
+                    member_value = self._normalize_actual_addr(member_value)
+                if (
+                    self._is_pointer_like_type(clean_type)
+                    and member_value
+                    and not self._is_null(member_value)
+                ):
+                    member_payload = self._structured_payload(raw_value)
+                    if member_payload:
+                        pending_element.pointee_addr = member_value
+                        pending_element.pointee_type = self._pointee_type(clean_type)
+                        nested_members = self._parse_structured_members(member_payload)
+                        if nested_members:
+                            pending_element.pointee_members = nested_members
+                        else:
+                            pending_element.pointee_value = self._clean_value(member_payload)
+                pending_element_members.append(_ParsedMember(
+                    name=name,
+                    type=clean_type,
+                    value=self._clean_value_preserving_payload(raw_value),
+                    actual_addr=f"{pending.actual_addr if pending else 'cdbdx'}:{name}",
+                ))
+                if member_points_to_live_object(clean_type, raw_value):
+                    pending_member = pending_element_members[-1]
+                    pending_member_indent = indent
+                    pending_member_elements = []
+                    pending_member_members = []
+                elif self._is_expandable_cdb_member_type(clean_type):
+                    pending_member = pending_element_members[-1]
+                    pending_member_indent = indent
+                    pending_member_elements = []
+                    pending_member_members = []
+                pending_element.value = self._format_members(pending_element_members)
+                continue
+
+            if pending_element is not None and indent <= pending_element_indent:
+                flush_pending_element()
+
+            if pending is not None and indent > pending_indent:
+                element_index = self._array_index(name)
+                if element_index is not None:
+                    target_elements = (
+                        pending.pointee_elements
+                        if pending.pointee_addr
+                        else pending.elements
+                    )
+                    element = self._parsed_element_from_raw(element_index, clean_type, raw_value)
+                    self._upsert_parsed_element(target_elements, element)
+                    pending_element = element
+                    pending_element_indent = indent
+                    pending_element_elements = []
+                    pending_element_members = []
+                else:
+                    target_members = (
+                        pending.pointee_members
+                        if pending.pointee_addr
+                        else pending.members
+                    )
+                    target_members.append(_ParsedMember(
+                        name=name,
+                        type=clean_type,
+                        value=self._clean_value_preserving_payload(raw_value),
+                        actual_addr=f"{pending.actual_addr}:{name}",
+                    ))
+                    if member_points_to_live_object(clean_type, raw_value):
+                        pending_member = target_members[-1]
+                        pending_member_indent = indent
+                        pending_member_elements = []
+                        pending_member_members = []
+                    elif self._is_expandable_cdb_member_type(clean_type):
+                        pending_member = target_members[-1]
+                        pending_member_indent = indent
+                        pending_member_elements = []
+                        pending_member_members = []
+                continue
+
+            flush_pending_member()
+            flush_pending_element()
+            var = _ParsedVar(
+                actual_addr=f"cdbdx:{len(variables)}:{name}",
+                type=clean_type,
+                name=name,
+                value=clean_value,
+            )
+            elements: list[_ParsedElement] = []
+            members: list[_ParsedMember] = []
+            payload = self._structured_payload(raw_value)
+            if payload and not self._is_std_string_type(clean_type):
+                element_type = self._array_element_type(clean_type)
+                elements = self._parse_structured_elements(payload, element_type)
+                members = [] if elements else self._parse_structured_members(payload)
+            if self._is_pointer_like_type(var.type) and self._is_hex_addr(clean_value) and not self._is_null(clean_value):
+                var.pointee_addr = clean_value
+                var.pointee_type = self._pointee_type(var.type)
+                var.pointee_elements = elements
+                var.pointee_members = members
+            else:
+                var.elements = elements
+                var.members = members
+            variables.append(var)
+            pending = var
+            pending_indent = indent
+
+        flush_pending_element()
+        self._collapse_cdb_string_children(variables)
+        return variables
+
+    def _parse_variables(self, text: str) -> list[_ParsedVar]:
+        variables: list[_ParsedVar] = []
+        pending_pointer: _ParsedVar | None = None
+        pending_container: _ParsedVar | None = None
+
+        for line in text.splitlines():
+            if line.strip() == "}":
+                pending_pointer = None
+                pending_container = None
+                continue
+            match = re.match(r"^(0x[0-9a-fA-F]+):(?P<rest>.*)$", line.rstrip())
+            if match is None:
+                continue
+            actual_addr = self._normalize_actual_addr(match.group(1))
+            rest = match.group("rest")
+
+            if rest.startswith(" " * 2):
+                child = self._parse_value_rest(rest.strip())
+                if child is None:
+                    continue
+
+                child_type, child_name, child_value = child
+                if (
+                    pending_pointer is not None
+                    and actual_addr == pending_pointer.pointee_addr
+                    and child_name.startswith("*")
+                ):
+                    pending_pointer.pointee_type = child_type
+                    pending_pointer.pointee_value = self._clean_value(child_value)
+                elif pending_pointer is not None:
+                    pending_pointer.pointee_type = pending_pointer.pointee_type or self._pointee_type(pending_pointer.type)
+                    element_index = self._array_index(child_name)
+                    if element_index is not None:
+                        pending_pointer.pointee_elements.append(
+                            self._parsed_element_from_raw(element_index, child_type, child_value)
+                        )
+                    else:
+                        pending_pointer.pointee_members.append(_ParsedMember(
+                            name=child_name.lstrip("*&"),
+                            type=self._clean_type(child_type),
+                            value=self._clean_value_preserving_payload(child_value),
+                            actual_addr=actual_addr,
+                        ))
+                elif pending_container is not None:
+                    element_index = self._array_index(child_name)
+                    if element_index is not None:
+                        pending_container.elements.append(
+                            self._parsed_element_from_raw(element_index, child_type, child_value)
+                        )
+                    else:
+                        pending_container.members.append(_ParsedMember(
+                            name=child_name.lstrip("*&"),
+                            type=self._clean_type(child_type),
+                            value=self._clean_value_preserving_payload(child_value),
+                            actual_addr=actual_addr,
+                        ))
+                continue
+
+            raw_rest = rest.strip()
+            parsed = self._parse_value_rest(raw_rest)
+            if parsed is None:
+                pending_pointer = None
+                pending_container = None
+                continue
+
+            type_text, name, raw_value = parsed
+            value = self._clean_value(raw_value)
+            if self._is_hex_addr(value):
+                value = self._normalize_actual_addr(value)
+            var = _ParsedVar(
+                actual_addr=actual_addr,
+                type=self._clean_type(type_text),
+                name=name,
+                value=value,
+            )
+            if self._is_hex_addr(value) and (self._is_pointer_like_type(type_text) or self._is_reference_type(type_text)):
+                var.pointee_addr = value
+                pending_pointer = var
+            else:
+                pending_pointer = None
+            pending_container = var if "{" in raw_value else None
+            variables.append(var)
+
+        return variables
+
+    @staticmethod
+    def _parse_value_rest(rest: str) -> tuple[str, str, str] | None:
+        match = re.match(
+            r"\((?P<type>.+?)\)\s+"
+            r"(?P<name>[*&]?[A-Za-z_]\w*|\[\d+\])\s+=\s+"
+            r"(?P<value>.*)$",
+            rest,
+        )
+        if match is None:
+            return None
+        return match.group("type"), match.group("name"), match.group("value")
+
+    def _parse_array_expressions(self, text: str) -> dict[str, list[_ParsedElement]]:
+        arrays: dict[str, list[_ParsedElement]] = {}
+        pending: tuple[str, int] | None = None
+        marker_re = re.compile(r"^__CXXMV_EXPR__\d+__(?P<name>[A-Za-z_]\w*)__(?P<index>\d+)$")
+        value_re = re.compile(r"^\((?P<type>.+?)\)\s+(?:\$\d+\s+=\s+)?(?P<value>.*)$")
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            marker = marker_re.match(line)
+            if marker:
+                pending = (marker.group("name"), int(marker.group("index")))
+                continue
+            if pending is None:
+                continue
+            value_match = value_re.match(line)
+            if value_match is None:
+                continue
+
+            pointer_name, index = pending
+            arrays.setdefault(pointer_name, []).append(
+                self._parsed_element_from_raw(
+                    index,
+                    value_match.group("type"),
+                    value_match.group("value"),
+                )
+            )
+            pending = None
+
+        for elements in arrays.values():
+            elements.sort(key=lambda element: element.index)
+        return arrays
+
+    @staticmethod
+    def _declaration_lines(lines: list[str]) -> dict[str, int]:
+        declarations: dict[str, int] = {}
+        scalar_type = (
+            r"(?:(?:signed|unsigned)\s+)?"
+            r"(?:auto|bool|char|wchar_t|char16_t|char32_t|"
+            r"short(?:\s+int)?|int|long(?:\s+long)?(?:\s+int)?|"
+            r"float|double|long\s+double|string|std::string|size_t|"
+            r"[A-Za-z_]\w*(?:::\w+)?(?:<[^;=]+>)?)"
+        )
+        pattern = re.compile(
+            r"^\s*(?:const\s+|static\s+|volatile\s+)*"
+            rf"{scalar_type}"
+            r"(?:\s+|(?=[*&]))[\s*&]*([A-Za-z_]\w*)\b"
+        )
+        for_pattern = re.compile(
+            rf"\bfor\s*\(\s*(?:const\s+)?{scalar_type}(?:\s+|(?=[*&]))[\s*&]*([A-Za-z_]\w*)\b"
+        )
+        for idx, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("#", "//", "return", "using ")):
+                continue
+            for_match = for_pattern.search(line)
+            if for_match:
+                declarations.setdefault(for_match.group(1), idx)
+            match = pattern.match(line)
+            if match:
+                declarations.setdefault(match.group(1), idx)
+        return declarations
+
+    @staticmethod
+    def _declaration_types(lines: list[str]) -> dict[str, str]:
+        declarations: dict[str, str] = {}
+        for line in lines:
+            stmt = DebugExecutor._strip_line_comment(line).strip().rstrip(";")
+            if not stmt:
+                continue
+            if stmt.startswith(("#", "return", "using ", "class ", "struct ", "enum ", "namespace ")):
+                continue
+            if stmt in {"public:", "protected:", "private:", "{", "}"}:
+                continue
+            if "(" in stmt and not re.search(r"=\s*[^;]*\(", stmt):
+                continue
+
+            parts = DebugExecutor._split_top_level_commas(stmt)
+            if not parts:
+                continue
+
+            first = parts[0].strip()
+            first_match = re.match(
+                r"^(?P<prefix>.+?)(?P<name>[A-Za-z_]\w*)"
+                r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                first,
+            )
+            if first_match is None:
+                continue
+            prefix = first_match.group("prefix").strip()
+            if not DebugExecutor._looks_like_decl_type_prefix(prefix):
+                continue
+
+            declarations[first_match.group("name")] = DebugExecutor._clean_type(prefix)
+            base_type = re.sub(r"[\s*&]+$", "", prefix).strip()
+            for declaration in parts[1:]:
+                decl = declaration.strip()
+                decl_match = re.match(
+                    r"^(?P<symbols>[\s*&]*)(?P<name>[A-Za-z_]\w*)"
+                    r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                    decl,
+                )
+                if decl_match is None:
+                    continue
+                symbols = decl_match.group("symbols").replace(" ", "")
+                declarations[decl_match.group("name")] = DebugExecutor._clean_type(base_type + symbols)
+        return declarations
+
+    @staticmethod
+    def _looks_like_decl_type_prefix(prefix: str) -> bool:
+        if not prefix or not re.search(r"[A-Za-z_]", prefix):
+            return False
+        if any(token in prefix for token in ('"', "'", "[", "]", ".", "->", "=")):
+            return False
+        return bool(re.match(
+            r"^(?:const\s+|static\s+|volatile\s+|mutable\s+|constexpr\s+)*"
+            r"[A-Za-z_]\w*(?:::\w+)?(?:\s*<[^;=()]+>)?(?:\s+const)?[\s*&]*$",
+            prefix,
+        ))
+
+    @staticmethod
+    def _display_type_for_parsed(
+        parsed_type: str,
+        name: str,
+        declared_types: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        parsed_clean = DebugExecutor._clean_type(parsed_type)
+        declared_clean = DebugExecutor._clean_type(declared_types.get(name, ""))
+        if not declared_clean or declared_clean == "auto":
+            return parsed_clean
+        if not (
+            DebugExecutor._is_pointer_type(declared_clean)
+            and DebugExecutor._is_pointer_type(parsed_clean)
+        ):
+            return parsed_clean
+
+        declared_class = DebugExecutor._object_class_name(declared_clean)
+        parsed_class = DebugExecutor._object_class_name(parsed_clean)
+        if (
+            declared_class
+            and parsed_class
+            and declared_class != parsed_class
+            and DebugExecutor._class_inherits_from(parsed_class, declared_class, class_info)
+        ):
+            return declared_clean
+        return parsed_clean
+
+    @staticmethod
+    def _class_inherits_from(
+        derived: str,
+        base: str,
+        class_info: dict[str, _ClassInfo],
+        seen: set[str] | None = None,
+    ) -> bool:
+        if derived == base:
+            return True
+        seen = seen or set()
+        if derived in seen:
+            return False
+        seen.add(derived)
+        info = class_info.get(derived)
+        if info is None:
+            return False
+        return any(
+            candidate == base or DebugExecutor._class_inherits_from(candidate, base, class_info, seen)
+            for candidate in info.base_classes
+        )
+
+    @staticmethod
+    def _class_metadata(lines: list[str]) -> dict[str, _ClassInfo]:
+        source = "\n".join(lines)
+        class_re = re.compile(
+            r"\b(?:class|struct)\s+"
+            r"(?P<name>[A-Za-z_]\w*)"
+            r"(?:\s*:\s*(?P<bases>[^{]+))?"
+            r"\s*\{(?P<body>.*?)\}\s*;",
+            re.DOTALL,
+        )
+        info: dict[str, _ClassInfo] = {}
+        for match in class_re.finditer(source):
+            name = match.group("name")
+            body = match.group("body") or ""
+            bases = DebugExecutor._parse_base_classes(match.group("bases") or "")
+            virtuals = DebugExecutor._parse_virtual_methods(body, name)
+            member_types = DebugExecutor._parse_member_type_declarations(body)
+            info[name] = _ClassInfo(
+                base_classes=bases,
+                virtual_methods=virtuals,
+                member_types=member_types,
+            )
+
+        def inherited_virtuals(class_name: str, seen: set[str] | None = None) -> list[str]:
+            seen = seen or set()
+            if class_name in seen:
+                return []
+            seen.add(class_name)
+            current = info.get(class_name)
+            if current is None:
+                return []
+            methods: list[str] = []
+            for base in current.base_classes:
+                for method in inherited_virtuals(base, seen):
+                    if method not in methods:
+                        methods.append(method)
+            for method in current.virtual_methods:
+                if method not in methods:
+                    methods.append(method)
+            return methods
+
+        for class_name, class_info in list(info.items()):
+            class_info.virtual_methods = inherited_virtuals(class_name)
+        return info
+
+    @staticmethod
+    def _parse_base_classes(base_text: str) -> list[str]:
+        bases: list[str] = []
+        for raw in base_text.split(","):
+            clean = re.sub(r"\b(?:public|protected|private|virtual)\b", "", raw).strip()
+            clean = clean.split("<", 1)[0].strip() if "<" in clean else clean
+            match = re.search(r"([A-Za-z_]\w*(?:::\w+)?)$", clean)
+            if match:
+                name = match.group(1).rsplit("::", 1)[-1]
+                if name not in bases:
+                    bases.append(name)
+        return bases
+
+    @staticmethod
+    def _parse_member_type_declarations(body: str) -> dict[str, str]:
+        members: dict[str, str] = {}
+        for raw_stmt in body.split(";"):
+            stmt = re.sub(r"\b(?:public|protected|private)\s*:\s*", " ", raw_stmt)
+            stmt = re.sub(r"//.*", "", stmt).strip()
+            if not stmt or "(" in stmt or ")" in stmt:
+                continue
+            stmt = re.sub(r"\b(?:static|mutable|constexpr|inline)\b", " ", stmt).strip()
+            if not stmt or stmt.startswith(("using ", "typedef ")):
+                continue
+
+            declarations = DebugExecutor._split_top_level_commas(stmt)
+            if not declarations:
+                continue
+
+            first = declarations[0].strip()
+            first_match = re.match(
+                r"^(?P<prefix>.+?)(?P<name>[A-Za-z_]\w*)"
+                r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                first,
+            )
+            if first_match is None:
+                continue
+
+            prefix = first_match.group("prefix").strip()
+            base_type = re.sub(r"[\s*&]+$", "", prefix).strip()
+            if not base_type:
+                continue
+
+            members[first_match.group("name")] = DebugExecutor._clean_type(prefix)
+
+            for declaration in declarations[1:]:
+                decl = declaration.strip()
+                decl_match = re.match(
+                    r"^(?P<symbols>[\s*&]*)(?P<name>[A-Za-z_]\w*)"
+                    r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                    decl,
+                )
+                if decl_match is None:
+                    continue
+                symbols = decl_match.group("symbols").replace(" ", "")
+                members[decl_match.group("name")] = DebugExecutor._clean_type(base_type + symbols)
+        return members
+
+    @staticmethod
+    def _split_top_level_commas(text: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        depth = 0
+        for ch in text:
+            if ch in "<({[":
+                depth += 1
+            elif ch in ">)}]":
+                depth = max(0, depth - 1)
+            if ch == "," and depth == 0:
+                part = "".join(current).strip()
+                if part:
+                    parts.append(part)
+                current = []
+                continue
+            current.append(ch)
+        part = "".join(current).strip()
+        if part:
+            parts.append(part)
+        return parts
+
+    @staticmethod
+    def _parse_virtual_methods(body: str, class_name: str = "") -> list[str]:
+        methods: list[str] = []
+        patterns = (
+            r"\bvirtual\b[^;{}]*?\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)",
+            r"\b(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:override|final)\b",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, body):
+                name = match.group("name")
+                previous = body[match.start("name") - 1] if match.start("name") > 0 else ""
+                if (
+                    name not in {"if", "for", "while", "switch", "return"}
+                    and name != class_name
+                    and previous != "~"
+                ):
+                    method = f"{name}()"
+                    if method not in methods:
+                        methods.append(method)
+        return methods
+
+    @staticmethod
+    def _heap_array_declarations(lines: list[str]) -> dict[str, tuple[str, int]]:
+        declarations: dict[str, tuple[str, int]] = {}
+        pattern = re.compile(
+            r"(?:\b(?:auto|[A-Za-z_]\w*(?:::\w+)?(?:<[^;=]+>)?\s*\*)\s+)?"
+            r"(?P<name>[A-Za-z_]\w*)\s*=\s*new\s+"
+            r"(?P<type>[A-Za-z_]\w*(?:::\w+)?(?:<[^;\[]+>)?)"
+            r"\s*\[\s*(?P<count>\d+)\s*\]"
+        )
+        for line in lines:
+            match = pattern.search(line)
+            if not match:
+                continue
+            count = min(int(match.group("count")), 32)
+            if count > 0:
+                declarations[match.group("name")] = (
+                    DebugExecutor._clean_type(match.group("type")),
+                    count,
+                )
+        return declarations
+
+    @staticmethod
+    def _std_array_declarations(lines: list[str]) -> dict[str, tuple[str, int]]:
+        declarations: dict[str, tuple[str, int]] = {}
+        for line in lines:
+            start_match = re.search(r"\b(?:std::)?array\s*<", line)
+            if not start_match:
+                continue
+            start = start_match.end() - 1
+            depth = 0
+            end = -1
+            for idx in range(start, len(line)):
+                ch = line[idx]
+                if ch == "<":
+                    depth += 1
+                    continue
+                if ch == ">":
+                    depth -= 1
+                    if depth == 0:
+                        end = idx
+                        break
+            if end < 0:
+                continue
+            args = DebugExecutor._template_args("array" + line[start:end + 1])
+            if len(args) < 2:
+                continue
+            name_match = re.match(r"\s*(?P<name>[A-Za-z_]\w*)\b", line[end + 1:])
+            if not name_match:
+                continue
+            count_text = args[1].strip()
+            if not count_text.isdigit():
+                continue
+            count = min(int(count_text), 32)
+            if count > 0:
+                declarations[name_match.group("name")] = (
+                    DebugExecutor._clean_type(args[0]),
+                    count,
+                )
+        return declarations
+
+    @staticmethod
+    def _step_in_lines(lines: list[str], line_map: dict[int, int]) -> set[int]:
+        function_names = DebugExecutor._user_function_names(lines)
+        if not function_names:
+            return set()
+
+        step_lines: set[int] = set()
+        for line_no in line_map:
+            line = lines[line_no - 1] if 1 <= line_no <= len(lines) else ""
+            if DebugExecutor._is_function_definition_line(line, function_names):
+                continue
+            if DebugExecutor._has_user_function_call(line, function_names):
+                step_lines.add(line_no)
+        return step_lines
+
+    @staticmethod
+    def _user_function_names(lines: list[str]) -> set[str]:
+        keywords = {
+            "if", "for", "while", "switch", "catch", "return", "sizeof",
+            "new", "delete", "else", "do",
+        }
+        pattern = re.compile(
+            r"^\s*(?:template\s*<[^>]+>\s*)?"
+            r"(?:(?:inline|static|virtual|explicit|constexpr|friend)\s+)*"
+            r"(?:(?:[A-Za-z_]\w*(?:::\w+)?|~?[A-Za-z_]\w*|operator\s*\S+)"
+            r"(?:<[^;{}()]*>)?[\s*&]+)*"
+            r"(?P<name>~?[A-Za-z_]\w*)\s*\([^;{}]*\)\s*"
+            r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[^:{]+)?\s*(?:[:{]|$)"
+        )
+        names: set[str] = set()
+        for raw_line in lines:
+            line = DebugExecutor._strip_line_comment(raw_line).strip()
+            if not line:
+                continue
+            match = pattern.match(line)
+            if not match:
+                continue
+            name = match.group("name").lstrip("~")
+            if name not in keywords:
+                names.add(name)
+        names.discard("main")
+        names.difference_update(DebugExecutor._class_names(lines))
+        return names
+
+    @staticmethod
+    def _class_names(lines: list[str]) -> set[str]:
+        names: set[str] = set()
+        pattern = re.compile(r"\b(?:class|struct)\s+([A-Za-z_]\w*)\b")
+        for line in lines:
+            match = pattern.search(DebugExecutor._strip_line_comment(line))
+            if match:
+                names.add(match.group(1))
+        return names
+
+    @staticmethod
+    def _is_function_definition_line(line: str, function_names: set[str]) -> bool:
+        stripped = DebugExecutor._strip_line_comment(line).strip()
+        if not stripped:
+            return False
+        for name in function_names:
+            if re.match(rf".*\b{re.escape(name)}\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:[:{{]|$)", stripped):
+                return True
+        return False
+
+    @staticmethod
+    def _has_user_function_call(line: str, function_names: set[str]) -> bool:
+        stripped = DebugExecutor._strip_line_comment(line)
+        if "cout" in stripped or "std::cout" in stripped:
+            return False
+        for name in function_names:
+            if re.search(rf"(?<![\w:~]){re.escape(name)}\s*\(", stripped):
+                return True
+        return False
+
+    @staticmethod
+    def _strip_line_comment(line: str) -> str:
+        in_string = False
+        escape = False
+        for i, ch in enumerate(line):
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                return line[:i]
+        return line
+
+    @staticmethod
+    def _lldb_step_command(step_in_lines: set[int], source_filename: str = "program.cpp") -> str:
+        line_set = "{" + ",".join(str(line) for line in sorted(step_in_lines)) + "}"
+        return (
+            "script "
+            "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame(); "
+            "entry=frame.GetLineEntry(); "
+            "file=entry.GetFileSpec().GetFilename(); "
+            "line=entry.GetLine(); "
+            f"cmd='process continue' if file and file != {source_filename!r} else "
+            f"('thread step-in' if line in {line_set} else 'thread step-over'); "
+            "lldb.debugger.HandleCommand(cmd)"
+        )
+
+    @staticmethod
+    def _lldb_stack_snapshot_command(source_filename: str = "program.cpp") -> str:
+        script = (
+            "import sys\n"
+            "target=lldb.debugger.GetSelectedTarget()\n"
+            "thread=target.GetProcess().GetSelectedThread()\n"
+            "def synthetic_addr(name, value_idx=-1, frame_idx=-1):\n"
+            "    seed=((frame_idx + 1) * 1000003 + (value_idx + 1) * 9176) & 0xfffffffffffffff\n"
+            "    for ch in (name or ''):\n"
+            "        seed=((seed * 131) + ord(ch)) & 0xfffffffffffffff\n"
+            "    return '0xf%015x' % seed\n"
+            "def addr_of(value, value_idx=-1, frame_idx=-1):\n"
+            "    typ=type_of(value)\n"
+            "    name=value.GetName() or ''\n"
+            "    loc=value.GetLocation() or ''\n"
+            "    if loc == 'scalar' and is_pointer_type(typ):\n"
+            "        return synthetic_addr(name, value_idx, frame_idx)\n"
+            "    if loc.startswith('0x'):\n"
+            "        return loc.split()[0]\n"
+            "    addr=value.GetAddress()\n"
+            "    if addr.IsValid():\n"
+            "        load=addr.GetLoadAddress(target)\n"
+            "        if load != lldb.LLDB_INVALID_ADDRESS:\n"
+            "            return '0x%x' % load\n"
+            "    return loc.split()[0] if loc.startswith('0x') else '0x0'\n"
+            "def val_of(value):\n"
+            "    return value.GetValue() or value.GetSummary() or ''\n"
+            "def type_of(value):\n"
+            "    return value.GetTypeName() or 'unknown'\n"
+            "def has_top_level_symbol(typ, symbol):\n"
+            "    depth=0\n"
+            "    for ch in typ:\n"
+            "        if ch == '<':\n"
+            "            depth += 1\n"
+            "            continue\n"
+            "        if ch == '>':\n"
+            "            depth=max(0, depth - 1)\n"
+            "            continue\n"
+            "        if ch == symbol and depth == 0:\n"
+            "            return True\n"
+            "    return False\n"
+            "def is_pointer_type(typ):\n"
+            "    return '[' not in typ and has_top_level_symbol(typ, '*')\n"
+            "def is_reference_type(typ):\n"
+            "    return has_top_level_symbol(typ, '&') and not is_pointer_type(typ)\n"
+            "def is_std_string_type(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    return compact in ('string', 'std::string', 'std::__1::string') or compact.startswith('std::basic_string<char') or compact.startswith('std::__1::basic_string<char')\n"
+            "def is_expandable_container_type(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    tokens=('array<', 'deque<', 'list<', 'map<', 'multimap<', 'multiset<', 'pair<', 'set<', 'tuple<', 'unordered_map<', 'unordered_set<', 'vector<')\n"
+            "    return any(token in compact for token in tokens)\n"
+            "def is_c_array_type(typ):\n"
+            "    return '[' in typ and ']' in typ\n"
+            "def top_level_template_type_key(typ):\n"
+            "    compact=typ.replace(' ', '')\n"
+            "    changed=True\n"
+            "    while changed:\n"
+            "        changed=False\n"
+            "        for prefix in ('class', 'struct', 'const', 'volatile'):\n"
+            "            if compact.startswith(prefix):\n"
+            "                compact=compact[len(prefix):]\n"
+            "                changed=True\n"
+            "    for prefix in ('std::__1::', 'std::'):\n"
+            "        if compact.startswith(prefix):\n"
+            "            compact=compact[len(prefix):]\n"
+            "            break\n"
+            "    return compact\n"
+            "def is_smart_pointer_type(typ):\n"
+            "    return top_level_template_type_key(typ).startswith(('unique_ptr<', 'shared_ptr<', 'weak_ptr<'))\n"
+            "def smart_pointer_child(value):\n"
+            "    count=min(value.GetNumChildren(), 16)\n"
+            "    for child_idx in range(count):\n"
+            "        child=value.GetChildAtIndex(child_idx)\n"
+            "        child_typ=type_of(child)\n"
+            "        raw=child.GetValue() or ''\n"
+            "        if not raw and is_pointer_type(child_typ):\n"
+            "            raw_unsigned=child.GetValueAsUnsigned(0)\n"
+            "            raw='0x%x' % raw_unsigned if raw_unsigned else ''\n"
+            "        if is_pointer_type(child_typ) and raw and raw not in ('0x0', '0x0000000000000000'):\n"
+            "            return child, raw\n"
+            "    return None, ''\n"
+            "def flat_value(value, depth=0):\n"
+            "    val=val_of(value)\n"
+            "    typ=type_of(value)\n"
+            "    if is_smart_pointer_type(typ):\n"
+            "        raw_child, raw_val=smart_pointer_child(value)\n"
+            "        if not raw_val:\n"
+            "            return '0x0'\n"
+            "        deref=raw_child.Dereference() if raw_child is not None else None\n"
+            "        if deref is not None and deref.IsValid():\n"
+            "            deref_count=min(deref.GetNumChildren(), 16)\n"
+            "            if deref_count > 0:\n"
+            "                parts=[]\n"
+            "                for child_idx in range(deref_count):\n"
+            "                    child=deref.GetChildAtIndex(child_idx)\n"
+            "                    child_name=child.GetName() or ''\n"
+            "                    child_val=flat_value(child, depth + 1)\n"
+            "                    parts.append('%s=%s' % (child_name.lstrip('*&'), child_val) if child_name else child_val)\n"
+            "                if parts:\n"
+            "                    return raw_val + ' {' + ', '.join(parts) + '}'\n"
+            "            deref_val=val_of(deref)\n"
+            "            if deref_val:\n"
+            "                return raw_val + ' {' + deref_val + '}'\n"
+            "        return raw_val\n"
+            "    if is_pointer_type(typ) and val and val not in ('0x0', '0x0000000000000000') and 'char' not in typ and depth < 3:\n"
+            "        deref=value.Dereference()\n"
+            "        if deref.IsValid():\n"
+            "            deref_count=min(deref.GetNumChildren(), 16)\n"
+            "            if deref_count > 0:\n"
+            "                parts=[]\n"
+            "                for child_idx in range(deref_count):\n"
+            "                    child=deref.GetChildAtIndex(child_idx)\n"
+            "                    child_name=child.GetName() or ''\n"
+            "                    child_val=flat_value(child, depth + 1)\n"
+            "                    parts.append('%s=%s' % (child_name.lstrip('*&'), child_val) if child_name else child_val)\n"
+            "                if parts:\n"
+            "                    return val + ' {' + ', '.join(parts) + '}'\n"
+            "            deref_val=val_of(deref)\n"
+            "            if deref_val:\n"
+            "                return val + ' {' + deref_val + '}'\n"
+            "        return val\n"
+            "    if val and not is_expandable_container_type(typ) and not is_c_array_type(typ):\n"
+            "        return val\n"
+            "    if depth >= 3:\n"
+            "        return val\n"
+            "    count=min(value.GetNumChildren(), 16)\n"
+            "    parts=[]\n"
+            "    for child_idx in range(count):\n"
+            "        child=value.GetChildAtIndex(child_idx)\n"
+            "        child_name=child.GetName() or ''\n"
+            "        child_val=flat_value(child, depth + 1)\n"
+            "        if child_name.startswith('['):\n"
+            "            parts.append('%s=%s' % (child_name, child_val))\n"
+            "        elif child_name:\n"
+            "            parts.append('%s=%s' % (child_name.lstrip('*&'), child_val))\n"
+            "        else:\n"
+            "            parts.append(child_val)\n"
+            "    if parts:\n"
+            "        return '{' + ', '.join(parts) + '}'\n"
+            "    if val:\n"
+            "        return val\n"
+            "    if 'vector' in typ:\n"
+            "        summary=value.GetSummary() or ''\n"
+            "        return summary\n"
+            "    return ''\n"
+            "def emit_child(child, name=None, frame_idx=-1):\n"
+            "    print('%s:   (%s) %s = %s' % (addr_of(child, -1, frame_idx), type_of(child), name or child.GetName() or '', flat_value(child)))\n"
+            "def emit_value(value, value_idx=-1, frame_idx=-1):\n"
+            "    name=value.GetName() or ''\n"
+            "    typ=type_of(value)\n"
+            "    val=val_of(value)\n"
+            "    addr=addr_of(value, value_idx, frame_idx)\n"
+            "    summary=value.GetSummary() or ''\n"
+            "    if is_std_string_type(typ) and val:\n"
+            "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
+            "        return\n"
+            "    if is_reference_type(typ) and val and val not in ('0x0', '0x0000000000000000'):\n"
+            "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
+            "        return\n"
+            "    if is_smart_pointer_type(typ):\n"
+            "        raw_child, raw_val=smart_pointer_child(value)\n"
+            "        if raw_val:\n"
+            "            print('%s: (%s) %s = %s {' % (addr, typ, name, raw_val))\n"
+            "            deref=raw_child.Dereference() if raw_child is not None else None\n"
+            "            if deref is not None and deref.IsValid():\n"
+            "                deref_child_count=min(deref.GetNumChildren(), 32)\n"
+            "                if deref_child_count > 0:\n"
+            "                    for child_idx in range(deref_child_count):\n"
+            "                        emit_child(deref.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
+            "                else:\n"
+            "                    emit_child(deref, '*' + name, frame_idx=frame_idx)\n"
+            "            print('}')\n"
+            "            return\n"
+            "        print('%s: (%s) %s = 0x0' % (addr, typ, name))\n"
+            "        return\n"
+            "    if is_pointer_type(typ) and not val:\n"
+            "        raw=value.GetValueAsUnsigned(0)\n"
+            "        val='0x%x' % raw\n"
+            "    if is_pointer_type(typ) and val in ('0x0', '0x0000000000000000'):\n"
+            "        print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
+            "        return\n"
+            "    if is_pointer_type(typ) and 'char' in typ and summary:\n"
+            "        char_typ='const char[]' if 'const' in typ else 'char[]'\n"
+            "        print('%s: (%s) %s = %s {' % (addr, typ, name, val))\n"
+            "        print('%s:   (%s) *%s = %s' % (val, char_typ, name, summary))\n"
+            "        print('}')\n"
+            "        return\n"
+            "    if is_pointer_type(typ) and val and val not in ('0x0', '0x0000000000000000'):\n"
+            "        print('%s: (%s) %s = %s {' % (addr, typ, name, val))\n"
+            "        deref=value.Dereference()\n"
+            "        if deref.IsValid():\n"
+            "            deref_child_count=min(deref.GetNumChildren(), 32)\n"
+            "            if deref_child_count > 0:\n"
+            "                for child_idx in range(deref_child_count):\n"
+            "                    emit_child(deref.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
+            "            else:\n"
+            "                emit_child(deref, '*' + name, frame_idx=frame_idx)\n"
+            "        print('}')\n"
+            "        return\n"
+            "    child_count=min(value.GetNumChildren(), 32)\n"
+            "    if child_count > 0:\n"
+            "        print('%s: (%s) %s = {' % (addr, typ, name))\n"
+            "        for child_idx in range(child_count):\n"
+            "            emit_child(value.GetChildAtIndex(child_idx), frame_idx=frame_idx)\n"
+            "        print('}')\n"
+            "        return\n"
+            "    print('%s: (%s) %s = %s' % (addr, typ, name, val))\n"
+            "limit=min(thread.GetNumFrames(), 8)\n"
+            "for idx in range(limit):\n"
+            "    frame=thread.GetFrameAtIndex(idx)\n"
+            "    entry=frame.GetLineEntry()\n"
+            "    file=entry.GetFileSpec().GetFilename()\n"
+            f"    if file != {source_filename!r}:\n"
+            "        continue\n"
+            "    name=frame.GetFunctionName() or frame.GetDisplayFunctionName() or ''\n"
+            "    print('__CXXMV_FRAME__%d__%d__%s' % (idx, entry.GetLine(), name))\n"
+            "    sys.stdout.flush()\n"
+            "    values=frame.GetVariables(True, True, False, True)\n"
+            "    for value_idx in range(values.GetSize()):\n"
+            "        emit_value(values.GetValueAtIndex(value_idx), value_idx, idx)\n"
+        )
+        return f"script exec({script!r})"
+
+    @staticmethod
+    def _lldb_array_probe_command(step: int, pointer_name: str, index: int) -> str:
+        marker = f"__CXXMV_EXPR__{step}__{pointer_name}__{index}"
+        expression = f"{pointer_name}[{index}]"
+        return (
+            "script "
+            "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame(); "
+            f"var=frame.FindVariable('{pointer_name}'); "
+            "value=var.GetValue(); "
+            "ok=var.IsValid() and value and int(value, 0) != 0; "
+            f"print('{marker}') if ok else None; "
+            f"print(frame.EvaluateExpression('{expression}')) if ok else None"
+        )
+
+    @staticmethod
+    def _lldb_std_array_probe_command(step: int, array_name: str, index: int, element_type: str) -> str:
+        marker = f"__CXXMV_EXPR__{step}__{array_name}__{index}"
+        expression = f"{array_name}[{index}]"
+        if DebugExecutor._is_smart_pointer_type(element_type):
+            script = (
+                "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame()\n"
+                f"var=frame.FindVariable({array_name!r})\n"
+                "storage=var.GetChildAtIndex(0) if var.IsValid() and var.GetNumChildren() else None\n"
+                f"elem=storage.GetChildAtIndex({index}) if storage is not None and storage.GetNumChildren() > {index} else None\n"
+                "ok=elem is not None and elem.IsValid()\n"
+                f"print({marker!r}) if ok else None\n"
+                "ptr=None\n"
+                "raw=''\n"
+                "count=min(elem.GetNumChildren(), 16) if ok else 0\n"
+                "for child_idx in range(count):\n"
+                "    if raw:\n"
+                "        break\n"
+                "    child=elem.GetChildAtIndex(child_idx)\n"
+                "    child_typ=child.GetTypeName() or ''\n"
+                "    child_raw=child.GetValue() or ''\n"
+                "    child_unsigned=child.GetValueAsUnsigned(0) if not child_raw and '*' in child_typ and '[' not in child_typ else 0\n"
+                "    child_raw=child_raw or ('0x%x' % child_unsigned if child_unsigned else '')\n"
+                "    if '*' in child_typ and '[' not in child_typ and child_raw and child_raw not in ('0x0', '0x0000000000000000'):\n"
+                "        ptr=child\n"
+                "        raw=child_raw\n"
+                "raw=raw or '0x0'\n"
+                "deref=ptr.Dereference() if ptr is not None and raw not in ('0x0', '0x0000000000000000') else None\n"
+                "deref_text=(deref.GetValue() or deref.GetSummary() or '') if deref and deref.IsValid() else ''\n"
+                f"print('({element_type}) $0 = ' + raw + ((' {{' + deref_text + '}}') if deref_text else '')) if ok else None\n"
+            )
+            return f"script exec({script!r})"
+        return (
+            "script "
+            "frame=lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame(); "
+            f"var=frame.FindVariable('{array_name}'); "
+            "ok=var.IsValid(); "
+            f"print('{marker}') if ok else None; "
+            f"print(frame.EvaluateExpression('{expression}')) if ok else None"
+        )
+
+    @staticmethod
+    def _source_line(lines: list[str], line_number: int) -> str:
+        if 1 <= line_number <= len(lines):
+            return lines[line_number - 1].strip()
+        return ""
+
+    @staticmethod
+    def _deleted_pointer_name(source_code: str) -> str:
+        match = re.search(r"\bdelete(?:\s*\[\s*\])?\s+([A-Za-z_]\w*)", source_code)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _new_pointer_name(source_code: str) -> str:
+        match = re.search(r"\b([A-Za-z_]\w*)\s*=\s*new\b", source_code)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _sim_addr(mapping: dict[str, str], actual_addr: str, prefix: str) -> str:
+        if actual_addr not in mapping:
+            mapping[actual_addr] = f"0x{prefix}{len(mapping) + 1:03d}"
+        return mapping[actual_addr]
+
+    def _heap_block_from_history(
+        self,
+        actual_addr: str,
+        target_addr: str,
+        default_type: str,
+        default_value: str,
+        is_freed: bool,
+        heap_values: dict[str, tuple[str, str]],
+        heap_array_values: dict[str, tuple[str, list[_ParsedElement]]],
+        heap_object_values: dict[str, tuple[str, list[_ParsedMember]]],
+        class_info: dict[str, _ClassInfo],
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> HeapBlock:
+        heap_type, heap_value = heap_values.get(actual_addr, (default_type, default_value))
+        array_info = heap_array_values.get(actual_addr)
+        if array_info is not None:
+            array_type, elements = array_info
+            element_models = self._array_elements_from_parsed(
+                elements,
+                owner_address=target_addr,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+                class_info=class_info,
+            )
+            return HeapBlock(
+                address=target_addr,
+                type=f"{self._clean_type(array_type)}[]",
+                value=self._format_array_element_models(element_models),
+                is_freed=is_freed,
+                is_array=True,
+                element_count=len(element_models),
+                elements=element_models,
+            )
+        object_info = heap_object_values.get(actual_addr)
+        if object_info is not None:
+            object_type, members = object_info
+            class_name = self._object_class_name(object_type or default_type)
+            metadata = class_info.get(class_name, _ClassInfo())
+            member_models = self._struct_members_from_parsed(
+                members,
+                owner_type=object_type or default_type,
+                owner_address=target_addr,
+                actual_stack_lookup=actual_stack_lookup,
+                stack_addr_map=stack_addr_map,
+                heap_addr_map=heap_addr_map,
+                class_info=class_info,
+            )
+            return HeapBlock(
+                address=target_addr,
+                type=self._clean_type(object_type or default_type),
+                value=self._format_struct_members(member_models),
+                is_freed=is_freed,
+                members=member_models,
+                is_object=True,
+                class_name=class_name,
+                base_classes=metadata.base_classes,
+                virtual_methods=metadata.virtual_methods,
+            )
+        return HeapBlock(
+            address=target_addr,
+            type=self._clean_type(heap_type or default_type),
+            value=self._clean_value(heap_value),
+            is_freed=is_freed,
+        )
+
+    def _array_elements_from_parsed(
+        self,
+        elements: list[_ParsedElement],
+        owner_address: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[ArrayElement]:
+        class_info = class_info or {}
+        return [
+            ArrayElement(
+                index=element.index,
+                type=self._clean_type(element.type),
+                value=self._array_element_display_value(
+                    element,
+                    actual_stack_lookup,
+                    stack_addr_map,
+                    heap_addr_map,
+                    class_info,
+                ),
+                address=self._array_element_sim_addr(owner_address, element.index),
+            )
+            for element in elements
+        ]
+
+    def _array_element_display_value(
+        self,
+        element: _ParsedElement,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        value = self._clean_value(element.value)
+        formatted_structured = self._structured_array_element_display_value(
+            element,
+            actual_stack_lookup,
+            stack_addr_map,
+            heap_addr_map,
+            class_info,
+        )
+        if formatted_structured:
+            return formatted_structured
+        is_reference = self._is_reference_type(element.type)
+        if (self._is_pointer_like_type(element.type) or is_reference) and self._is_null(value):
+            return "nullptr"
+        if (
+            (self._is_pointer_like_type(element.type) or is_reference)
+            and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+        ):
+            value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+            return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+        return value
+
+    def _structured_array_element_display_value(
+        self,
+        element: _ParsedElement,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        member_types = self._structured_array_element_member_types(element.type, class_info)
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+            return ""
+        payload = self._structured_payload(element.value)
+        if not payload:
+            return ""
+        members = self._parse_structured_members(payload)
+        if not members:
+            return ""
+        parts: list[str] = []
+        for member in members:
+            member_type = member_types.get(member.name, "")
+            value = self._clean_value(member.value)
+            if (
+                self._is_pointer_like_type(member_type)
+                and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+                and not self._is_null(value)
+            ):
+                actual = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+                value = self._target_sim_addr(actual, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            elif self._is_pointer_like_type(member_type) and self._is_null(value):
+                value = "nullptr"
+            parts.append(f"{member.name}={value}")
+        return "{" + ", ".join(parts) + "}"
+
+    @staticmethod
+    def _structured_array_element_member_types(
+        type_text: str,
+        class_info: dict[str, _ClassInfo],
+    ) -> dict[str, str]:
+        if DebugExecutor._is_pair_type(type_text):
+            return {
+                name: member_type
+                for name, member_type in (
+                    ("first", DebugExecutor._pair_member_type(type_text, "first")),
+                    ("second", DebugExecutor._pair_member_type(type_text, "second")),
+                )
+                if member_type
+            }
+        class_name = DebugExecutor._object_class_name(type_text)
+        info = class_info.get(class_name)
+        return dict(info.member_types) if info is not None else {}
+
+    @staticmethod
+    def _array_element_sim_addr(owner_address: str, index: int) -> str:
+        return f"{owner_address}[{index}]"
+
+    def _struct_members_from_parsed(
+        self,
+        members: list[_ParsedMember],
+        owner_type: str,
+        owner_address: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[StructMember]:
+        class_info = class_info or {}
+        member_models: list[StructMember] = []
+        seen: set[tuple[str, str, str]] = set()
+        index_by_name: dict[str, int] = {}
+        for member in members:
+            name = self._semantic_member_name(owner_type, member)
+            member_type = self._semantic_member_type(owner_type, member)
+            value = self._member_display_value(
+                member,
+                owner_type,
+                actual_stack_lookup,
+                stack_addr_map,
+                heap_addr_map,
+                class_info,
+            )
+            key = (name, member_type, value)
+            if key in seen:
+                continue
+            seen.add(key)
+            if name in index_by_name:
+                existing_index = index_by_name[name]
+                existing = member_models[existing_index]
+                prefer_new = (
+                    (not existing.type and bool(member_type))
+                    or (
+                        bool(member_type)
+                        and not (existing.value.startswith("0xS") or existing.value.startswith("0xH") or existing.value == "nullptr")
+                        and (value.startswith("0xS") or value.startswith("0xH") or value == "nullptr")
+                    )
+                )
+                if prefer_new:
+                    member_models[existing_index] = StructMember(
+                        name=name,
+                        type=member_type,
+                        value=value,
+                        address=existing.address or self._member_sim_addr(owner_address, member.name, existing_index),
+                    )
+                continue
+            member_models.append(StructMember(
+                name=name,
+                type=member_type,
+                value=value,
+                address=self._member_sim_addr(owner_address, member.name, len(member_models)),
+            ))
+            index_by_name[name] = len(member_models) - 1
+        return member_models
+
+    def _member_display_value(
+        self,
+        member: _ParsedMember,
+        owner_type: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        value = self._clean_value(member.value)
+        member_type = self._semantic_member_type(owner_type, member)
+        is_reference = self._is_reference_type(member_type)
+        if (self._is_pointer_like_type(member_type) or is_reference) and self._is_null(value):
+            return "nullptr"
+        if (
+            (self._is_pointer_like_type(member_type) or is_reference)
+            and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+        ):
+            value = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+            return self._target_sim_addr(value, actual_stack_lookup, stack_addr_map, heap_addr_map)
+        formatted_structured = self._structured_member_display_value(
+            member,
+            owner_type,
+            actual_stack_lookup,
+            stack_addr_map,
+            heap_addr_map,
+            class_info,
+        )
+        if formatted_structured:
+            return formatted_structured
+        return value
+
+    def _structured_member_display_value(
+        self,
+        member: _ParsedMember,
+        owner_type: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        member_type = self._semantic_member_type(owner_type, member)
+        member_types = self._structured_array_element_member_types(member_type, class_info)
+        if not any(self._is_pointer_like_type(nested_type) for nested_type in member_types.values()):
+            return ""
+        payload = self._structured_payload(member.value)
+        if not payload:
+            return ""
+        nested_members = self._parse_structured_members(payload)
+        if not nested_members:
+            return ""
+        parts: list[str] = []
+        for nested in nested_members:
+            nested_type = member_types.get(nested.name, "")
+            value = self._clean_value(nested.value)
+            if (
+                self._is_pointer_like_type(nested_type)
+                and (self._is_hex_addr(value) or self._is_cdb_addr(value))
+                and not self._is_null(value)
+            ):
+                actual = self._normalize_cdb_addr(value) if self._is_cdb_addr(value) else self._normalize_actual_addr(value)
+                value = self._target_sim_addr(actual, actual_stack_lookup, stack_addr_map, heap_addr_map)
+            elif self._is_pointer_like_type(nested_type) and self._is_null(value):
+                value = "nullptr"
+            parts.append(f"{nested.name}={value}")
+        return "{" + ", ".join(parts) + "}"
+
+    @staticmethod
+    def _semantic_member_name(owner_type: str, member: _ParsedMember) -> str:
+        if DebugExecutor._is_optional_type(owner_type) and member.name == "Value":
+            return "value"
+        if DebugExecutor._is_variant_type(owner_type) and member.name == "Value":
+            return "value"
+        return member.name
+
+    @staticmethod
+    def _semantic_member_type(owner_type: str, member: _ParsedMember) -> str:
+        cleaned_member_type = DebugExecutor._clean_type(member.type)
+        if DebugExecutor._is_optional_type(owner_type) and member.name == "Value":
+            value_type = DebugExecutor._first_template_arg(owner_type)
+            if value_type:
+                return value_type
+        return cleaned_member_type
+
+    @staticmethod
+    def _member_sim_addr(owner_address: str, member_name: str, index: int) -> str:
+        safe_name = re.sub(r"[^A-Za-z0-9_]+", "_", member_name or f"member_{index}").strip("_")
+        return f"{owner_address}.{safe_name or f'member_{index}'}"
+
+    def _append_member_pointer_edges(
+        self,
+        members: list[StructMember],
+        pointer_edges: list[PointerEdge],
+        edge_keys: set[tuple[str, str]],
+        freed_target_addrs: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
+    ):
+        class_info = class_info or {}
+        for member in members:
+            if not member.address:
+                continue
+            if not self._is_pointer_like_type(member.type):
+                target_addrs = []
+            else:
+                target_addrs = [member.value]
+            target_addrs.extend(self._structured_member_pointer_targets(member, class_info))
+            for target_addr in target_addrs:
+                if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                    continue
+                key = (member.address, target_addr)
+                if key in edge_keys:
+                    continue
+                pointer_edges.append(PointerEdge(
+                    source_address=member.address,
+                    target_address=target_addr,
+                    is_dangling=target_addr in freed_target_addrs,
+                ))
+                edge_keys.add(key)
+
+    def _structured_member_pointer_targets(
+        self,
+        member: StructMember,
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[str]:
+        member_types = self._structured_array_element_member_types(member.type, class_info or {})
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+            return []
+        payload = self._structured_payload(member.value)
+        if not payload:
+            return []
+        targets: list[str] = []
+        for nested in self._parse_structured_members(payload):
+            nested_type = member_types.get(nested.name, "")
+            if not self._is_pointer_like_type(nested_type):
+                continue
+            value = self._clean_value(nested.value)
+            if value.startswith("0xS") or value.startswith("0xH"):
+                targets.append(value)
+        return targets
+
+    def _append_array_pointer_edges(
+        self,
+        elements: list[ArrayElement],
+        pointer_edges: list[PointerEdge],
+        edge_keys: set[tuple[str, str]],
+        dangling_target_addrs: set[str],
+        class_info: dict[str, _ClassInfo] | None = None,
+    ):
+        class_info = class_info or {}
+        for element in elements:
+            if not element.address:
+                continue
+            target_addrs: list[str] = []
+            if self._is_pointer_like_type(element.type):
+                target_addrs.append(element.value)
+            target_addrs.extend(self._structured_array_element_pointer_targets(element, class_info))
+            for target_addr in target_addrs:
+                if not (target_addr.startswith("0xS") or target_addr.startswith("0xH")):
+                    continue
+                key = (element.address, target_addr)
+                if key in edge_keys:
+                    continue
+                pointer_edges.append(PointerEdge(
+                    source_address=element.address,
+                    target_address=target_addr,
+                    is_dangling=target_addr in dangling_target_addrs,
+                ))
+                edge_keys.add(key)
+
+    def _structured_array_element_pointer_targets(
+        self,
+        element: ArrayElement,
+        class_info: dict[str, _ClassInfo] | None = None,
+    ) -> list[str]:
+        member_types = self._structured_array_element_member_types(element.type, class_info or {})
+        if not any(self._is_pointer_like_type(member_type) for member_type in member_types.values()):
+            return []
+        payload = self._structured_payload(element.value)
+        if not payload:
+            return []
+        targets: list[str] = []
+        for member in self._parse_structured_members(payload):
+            member_type = member_types.get(member.name, "")
+            if not self._is_pointer_like_type(member_type):
+                continue
+            value = self._clean_value(member.value)
+            if value.startswith("0xS") or value.startswith("0xH"):
+                targets.append(value)
+        return targets
+
+    def _target_sim_addr(
+        self,
+        actual_addr: str,
+        actual_stack_lookup: dict[str, str],
+        stack_addr_map: dict[str, str],
+        heap_addr_map: dict[str, str],
+    ) -> str:
+        if actual_addr in actual_stack_lookup:
+            return actual_stack_lookup[actual_addr]
+        if actual_addr in stack_addr_map:
+            return stack_addr_map[actual_addr]
+        return self._sim_addr(heap_addr_map, actual_addr, "H")
+
+    @staticmethod
+    def _is_hex_addr(value: str) -> bool:
+        return bool(re.fullmatch(r"0x[0-9a-fA-F]+", value.strip()))
+
+    @staticmethod
+    def _normalize_actual_addr(value: str) -> str:
+        stripped = value.strip()
+        if not DebugExecutor._is_hex_addr(stripped):
+            return stripped
+        return f"0x{int(stripped, 16):x}"
+
+    @staticmethod
+    def _is_cdb_addr(value: str) -> bool:
+        stripped = value.strip().replace("`", "")
+        return bool(re.fullmatch(r"(?:0x)?[0-9a-fA-F]{4,}", stripped))
+
+    @staticmethod
+    def _normalize_cdb_addr(value: str) -> str:
+        stripped = value.strip().replace("`", "")
+        if stripped.startswith("cdb:"):
+            return stripped
+        if stripped.lower().startswith("0x"):
+            return DebugExecutor._normalize_actual_addr(stripped)
+        if re.fullmatch(r"[0-9a-fA-F]{4,}", stripped):
+            return DebugExecutor._normalize_actual_addr(f"0x{stripped}")
+        return stripped
+
+    @staticmethod
+    def _path_name(path_text: str) -> str:
+        return re.split(r"[\\/]", path_text.strip())[-1]
+
+    @staticmethod
+    def _structured_payload(value_text: str) -> str:
+        start = value_text.find("{")
+        end = value_text.rfind("}")
+        if start < 0 or end <= start:
+            return ""
+        return value_text[start + 1:end].strip()
+
+    @staticmethod
+    def _split_structured_items(payload: str) -> list[str]:
+        items: list[str] = []
+        current: list[str] = []
+        depth = 0
+        in_string = False
+        escape = False
+        for ch in payload:
+            if in_string:
+                current.append(ch)
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                current.append(ch)
+                continue
+            if ch == "{":
+                depth += 1
+                current.append(ch)
+                continue
+            if ch == "}":
+                depth = max(0, depth - 1)
+                current.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                item = "".join(current).strip()
+                if item:
+                    items.append(item)
+                current = []
+                continue
+            current.append(ch)
+
+        item = "".join(current).strip()
+        if item:
+            items.append(item)
+        return items
+
+    @staticmethod
+    def _parse_structured_elements(payload: str, element_type: str = "") -> list[_ParsedElement]:
+        items = DebugExecutor._split_structured_items(payload)
+        elements: list[_ParsedElement] = []
+        indexed = False
+        for idx, item in enumerate(items):
+            match = re.match(r"^\[(?P<index>\d+)\]\s*=\s*(?P<value>.*)$", item)
+            if match:
+                indexed = True
+                elements.append(DebugExecutor._parsed_element_from_raw(
+                    int(match.group("index")),
+                    element_type,
+                    match.group("value"),
+                ))
+                continue
+            if indexed:
+                return []
+            if re.match(r"^[A-Za-z_]\w*\s*=", item):
+                return []
+            elements.append(DebugExecutor._parsed_element_from_raw(idx, element_type, item))
+        return elements if elements and (indexed or len(items) > 1) else []
+
+    @staticmethod
+    def _parsed_element_from_raw(index: int, type_text: str, raw_value: str) -> _ParsedElement:
+        clean_type = DebugExecutor._clean_type(type_text)
+        value = DebugExecutor._clean_value(raw_value)
+        if DebugExecutor._is_cdb_addr(value):
+            value = DebugExecutor._normalize_cdb_addr(value)
+        elif DebugExecutor._is_hex_addr(value):
+            value = DebugExecutor._normalize_actual_addr(value)
+        element = _ParsedElement(index=index, type=clean_type, value=value)
+        if (
+            DebugExecutor._is_pointer_like_type(clean_type)
+            and (DebugExecutor._is_hex_addr(value) or DebugExecutor._is_cdb_addr(value))
+            and not DebugExecutor._is_null(value)
+        ):
+            element.pointee_addr = (
+                DebugExecutor._normalize_cdb_addr(value)
+                if DebugExecutor._is_cdb_addr(value)
+                else DebugExecutor._normalize_actual_addr(value)
+            )
+            element.pointee_type = DebugExecutor._pointee_type(clean_type)
+            payload = DebugExecutor._structured_payload(raw_value)
+            if payload:
+                nested_elements = DebugExecutor._parse_structured_elements(
+                    payload,
+                    DebugExecutor._array_element_type(element.pointee_type),
+                )
+                nested_members = [] if nested_elements else DebugExecutor._parse_structured_members(payload)
+                if nested_members:
+                    element.pointee_members = nested_members
+                elif not nested_elements:
+                    element.pointee_value = DebugExecutor._clean_value(payload)
+        return element
+
+    @staticmethod
+    def _upsert_parsed_element(elements: list[_ParsedElement], element: _ParsedElement):
+        for idx, existing in enumerate(elements):
+            if existing.index == element.index:
+                elements[idx] = element
+                return
+        elements.append(element)
+
+    @staticmethod
+    def _parse_structured_members(payload: str) -> list[_ParsedMember]:
+        members: list[_ParsedMember] = []
+        for item in DebugExecutor._split_structured_items(payload):
+            match = re.match(r"^(?:\.|this->)?(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<value>.*)$", item)
+            if not match:
+                return []
+            members.append(_ParsedMember(
+                name=match.group("name"),
+                type="",
+                value=DebugExecutor._clean_value(match.group("value")),
+            ))
+        return members
+
+    @staticmethod
+    def _wrapped_std_array_elements(var: _ParsedVar) -> list[_ParsedElement]:
+        if not DebugExecutor._is_std_array_type(var.type):
+            return []
+        for member in var.members:
+            payload = DebugExecutor._structured_payload(member.value)
+            if not payload:
+                continue
+            elements = DebugExecutor._parse_structured_elements(
+                payload,
+                DebugExecutor._array_element_type(member.type),
+            )
+            if elements:
+                return elements
+        return []
+
+    @staticmethod
+    def _wrapped_container_adapter_elements(var: _ParsedVar) -> list[_ParsedElement]:
+        if not DebugExecutor._is_container_adapter_type(var.type):
+            return []
+        for member in var.members:
+            if member.name not in {"c", "container", "_Get_container"}:
+                continue
+            payload = DebugExecutor._structured_payload(member.value)
+            if not payload:
+                continue
+            elements = DebugExecutor._parse_structured_elements(
+                payload,
+                DebugExecutor._adapter_element_type(var.type),
+            )
+            if elements:
+                return elements
+        return []
+
+    @staticmethod
+    def _array_element_type(type_text: str) -> str:
+        cleaned = DebugExecutor._clean_type(type_text)
+        if "[" in cleaned:
+            return re.sub(r"\s*\[[^\]]*\]", "", cleaned).strip()
+        return cleaned
+
+    @staticmethod
+    def _is_std_array_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("array<", "std::array<", "std::__1::array<"))
+
+    @staticmethod
+    def _is_container_adapter_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(
+            token in compact
+            for token in (
+                "queue<",
+                "stack<",
+                "priority_queue<",
+                "std::queue<",
+                "std::stack<",
+                "std::priority_queue<",
+                "std::__1::queue<",
+                "std::__1::stack<",
+                "std::__1::priority_queue<",
+            )
+        )
+
+    @staticmethod
+    def _adapter_element_type(type_text: str) -> str:
+        return DebugExecutor._first_template_arg(type_text)
+
+    @staticmethod
+    def _first_template_arg(type_text: str) -> str:
+        compact_start = type_text.find("<")
+        if compact_start < 0:
+            return ""
+        depth = 0
+        arg: list[str] = []
+        for ch in type_text[compact_start + 1:]:
+            if ch == "<":
+                depth += 1
+                arg.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    break
+                depth -= 1
+                arg.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                break
+            arg.append(ch)
+        return DebugExecutor._clean_type("".join(arg).strip())
+
+    @staticmethod
+    def _is_optional_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("optional<", "std::optional<", "std::__1::optional<"))
+
+    @staticmethod
+    def _is_variant_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("variant<", "std::variant<", "std::__1::variant<"))
+
+    @staticmethod
+    def _is_pair_type(type_text: str) -> bool:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        return any(token in compact for token in ("pair<", "std::pair<", "std::__1::pair<"))
+
+    @staticmethod
+    def _pair_type_has_pointer_member(type_text: str) -> bool:
+        if not DebugExecutor._is_pair_type(type_text):
+            return False
+        return any(DebugExecutor._is_pointer_like_type(arg) for arg in DebugExecutor._template_args(type_text)[:2])
+
+    @staticmethod
+    def _pair_member_type(type_text: str, member_name: str) -> str:
+        args = DebugExecutor._template_args(type_text)
+        if member_name == "first" and len(args) >= 1:
+            return DebugExecutor._clean_type(re.sub(r"\bconst\b", "", args[0]).strip())
+        if member_name == "second" and len(args) >= 2:
+            return DebugExecutor._clean_type(re.sub(r"\bconst\b", "", args[1]).strip())
+        return ""
+
+    @staticmethod
+    def _template_args(type_text: str) -> list[str]:
+        start = type_text.find("<")
+        if start < 0:
+            return []
+        args: list[str] = []
+        current: list[str] = []
+        depth = 0
+        for ch in type_text[start + 1:]:
+            if ch == "<":
+                depth += 1
+                current.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    item = "".join(current).strip()
+                    if item:
+                        args.append(DebugExecutor._clean_type(item))
+                    break
+                depth -= 1
+                current.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                item = "".join(current).strip()
+                if item:
+                    args.append(DebugExecutor._clean_type(item))
+                current = []
+                continue
+            current.append(ch)
+        return args
+
+    @staticmethod
+    def _is_optional_empty_summary(value: str) -> bool:
+        compact = value.strip().replace(" ", "").lower()
+        return compact in {"hasvalue=false", "nullopt", "empty"}
+
+    @staticmethod
+    def _is_null(value: str) -> bool:
+        stripped = value.strip().lower()
+        return stripped in {"0x0", "0x0000000000000000", "nullptr", "null"}
+
+    @staticmethod
+    def _clean_type(type_text: str) -> str:
+        return re.sub(r"\s+", " ", type_text.replace(" *", "*").replace(" &", "&")).strip()
+
+    @staticmethod
+    def _object_class_name(type_text: str) -> str:
+        cleaned = DebugExecutor._clean_type(type_text)
+        cleaned = re.sub(r"\b(?:class|struct|const|volatile)\b", "", cleaned).strip()
+        cleaned = DebugExecutor._strip_top_level_pointer_reference(cleaned)
+        for prefix in ("std::__1::", "std::"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+                break
+        if "::" in cleaned and "<" not in cleaned:
+            cleaned = cleaned.rsplit("::", 1)[-1]
+        return cleaned
+
+    @staticmethod
+    def _strip_top_level_pointer_reference(type_text: str) -> str:
+        depth = 0
+        chars: list[str] = []
+        for ch in type_text:
+            if ch == "<":
+                depth += 1
+                chars.append(ch)
+                continue
+            if ch == ">":
+                depth = max(0, depth - 1)
+                chars.append(ch)
+                continue
+            if depth == 0 and ch in "*&":
+                continue
+            chars.append(ch)
+        return DebugExecutor._clean_type("".join(chars).strip())
+
+    @staticmethod
+    def _clean_value(value: str) -> str:
+        cleaned = value.strip()
+        if cleaned == "{":
+            return ""
+        if "{" in cleaned and not cleaned.startswith("{"):
+            cleaned = cleaned.split("{", 1)[0].strip()
+        cleaned = cleaned.strip('"')
+        if DebugExecutor._is_hex_addr(cleaned):
+            return cleaned
+        return DebugExecutor._clean_float_value(cleaned)
+
+    @staticmethod
+    def _clean_value_preserving_payload(value: str) -> str:
+        return value.strip() if DebugExecutor._structured_payload(value) else DebugExecutor._clean_value(value)
+
+    @staticmethod
+    def _clean_cdb_value(value: str) -> str:
+        cleaned = value.strip()
+        if cleaned.startswith("0n") and cleaned[2:].lstrip("-").isdigit():
+            return cleaned[2:]
+        return DebugExecutor._clean_value(cleaned)
+
+    @staticmethod
+    def _clean_float_value(value: str) -> str:
+        if not re.fullmatch(r"[-+]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+[eE][-+]?\d+))(?:[eE][-+]?\d+)?", value):
+            return value
+        try:
+            return f"{float(value):.15g}"
+        except ValueError:
+            return value
+
+    @staticmethod
+    def _clean_frame_name(function: str) -> str:
+        name = function.strip()
+        if "!" in name:
+            name = name.rsplit("!", 1)[-1]
+        name = re.sub(r"\+0x[0-9a-fA-F]+$", "", name)
+        name = name.split("(", 1)[0].strip()
+        if "::" in name:
+            name = name.rsplit("::", 1)[-1]
+        return name or "main"
+
+    @staticmethod
+    def _is_lambda_type(type_text: str) -> bool:
+        cleaned = type_text.strip().lower()
+        return "lambda" in cleaned or cleaned in {"(unnamed class)", "unnamed class"}
+
+    @staticmethod
+    def _pointee_type(pointer_type: str) -> str:
+        smart_type = DebugExecutor._smart_pointee_type(pointer_type)
+        if smart_type:
+            return smart_type
+        return pointer_type.replace("*", "").strip() or "unknown"
+
+    @staticmethod
+    def _is_pointer_like_type(type_text: str) -> bool:
+        return DebugExecutor._is_pointer_type(type_text) or DebugExecutor._is_smart_pointer_type(type_text)
+
+    @staticmethod
+    def _is_pointer_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        if re.search(r"\[[^\]]*\]", cleaned):
+            return False
+        return DebugExecutor._has_top_level_symbol(cleaned, "*")
+
+    @staticmethod
+    def _is_reference_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        return (
+            DebugExecutor._has_top_level_symbol(cleaned, "&")
+            and not DebugExecutor._is_pointer_type(cleaned)
+        )
+
+    @staticmethod
+    def _has_top_level_symbol(type_text: str, symbol: str) -> bool:
+        depth = 0
+        for ch in type_text:
+            if ch == "<":
+                depth += 1
+                continue
+            if ch == ">":
+                depth = max(0, depth - 1)
+                continue
+            if ch == symbol and depth == 0:
+                return True
+        return False
+
+    @staticmethod
+    def _is_smart_pointer_type(type_text: str) -> bool:
+        return DebugExecutor._is_top_level_template_type(
+            type_text,
+            ("unique_ptr", "shared_ptr", "weak_ptr"),
+        )
+
+    @staticmethod
+    def _is_shared_pointer_type(type_text: str) -> bool:
+        return DebugExecutor._is_top_level_template_type(type_text, ("shared_ptr",))
+
+    @staticmethod
+    def _is_weak_pointer_type(type_text: str) -> bool:
+        return DebugExecutor._is_top_level_template_type(type_text, ("weak_ptr",))
+
+    @staticmethod
+    def _is_top_level_template_type(type_text: str, names: tuple[str, ...]) -> bool:
+        key = DebugExecutor._top_level_template_type_key(type_text)
+        return any(key.startswith(f"{name}<") for name in names)
+
+    @staticmethod
+    def _top_level_template_type_key(type_text: str) -> str:
+        compact = DebugExecutor._clean_type(type_text).replace(" ", "")
+        changed = True
+        while changed:
+            changed = False
+            for prefix in ("class", "struct", "const", "volatile"):
+                if compact.startswith(prefix):
+                    compact = compact[len(prefix):]
+                    changed = True
+        for prefix in ("std::__1::", "std::"):
+            if compact.startswith(prefix):
+                compact = compact[len(prefix):]
+                break
+        return compact
+
+    @staticmethod
+    def _smart_pointee_type(type_text: str) -> str:
+        compact_start = type_text.find("<")
+        if compact_start < 0 or not DebugExecutor._is_smart_pointer_type(type_text):
+            return ""
+        depth = 0
+        arg: list[str] = []
+        for ch in type_text[compact_start + 1:]:
+            if ch == "<":
+                depth += 1
+                arg.append(ch)
+                continue
+            if ch == ">":
+                if depth == 0:
+                    break
+                depth -= 1
+                arg.append(ch)
+                continue
+            if ch == "," and depth == 0:
+                break
+            arg.append(ch)
+        return DebugExecutor._clean_type("".join(arg).strip())
+
+    @staticmethod
+    def _array_index(name: str) -> int | None:
+        match = re.fullmatch(r"\[(\d+)\]", name)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _is_std_string_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        cleaned = re.sub(r"\b(?:class|struct|const|volatile)\b", "", cleaned).strip()
+        compact = re.sub(r"\s+", "", cleaned)
+        if compact.startswith("std::__1::"):
+            compact = "std::" + compact[len("std::__1::"):]
+        return (
+            compact in {"string", "std::string"}
+            or compact.startswith("std::basic_string<char")
+        )
+
+    @staticmethod
+    def _is_expandable_cdb_member_type(type_text: str) -> bool:
+        cleaned = DebugExecutor._clean_type(type_text)
+        compact = re.sub(r"\s+", "", cleaned)
+        if DebugExecutor._is_std_string_type(compact):
+            return True
+        return any(
+            token in compact
+            for token in (
+                "array<",
+                "deque<",
+                "list<",
+                "map<",
+                "multimap<",
+                "multiset<",
+                "optional<",
+                "pair<",
+                "set<",
+                "tuple<",
+                "unordered_map<",
+                "unordered_set<",
+                "variant<",
+                "vector<",
+            )
+        )
+
+    @staticmethod
+    def _collapse_cdb_string_children(variables: list[_ParsedVar]):
+        for var in variables:
+            if var.elements and DebugExecutor._is_std_string_type(var.type):
+                string_value = DebugExecutor._string_from_char_elements(var.elements)
+                if string_value is not None:
+                    var.value = string_value
+                    var.elements = []
+            if var.pointee_elements and DebugExecutor._is_std_string_type(var.pointee_type):
+                string_value = DebugExecutor._string_from_char_elements(var.pointee_elements)
+                if string_value is not None:
+                    var.pointee_value = string_value
+                    var.pointee_elements = []
+
+    @staticmethod
+    def _string_from_char_elements(elements: list[_ParsedElement]) -> str | None:
+        if not elements:
+            return None
+        chars: list[str] = []
+        for element in sorted(elements, key=lambda item: item.index):
+            value = DebugExecutor._clean_value(element.value)
+            match = re.search(r"'(?P<char>(?:\\.|[^'])*)'", value)
+            if match is None:
+                return None
+            char = DebugExecutor._decode_cdb_char_literal(match.group("char"))
+            if char == "\0":
+                break
+            chars.append(char)
+        return "".join(chars)
+
+    @staticmethod
+    def _decode_cdb_char_literal(value: str) -> str:
+        if not value.startswith("\\"):
+            return value
+        if len(value) == 2:
+            return {
+                "0": "\0",
+                "n": "\n",
+                "r": "\r",
+                "t": "\t",
+                "\\": "\\",
+                "'": "'",
+                '"': '"',
+            }.get(value[1], value)
+        hex_match = re.fullmatch(r"\\x([0-9a-fA-F]{1,2})", value)
+        if hex_match:
+            return chr(int(hex_match.group(1), 16))
+        return value
+
+    @staticmethod
+    def _format_elements(elements: list[_ParsedElement]) -> str:
+        return "{" + ", ".join(
+            f"[{element.index}]={DebugExecutor._clean_value(element.value)}"
+            for element in elements
+        ) + "}"
+
+    @staticmethod
+    def _format_array_element_models(elements: list[ArrayElement]) -> str:
+        return "{" + ", ".join(
+            f"[{element.index}]={element.value}"
+            for element in elements
+        ) + "}"
+
+    @staticmethod
+    def _format_members(members: list[_ParsedMember]) -> str:
+        return "{" + ", ".join(
+            f"{member.name}={DebugExecutor._clean_value(member.value)}"
+            for member in members
+        ) + "}"
+
+    @staticmethod
+    def _format_struct_members(members: list[StructMember]) -> str:
+        return "{" + ", ".join(
+            f"{member.name}={member.value}"
+            for member in members
+        ) + "}"

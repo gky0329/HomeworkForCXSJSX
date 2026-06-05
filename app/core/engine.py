@@ -13,7 +13,8 @@ from app.core.state_diff import StateDiffEngine, DiffResult
 from app.ui.main_window import MainWindow
 from app.ui.canvas.memory_canvas import MemoryCanvas
 from app.ui.canvas.canvas_animator import CanvasAnimator
-from app.core.execution_worker import ExecutionWorker
+from app.core.execution_worker import ExecutionResult, ExecutionWorker
+from app.core.debug_executor import DebugExecutor
 from app.ui.widgets import error_dialog
 from app.ui.widgets.threading import retire_worker
 from app.services import error_store
@@ -49,6 +50,20 @@ def _has_api_key() -> bool:
     return False
 
 
+def _has_local_debugger(config_path: Path | None = None) -> bool:
+    try:
+        return DebugExecutor.is_available(config_path)
+    except Exception:
+        return False
+
+
+def _can_run_locally(code: str, stdin_text: str = "", config_path: Path | None = None) -> bool:
+    try:
+        return DebugExecutor.can_run_code_locally(code, stdin_text, config_path)
+    except Exception:
+        return False
+
+
 class Engine:
     def __init__(self, window: MainWindow, config_path: Path | None = None):
         self._window = window
@@ -62,6 +77,7 @@ class Engine:
         self._worker: ExecutionWorker | None = None
         self._retired_workers: list[ExecutionWorker] = []
         self._last_code: str = ""
+        self._execution_diagnostics: str = ""
         self._auto_play_timer = QTimer()
         self._auto_play_timer.timeout.connect(self._on_next)
         self._auto_play_ms = 800
@@ -89,50 +105,67 @@ class Engine:
                 ],
             )
             self._worker = None
+        self._execution_diagnostics = ""
         self._window.show_loading(False)
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
     def _on_run(self):
-        if not _has_api_key():
-            from app.ui.widgets.api_key_dialog import show_api_key_dialog
-            show_api_key_dialog(self._window)
-            if not _has_api_key():
-                self._window.statusBar().showMessage(
-                    tr("API key not configured - click Settings or set provider API key")
-                )
-                return
-
         code = self._window.get_code()
         if not code:
             self._window.statusBar().showMessage(tr("No code to run"))
             return
+        stdin_text = self._window.get_stdin()
+
+        if not _has_api_key() and not _can_run_locally(code, stdin_text, self._config_path):
+            from app.ui.widgets.api_key_dialog import show_api_key_dialog
+            show_api_key_dialog(self._window)
+            if not _has_api_key() and not _can_run_locally(code, stdin_text, self._config_path):
+                self._window.statusBar().showMessage(
+                    tr("API key not configured - click Settings or set provider API key")
+                )
+                return
         self._last_code = code
 
         self.cancel_current_run()
 
         self._window.show_loading(True)
-        self._window.statusBar().showMessage(tr("Sending code to AI..."))
+        self._window.statusBar().showMessage(tr("Analyzing code..."))
 
-        self._worker = ExecutionWorker(code, self._config_path)
+        self._worker = ExecutionWorker(code, self._config_path, stdin_text)
         self._worker.finished.connect(self._on_trace_ready)
         self._worker.error.connect(self._on_trace_error)
         self._worker.start()
 
-    def _on_trace_ready(self, trace: ExecutionTrace):
+    def _on_trace_ready(self, result: ExecutionTrace | ExecutionResult):
+        if isinstance(result, ExecutionResult):
+            trace = result.trace
+            diagnostics = result.diagnostics
+        else:
+            trace = result
+            diagnostics = ""
+        self._execution_diagnostics = diagnostics
+
         self._window.show_loading(False)
         self._trace = trace
+        self._canvas.clear()
 
         if trace.steps:
+            self._canvas.prepare_trace_layout(trace.steps)
+            self._window.canvas_view.set_stable_fit_bounds(self._canvas.stable_fit_bounds())
             self._current_index = 0
             self._canvas.render_state(trace.steps[0])
             self._window.tracker_panel.set_state(trace.steps[0])
+            self._queue_canvas_fit()
             self._ingest_knowledge(trace)
             error_store.log_activity("Code Run", f"Executed {len(trace.steps)} steps")
-            self._window.statusBar().showMessage(
-                tr("Step 1/{total} - Press PageDown for next step", total=len(trace.steps))
-            )
+            message = tr("Step 1/{total} - Press PageDown for next step", total=len(trace.steps))
+            if diagnostics:
+                message = f"{message} [{diagnostics}]"
+            self._window.statusBar().showMessage(message)
         else:
             self._current_index = -1
+            self._execution_diagnostics = ""
+            self._window.canvas_view.clear_stable_fit_bounds()
             self._window.statusBar().showMessage(tr("AI returned empty trace"))
 
         self._update_controls()
@@ -140,6 +173,7 @@ class Engine:
 
     def _on_trace_error(self, error_msg: str):
         self._window.show_loading(False)
+        self._execution_diagnostics = ""
         self._window.statusBar().showMessage(
             tr("Error: {message}", message=error_msg.split(chr(10))[0])
         )
@@ -180,7 +214,7 @@ class Engine:
         self._window.tracker_panel.set_state(curr_state)
         self._animator.animate_diff(diff)
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
-            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
+            self._queue_canvas_fit()
         self._update_controls()
         self._highlight_current_line()
 
@@ -194,16 +228,22 @@ class Engine:
         self._canvas.render_state(curr_state)
         self._window.tracker_panel.set_state(curr_state)
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
-            QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
+            self._queue_canvas_fit()
         self._update_controls()
         self._highlight_current_line()
+
+    def _queue_canvas_fit(self):
+        QTimer.singleShot(0, self._window.canvas_view.zoom_fit)
 
     def _on_reset(self):
         self._auto_play_timer.stop()
         self._trace = None
         self._current_index = -1
+        self._execution_diagnostics = ""
         self._animator.stop_all()
         self._canvas.clear()
+        self._window.canvas_view.clear_stable_fit_bounds()
+        self._window.canvas_view.reset_view()
         self._window.tracker_panel.clear()
         self._window.step_label.setText(tr("Ready"))
         self._window.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
@@ -299,11 +339,12 @@ class Engine:
         self._window.btn_autoplay.setEnabled(has_next)
         if not has_next:
             self._window.btn_autoplay.setChecked(False)
-        self._window.statusBar().showMessage(
-            tr(
-                "Step {current}/{total} - {hint}",
-                current=current,
-                total=total,
-                hint=tr("PageDown=next PageUp=prev") if self._trace else tr("Enter C++ code and click Run"),
-            )
+        message = tr(
+            "Step {current}/{total} - {hint}",
+            current=current,
+            total=total,
+            hint=tr("PageDown=next PageUp=prev") if self._trace else tr("Enter C++ code and click Run"),
         )
+        if self._trace and self._execution_diagnostics:
+            message = f"{message} [{self._execution_diagnostics}]"
+        self._window.statusBar().showMessage(message)

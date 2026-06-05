@@ -22,6 +22,7 @@ from app.ui.pages.knowledge_page import KnowledgePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
 from app.services.i18n import load_language, tr
+from app.core.demo_examples import ROADSHOW_DEMO_CODE
 
 
 ZOOM_FACTOR = 1.15
@@ -50,6 +51,29 @@ TAB_STYLE = (
 )
 
 EXAMPLE_CODES = {
+    "Roadshow Demo": ROADSHOW_DEMO_CODE,
+    "Teaching Basics": (
+        "class Student {\n"
+        "public:\n"
+        "  int score;\n"
+        "  double progress;\n"
+        "};\n"
+        "int scores[3] = {72, 85, 91};\n"
+        "int total = scores[0] + scores[1] + scores[2];\n"
+        "double average = total / 3.0;\n"
+        "int* focus = &total;\n"
+        "*focus = total + 5;\n"
+        "Student alice;\n"
+        "alice.score = 88;\n"
+        "alice.progress = 0.75;\n"
+        "Student* mentor = new Student();\n"
+        "mentor->score = alice.score + 7;\n"
+        "mentor->progress = 0.95;\n"
+        "int* reward = new int(mentor->score);\n"
+        "*reward = *reward + 2;\n"
+        "delete reward;\n"
+        "delete mentor;\n"
+    ),
     "Basic Variables": (
         "int a = 42;\n"
         "int b = a + 10;\n"
@@ -102,6 +126,7 @@ class CanvasView(QGraphicsView):
         self._zoom_level = 1.0
         self._panning = False
         self._pan_last_pos = QPointF()
+        self._stable_fit_bounds = QRectF()
         self.setAcceptDrops(True)
         self.setSceneRect(0, 0, SCENE_W, SCENE_H)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -186,11 +211,17 @@ class CanvasView(QGraphicsView):
             self.scale(1 / ZOOM_FACTOR, 1 / ZOOM_FACTOR)
 
     def zoom_fit(self):
-        fit_rect = self._fit_bounds()
+        fit_rect = self._stable_fit_bounds if self._stable_fit_bounds.isValid() else self._fit_bounds()
         if not fit_rect.isValid() or fit_rect.isEmpty():
             return
         self.fitInView(fit_rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._zoom_level = self.transform().m11()
+
+    def set_stable_fit_bounds(self, bounds: QRectF):
+        self._stable_fit_bounds = QRectF(bounds)
+
+    def clear_stable_fit_bounds(self):
+        self._stable_fit_bounds = QRectF()
 
     def _fit_bounds(self):
         scene = self.scene()
@@ -337,8 +368,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.btn_zoom_fit)
 
         self.auto_fit_check = QCheckBox(tr("Auto Fit"))
-        self.auto_fit_check.setChecked(True)
-        self.auto_fit_check.setToolTip(tr("Auto-fit canvas content on each step"))
+        self.auto_fit_check.setChecked(False)
+        self.auto_fit_check.setToolTip(tr("Keep fitting canvas content on every step"))
         header.addWidget(self.auto_fit_check)
 
         self.step_label = QLabel(tr("Ready"))
@@ -353,6 +384,29 @@ class MainWindow(QMainWindow):
         font_size = self._read_config_font_size()
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
+
+        left_pane = QWidget()
+        left_layout = QVBoxLayout(left_pane)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        left_layout.addWidget(self.code_editor, 1)
+
+        self.stdin_label = QLabel(tr("Program Input (stdin)"))
+        self.stdin_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 11px; padding: 4px 8px; "
+            f"background-color: {SURFACE}; border-top: 1px solid {BORDER};"
+        )
+        left_layout.addWidget(self.stdin_label, 0)
+
+        self.stdin_editor = QPlainTextEdit()
+        self.stdin_editor.setFixedHeight(92)
+        self.stdin_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", max(10, font_size - 2)))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
+        self.stdin_editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
+            f"border: none; border-top: 1px solid {BORDER}; padding: 6px; }}"
+        )
+        left_layout.addWidget(self.stdin_editor, 0)
 
         self.canvas_view = CanvasView()
         self.canvas_view.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -413,7 +467,7 @@ class MainWindow(QMainWindow):
 
         right_layout.addLayout(step_bar, 0)
 
-        splitter.addWidget(self.code_editor)
+        splitter.addWidget(left_pane)
         splitter.addWidget(right_pane)
         splitter.setSizes([500, 700])
         splitter.setStretchFactor(0, 4)
@@ -464,7 +518,7 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(12)
 
-        self._overlay_label = QLabel(tr("Analyzing code with AI..."))
+        self._overlay_label = QLabel(tr("Analyzing code..."))
         self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_label.setStyleSheet(
             f"QLabel {{ color: {HIGHLIGHT}; font-size: 24px; font-weight: bold; background: transparent; }}"
@@ -511,7 +565,7 @@ class MainWindow(QMainWindow):
             self._overlay.setGeometry(self.centralWidget().rect())
             self._overlay.raise_()
             self._load_start_time = time.time()
-            self._overlay_label.setText(tr("Analyzing code with AI..."))
+            self._overlay_label.setText(tr("Analyzing code..."))
             self._overlay_time.setText("")
             self._elapsed_timer.start(100)
         else:
@@ -522,6 +576,14 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._overlay.setGeometry(self.centralWidget().rect())
+
+    def closeEvent(self, event):
+        for page_attr in ("review_page", "knowledge_page", "file_page", "oj_page"):
+            page = getattr(self, page_attr, None)
+            shutdown = getattr(page, "shutdown_workers", None)
+            if callable(shutdown):
+                shutdown()
+        super().closeEvent(event)
 
     def _setup_shortcuts(self):
         self._global_shortcuts = ShortcutRegistry(self)
@@ -617,6 +679,8 @@ class MainWindow(QMainWindow):
         self.btn_next.setText(tr("Next"))
         self.btn_reset.setText(tr("Reset"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self.stdin_label.setText(tr("Program Input (stdin)"))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
         self.step_label.setText(tr("Ready") if "Ready" in self.step_label.text() or "就绪" in self.step_label.text() else self.step_label.text())
 
     def _setup_statusbar(self):
@@ -631,6 +695,9 @@ class MainWindow(QMainWindow):
 
     def get_code(self) -> str:
         return self.code_editor.toPlainText().strip()
+
+    def get_stdin(self) -> str:
+        return self.stdin_editor.toPlainText()
 
     def eventFilter(self, obj, event):
         if self._current_code_tab_active():
@@ -647,6 +714,8 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _current_code_tab_active(self) -> bool:
+        if not hasattr(self, "_tabs") or not hasattr(self, "_code_tab"):
+            return False
         return self._tabs.currentWidget() is self._code_tab
 
     def _retranslate_ui(self):
@@ -677,7 +746,9 @@ class MainWindow(QMainWindow):
         self.auto_fit_check.setText(tr("Auto Fit"))
         self.step_label.setText(tr("Ready"))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
-        self._overlay_label.setText(tr("Analyzing code with AI..."))
+        self.stdin_label.setText(tr("Program Input (stdin)"))
+        self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
+        self._overlay_label.setText(tr("Analyzing code..."))
         self._overlay_cancel_btn.setText(tr("Cancel"))
         if hasattr(self, "home_page"):
             self.home_page.retranslate_ui()

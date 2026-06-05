@@ -7,11 +7,32 @@ from app.ui.theme.colors import (
     STACK_BORDER, STACK_BG, STACK_TITLE, STACK_VAR_TEXT,
     HEAP_BORDER, HEAP_BG, EDGE_DANGLING,
 )
+from app.ui.canvas.object_layout import (
+    base_subobjects,
+    derived_object_members,
+    visible_object_members,
+    vtable_rows,
+)
 from app.ui.widgets.helpers import text_width
 
 
 def _text_width(text: str, font: QFont) -> float:
     return text_width(text, font)
+
+
+def _member_preview(members, limit: int = 3) -> str:
+    visible = visible_object_members(members)
+    parts = [f"{m.name}={m.value}" for m in visible[:limit]]
+    if len(visible) > limit:
+        parts.append("...")
+    return ", ".join(parts)
+
+
+def _object_header_text(var: Variable) -> str:
+    bases = f" : {', '.join(var.base_classes)}" if var.base_classes else ""
+    preview = _member_preview(var.members)
+    summary = f" = {{{preview}}}" if preview else ""
+    return f"  {var.name}: {var.class_name or var.type}{bases}{summary}"
 
 
 class VarItem(QGraphicsTextItem):
@@ -44,10 +65,7 @@ class VarItem(QGraphicsTextItem):
                 f"  {v.name}: λ = [{', '.join(caps)}]{badge_str}" if caps else f"  {v.name}: λ{badge_str}"
             )
         elif v.is_object:
-            bases = f" : {', '.join(v.base_classes)}" if v.base_classes else ""
-            self.setPlainText(
-                f"  {v.name}: {v.class_name or v.type}{bases}{badge_str}"
-            )
+            self.setPlainText(f"{_object_header_text(v)}{badge_str}")
         elif v.is_array and v.elements:
             items = [e.value for e in v.elements]
             self.setPlainText(
@@ -81,10 +99,13 @@ class StackItem(QGraphicsRectItem):
         super().__init__()
         self.frame = frame
         self.var_items: dict[str, VarItem] = {}
+        self.member_items: dict[str, QGraphicsTextItem] = {}
         self._layout_items: list[QGraphicsTextItem] = []
         self._on_item_moved = on_item_moved
         self._array_cells: list[QGraphicsRectItem] = []
         self._array_cells_by_var: dict[str, list[QGraphicsRectItem]] = {}
+        self._object_sections: list[dict[str, object]] = []
+        self.element_items: dict[str, QGraphicsRectItem] = {}
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
@@ -136,9 +157,12 @@ class StackItem(QGraphicsRectItem):
     def update_frame(self, frame: StackFrame):
         self.frame = frame
         self.var_items = {}
+        self.member_items = {}
         self._layout_items = []
         self._array_cells = []
         self._array_cells_by_var = {}
+        self._object_sections = []
+        self.element_items = {}
         self._clear_children()
 
         self._title_item = QGraphicsTextItem(self)
@@ -223,6 +247,7 @@ class StackItem(QGraphicsRectItem):
         total_h = y + 4
         self.prepareGeometryChange()
         self.setRect(0, 0, width, total_h)
+        self._layout_object_sections()
         self._clamp_within_scene()
         if self._on_item_moved:
             try:
@@ -283,11 +308,16 @@ class StackItem(QGraphicsRectItem):
                 1 for flag in [
                     var.is_destroyed or var.is_constructed,
                     var.is_temporary,
-                    bool(var.base_classes),
-                    bool(var.virtual_methods),
                 ] if flag
             )
-        y += 18 * len([m for m in var.members if m.name != "_vptr"])
+        y += 32 * len(base_subobjects(var.base_classes, var.members))
+        rows = vtable_rows(var.class_name, var.type, var.base_classes, var.virtual_methods)
+        if rows:
+            y += 16 * (1 + len(rows))
+        derived_members = derived_object_members(var.base_classes, var.members)
+        if var.base_classes and derived_members:
+            y += 16
+        y += 18 * len(derived_members)
         return y
 
     def _function_object_height(self, var: Variable, y_offset: float) -> float:
@@ -308,6 +338,8 @@ class StackItem(QGraphicsRectItem):
             cell.setZValue(-0.5)
             self._array_cells.append(cell)
             cells.append(cell)
+            if elem.address:
+                self.element_items[elem.address] = cell
         self._array_cells_by_var[var.address] = cells
 
     def _array_cell_width(self, var: Variable, font: QFont) -> float:
@@ -382,8 +414,31 @@ class StackItem(QGraphicsRectItem):
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(self.PADDING + 16, y)
             self._layout_items.append(label)
+            if m.address:
+                self.member_items[m.address] = label
             y += 18
         return y
+
+    def _make_object_section(self, color: str, items: list[QGraphicsTextItem]):
+        rect = QGraphicsRectItem(self)
+        rect.setPen(QPen(QColor(color), 1, Qt.PenStyle.DashLine))
+        fill = QColor(color)
+        fill.setAlpha(28)
+        rect.setBrush(QBrush(fill))
+        rect.setZValue(-0.75)
+        self._object_sections.append({"rect": rect, "items": items})
+
+    def _layout_object_sections(self):
+        for section in self._object_sections:
+            rect = section.get("rect")
+            items = section.get("items")
+            if not isinstance(rect, QGraphicsRectItem) or not isinstance(items, list) or not items:
+                continue
+            top = min(item.pos().y() for item in items)
+            bottom = max(item.pos().y() + item.boundingRect().height() for item in items)
+            left = min(item.pos().x() for item in items) - 6.0
+            right = self.rect().width() - self.PADDING
+            rect.setRect(left, top - 2.0, max(36.0, right - left), max(18.0, bottom - top + 4.0))
 
     def _draw_object(self, var, y_offset: float) -> float:
         y = y_offset
@@ -408,37 +463,76 @@ class StackItem(QGraphicsRectItem):
             badge.setPos(self.PADDING + 12, y)
             self._layout_items.append(badge)
             y += 16
-        if var.base_classes:
-            bases_label = QGraphicsTextItem(
-                f"  ⬆ extends {', '.join(var.base_classes)}", self
-            )
-            bases_label.setDefaultTextColor(QColor("#CE9178"))
-            bases_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
-            bases_label.setPos(self.PADDING + 12, y)
-            self._layout_items.append(bases_label)
+        body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
+        member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
+        for base, member in base_subobjects(var.base_classes, var.members):
+            section_items: list[QGraphicsTextItem] = []
+            base_label = QGraphicsTextItem(f"  base subobject: {base}", self)
+            base_label.setDefaultTextColor(QColor("#CE9178"))
+            base_label.setFont(body_font)
+            base_label.setPos(self.PADDING + 12, y)
+            self._layout_items.append(base_label)
+            section_items.append(base_label)
             y += 16
 
-        if var.virtual_methods:
-            vtable_label = QGraphicsTextItem(
-                f"  [vtable] {' '.join(var.virtual_methods)}", self
-            )
+            state = member.value if member is not None and member.value else "<base layout>"
+            state_label = QGraphicsTextItem(f"    contains {base} = {state}", self)
+            state_label.setDefaultTextColor(QColor("#CE9178"))
+            state_label.setFont(body_font)
+            state_label.setPos(self.PADDING + 20, y)
+            self._layout_items.append(state_label)
+            section_items.append(state_label)
+            if member is not None and member.address:
+                self.member_items[member.address] = state_label
+            y += 16
+            self._make_object_section("#CE9178", section_items)
+
+        rows = vtable_rows(var.class_name, var.type, var.base_classes, var.virtual_methods)
+        if rows:
+            section_items = []
+            vtable_label = QGraphicsTextItem(f"  vptr -> {(var.class_name or var.type)} vtable", self)
             vtable_label.setDefaultTextColor(QColor("#DCDCAA"))
-            vtable_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
+            vtable_label.setFont(body_font)
             vtable_label.setPos(self.PADDING + 12, y)
             self._layout_items.append(vtable_label)
+            section_items.append(vtable_label)
             y += 16
+            for row in rows:
+                slot_label = QGraphicsTextItem(f"    {row}", self)
+                slot_label.setDefaultTextColor(QColor("#DCDCAA"))
+                slot_label.setFont(body_font)
+                slot_label.setPos(self.PADDING + 20, y)
+                self._layout_items.append(slot_label)
+                section_items.append(slot_label)
+                y += 16
+            self._make_object_section("#DCDCAA", section_items)
 
-        for m in var.members:
-            if m.name == "_vptr":
-                continue
-            color = "#9CDCFE"
+        derived_members = derived_object_members(var.base_classes, var.members)
+        if var.base_classes and derived_members:
+            section_items = []
+            derived_label = QGraphicsTextItem(f"  derived fields: {var.class_name or var.type}", self)
+            derived_label.setDefaultTextColor(QColor("#9CDCFE"))
+            derived_label.setFont(body_font)
+            derived_label.setPos(self.PADDING + 12, y)
+            self._layout_items.append(derived_label)
+            section_items.append(derived_label)
+            y += 16
+            self._make_object_section("#9CDCFE", section_items)
+        else:
+            section_items = []
+
+        for m in derived_members:
             label = QGraphicsTextItem(
                 f"    .{m.name}: {m.type} = {m.value}", self
             )
-            label.setDefaultTextColor(QColor(color))
-            label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setFont(member_font)
             label.setPos(self.PADDING + 12, y)
             self._layout_items.append(label)
+            if section_items:
+                section_items.append(label)
+            if m.address:
+                self.member_items[m.address] = label
             y += 18
         return y
 
@@ -469,10 +563,18 @@ class StackItem(QGraphicsRectItem):
         max_width = _text_width(frame.frame_name, title_font)
         for var in frame.variables:
             if var.is_object:
-                max_width = max(max_width, _text_width(f"  {var.name}: {var.class_name or var.type}", body_font))
-                for m in var.members:
-                    if m.name == "_vptr":
-                        continue
+                max_width = max(max_width, _text_width(_object_header_text(var), body_font))
+                for base, member in base_subobjects(var.base_classes, var.members):
+                    max_width = max(max_width, _text_width(f"  base subobject: {base}", small_font))
+                    state = member.value if member is not None and member.value else "<base layout>"
+                    max_width = max(max_width, _text_width(f"    contains {base} = {state}", small_font))
+                for row in vtable_rows(var.class_name, var.type, var.base_classes, var.virtual_methods):
+                    max_width = max(max_width, _text_width(f"    {row}", small_font))
+                if var.virtual_methods:
+                    max_width = max(max_width, _text_width(f"  vptr -> {(var.class_name or var.type)} vtable", small_font))
+                if var.base_classes and derived_object_members(var.base_classes, var.members):
+                    max_width = max(max_width, _text_width(f"  derived fields: {var.class_name or var.type}", small_font))
+                for m in derived_object_members(var.base_classes, var.members):
                     max_width = max(max_width, _text_width(f"    .{m.name}: {m.type} = {m.value}", body_font))
             elif var.is_function_object:
                 max_width = max(max_width, _text_width(f"  {var.name}: λ", body_font))

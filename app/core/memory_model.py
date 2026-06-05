@@ -20,18 +20,21 @@ class MemoryBaseModel(BaseModel):
 
 class ArrayElement(MemoryBaseModel):
     index: int = 0
+    type: str = ""
     value: str = ""
+    address: str = ""
 
     _normalize_index = field_validator("index", mode="before")(_zero_if_none)
-    _normalize_text = field_validator("value", mode="before")(_empty_string_if_none)
+    _normalize_text = field_validator("type", "value", "address", mode="before")(_empty_string_if_none)
 
 
 class StructMember(MemoryBaseModel):
     name: str = ""
     type: str = ""
     value: str = ""
+    address: str = ""
 
-    _normalize_text = field_validator("name", "type", "value", mode="before")(_empty_string_if_none)
+    _normalize_text = field_validator("name", "type", "value", "address", mode="before")(_empty_string_if_none)
 
 
 class LambdaCapture(MemoryBaseModel):

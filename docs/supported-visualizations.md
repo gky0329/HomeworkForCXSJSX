@@ -85,7 +85,51 @@
 - cell 宽度根据“元素值文本宽度”和“索引文本宽度”二者较大值自动计算
 - 整个 HeapItem 宽度取“标题行宽度”和“所有 cell 总宽度”中的较大值，避免标题溢出
 
+`std::array<T, N>` 会解包其调试器实现字段（如 `__elems_` / `_Elems`），按普通数组的 `elements` cell 渲染，而不是显示为单个对象成员。
+
+当 `std::array` / 容器元素本身是结构体或类时，元素值中的指针成员会根据源码字段类型映射成 `0xS...` / `0xH...` 模拟地址，并从对应 element cell 画出指针箭头。例如 `std::array<Node, 2>` 中 `nodes[1].next` 指向 `first` 时，`nodes[1]` cell 会显示 `next=0xS001`，并连到 `first`。
+
+STL 容器适配器（如 `std::stack<T>`、`std::queue<T>`、`std::priority_queue<T>`）会解包底层容器字段 `c`，按 `elements` cell 渲染当前存储内容，避免把实现细节当成业务成员展示。若适配器元素是指针，例如 `queue<int*>`，元素 cell 仍会作为箭头起点指向对应栈/堆目标。
+
+常见顺序/关联/哈希容器（如 `std::deque<T>`、`std::list<T>`、`std::set<T>`、`std::unordered_set<T>`、`std::unordered_map<K, V>`）在原生调试器路径下会按逻辑元素渲染为 `elements` cell。若元素或 entry value 是指针类型，例如 `list<int*>`、`set<int*>`、`unordered_set<int*>`、`unordered_map<string, int*>`，元素 cell 会作为箭头起点指向对应栈/堆目标。
+
+字符串容器会把调试器展开出的字符数组和实现字段折叠成业务可读的字符串元素。例如 `vector<string>{"one", "three", "two"}` 应显示为三个 cell：`one`、`three`、`two`，而不是 `_Mypair` / `_Bx` / 字符 buffer 等实现细节。
+
+`std::pair<A, B>` 会按对象成员展示 `first` / `second`。如果某个成员是指针，例如 `pair<Node*, string>`，`first` 成员行会作为箭头起点指向对应对象。`std::tuple<T...>` 会按 `[0]` / `[1]` / `[2]` 这类索引 cell 渲染；当调试器同时输出 tuple 摘要和子元素行时，执行器以子元素行为准，避免重复 cell。
+
 ---
+
+## 2.1 智能指针
+
+`std::unique_ptr<T>` / `std::shared_ptr<T>` 会按 pointer-like owner 渲染，目标对象显示为 heap block。多个 `shared_ptr` 指向同一对象时共享同一个 `0xH...` block，并分别画 owner edge。
+
+当 `std::unique_ptr<T>` / `std::shared_ptr<T>` 出现在 `std::vector` / `std::array` / `std::map` 等容器的模板参数里时，容器本身仍按 array/container cell 渲染，不能把整个容器误判为 pointer-like owner。元素 cell 会保留智能指针目标地址，并从元素 cell 画到对应 heap block。
+
+若容器内的智能指针指向结构体/类对象（例如 `vector<unique_ptr<Node>>`、`map<string, unique_ptr<Node>>`），目标 heap block 会按对象渲染，保留成员列表与成员指针边，例如 `Node.next -> first`。
+
+若容器内的智能指针静态类型是基类但运行时对象是派生类（例如 `vector<unique_ptr<Animal>>` 实际持有 `Dog`），执行器会根据调试器展开出的基类/派生成员推断 heap block 的动态类型，显示 `Dog`、`extends Animal`、虚函数元数据和派生类成员。
+
+`std::weak_ptr<T>` 不视为 owner。只要仍有 live `shared_ptr` owner，`weak_ptr` 会显示为普通弱引用边；当所有 `shared_ptr` owner reset 后，`weak_ptr` 仍保留历史目标地址，但目标 heap 标记为 freed，边显示为 dangling，避免误导用户以为 weak_ptr 延长了对象生命周期。
+
+```cpp
+std::shared_ptr<int> sp = std::make_shared<int>(3);
+std::weak_ptr<int> wp = sp;
+sp.reset();
+bool gone = wp.expired();
+```
+预期: `sp` 显示 `nullptr`，`wp` 指向历史 heap block；该 heap block 标记为 freed，`wp -> heap` 为 dangling edge，`gone = true`。
+
+## 2.2 optional / variant 对象值
+
+`std::optional<Node>` 和 `std::variant<int, Node>` 这类包装对象会把当前 engaged value 渲染成 `value` 成员。若该成员本身是对象并包含指针字段，例如 `Node.next` 指向栈对象，显示值会转换为模拟地址并从 `value` 成员行画出指针边：
+
+```cpp
+Node first{1, nullptr};
+optional<Node> maybe = Node{2, &first};
+variant<int, Node> either = Node{3, &first};
+```
+
+预期: `maybe.value = {value=2, next=0xS001}`、`either.value = {value=3, next=0xS001}`，并分别有 `value -> first` 的指针边。
 
 ## 3. struct / class (members)
 
@@ -143,6 +187,8 @@
 | `p = new int(5)` | heap: `0xH001`, edge: `source=0xS00p target=0xH001` | 堆块飞入 + 箭头指向堆 |
 | `delete p` | heap `is_freed=true`, edge `is_dangling=true` | 堆块抖动渐隐 + 箭头变红虚线后消失 |
 
+对于树/链表/图这类堆对象，若删除根指针但子节点仍未释放，原生调试器路径会保留根节点的 freed 状态，同时继续把 `left/right/next` 等成员指针指向的泄漏子对象渲染为 `Node` heap object，而不是退化成 `unknown` 块。
+
 ---
 
 ## 6. 地址规则
@@ -174,7 +220,7 @@
 }
 ```
 
-- Canvas: Class header `a: Animal` → `[vtable] speak()` → `.name: string = Tom`
+- Canvas: Class header `a: Animal` 下方显示 `vptr -> Animal vtable` 分区；虚函数以 `slot[0] speak() -> Animal::speak()` 形式列出，再显示对象字段 `.name: string = Tom`。
 
 ### 7.2 继承 (base_classes)
 
@@ -189,20 +235,43 @@
   "virtual_methods": ["speak()"],
   "members": [
     {"name": "_vptr", "type": "vtable*", "value": "&Dog::vtable"},
-    {"name": "name", "type": "string", "value": "Buddy"},
+    {"name": "Animal", "type": "Animal", "value": "{name=Buddy}"},
     {"name": "breed", "type": "string", "value": "Golden"}
   ]
 }
 ```
 
-- Canvas: 橙色 `⬆ extends Animal` 提示 + 所有成员（含继承的 name）
+- Canvas: 对象卡片内部按 C++ 对象布局分区：
+  - `base subobject: Animal` 区显示父类子对象，例如 `contains Animal = {name=Buddy}`，表达“派生类对象包含父类子对象”。
+  - `vptr -> Dog vtable` 区显示虚函数表入口，例如 `slot[0] speak() -> Dog::speak()`；若存在基类，会附加 `Animal* dispatch uses Dog vtable`，表达基类指针虚调用会经由派生类 vtable 动态派发。
+  - `derived fields: Dog` 区显示派生类新增字段，例如 `.breed: string = Golden`。
 
 ### 7.3 多态指针
 
 基类指针 `Animal* p` 指向派生类对象 `Dog`：
 - `p` 的 type 为 `"Animal*"`，value = target_address
 - Edge 指向的堆块 class_name 为 `"Dog"`，包含 Dog 全部成员
-- Canvas 通过观察指针箭头指向的实际 class_name 理解多态
+- Canvas 通过 `p -> Dog object` 的箭头、对象标题 `Dog`、内部 `base subobject: Animal` 和 `vptr -> Dog vtable` 分区共同表达多态：静态类型是 `Animal*`，动态对象和虚函数表属于 `Dog`。
+
+### 7.4 对象成员指针
+
+```json
+{
+  "name": "second",
+  "type": "Node",
+  "value": "{value=2, next=0xS001}",
+  "address": "0xS002",
+  "is_object": true,
+  "members": [
+    {"name": "value", "type": "int", "value": "2", "address": "0xS002.value"},
+    {"name": "next", "type": "Node*", "value": "0xS001", "address": "0xS002.next"}
+  ]
+}
+```
+
+- Canvas: `.next: Node* = 0xS001` 这一行作为箭头起点，指向目标 `Node` 对象。
+- 适合链表、树、图节点等课堂/OJ 高频结构，例如 `second.next -> first`。
+- 当 heap 对象成员指针继续指向其他 heap 对象时，执行器会闭包补齐目标 heap block。例如二叉树 `root.left` / `root.right` 指向两个子节点时，画布会同时显示 root、left child、right child，而不只显示 root 上的两条悬空边。
 
 ---
 
@@ -329,6 +398,44 @@ v.push_back(10);
 v.push_back(20);
 ```
 预期: 堆 buffer `size=2 cap=N [10][20]`，扩容时 cap 变化
+
+### std::vector 指针元素测试
+```cpp
+int a = 1;
+int b = 2;
+std::vector<int*> ptrs = {&a, &b};
+*ptrs[1] = 9;
+```
+预期: `ptrs` 显示为 array/container 单元格，不能把整个 `ptrs` 变量标成 pointer；`b` 的值变成 9；`ptrs[0]` / `ptrs[1]` 单元格分别画出指向 `a` / `b` 的箭头
+
+### std::array 对象元素指针成员测试
+```cpp
+struct Node { int value; Node* next; };
+Node first{1, nullptr};
+Node second{2, &first};
+std::array<Node, 2> nodes = {first, second};
+nodes[1].next->value = 5;
+```
+预期: `nodes` 显示为 element cell，不显示 `__elems_` / `_Elems` 实现字段；`nodes[1]` 中的 `next` 映射为 `first` 的模拟地址，并从 `nodes[1]` cell 画出指向 `first` 的箭头；`first.value` 变成 5
+
+### std::map 指针值测试
+```cpp
+int a = 1;
+int b = 2;
+std::map<std::string, int*> m;
+m["a"] = &a;
+m["b"] = &b;
+*m["b"] = 9;
+```
+预期: `m` 显示为 key/value entry 单元格，entry 中的 `second` 指针值映射为 `0xS...` 模拟地址；每个 entry cell 画出指向对应栈变量的箭头，`b` 的值变成 9
+
+### std::optional 指针值测试
+```cpp
+int a = 1;
+std::optional<int*> op = &a;
+*op.value() = 5;
+```
+预期: `op` 显示为 `optional<int*>` 对象，内部 `.value: int* = 0xS...` 成员行作为箭头起点指向 `a`；`a` 的值变成 5。`optional<int>` 为空时显示 `empty`，不展示 `Has Value=false` 这类调试器摘要。
 
 ### 运算符重载测试
 ```cpp

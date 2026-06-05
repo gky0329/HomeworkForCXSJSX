@@ -27,6 +27,8 @@ class MemoryCanvas:
         self._next_layout_frame: int = 0
         self._position_cache: dict[tuple[str, str, int], QPointF] = {}
         self._heap_index_cache: list[QPointF] = []
+        self._heap_column_x = HEAP_ITEM_X
+        self._stable_fit_bounds = QRectF()
 
     def clear(self):
         all_items = self._stack_items + self._heap_items + self._edge_items
@@ -41,7 +43,42 @@ class MemoryCanvas:
         self._edge_by_target.clear()
         self._position_cache.clear()
         self._heap_index_cache.clear()
+        self._heap_column_x = HEAP_ITEM_X
+        self._stable_fit_bounds = QRectF()
         self._next_layout_frame = 0
+
+    def prepare_trace_layout(self, states: list[MemoryState]):
+        """Precompute a stable viewport and heap column for one execution trace."""
+        max_stack_w = 0.0
+        max_stack_h = START_Y
+        max_heap_w = 0.0
+        max_heap_h = START_Y
+
+        for state in states:
+            stack_y = START_Y
+            for frame in state.stack:
+                item = StackItem(frame)
+                max_stack_w = max(max_stack_w, item.rect().width())
+                stack_y += item.rect().height() + ITEM_GAP
+            max_stack_h = max(max_stack_h, stack_y)
+
+            heap_y = START_Y
+            for block in state.heap:
+                item = HeapItem(block)
+                max_heap_w = max(max_heap_w, item.rect().width())
+                heap_y += item.rect().height() + ITEM_GAP
+            max_heap_h = max(max_heap_h, heap_y)
+
+        self._heap_column_x = max(HEAP_ITEM_X, STACK_ITEM_X + max_stack_w + 64.0)
+        right = max(STACK_ITEM_X + max_stack_w, self._heap_column_x + max_heap_w)
+        bottom = max(max_stack_h, max_heap_h)
+        if right <= START_Y or bottom <= START_Y:
+            self._stable_fit_bounds = QRectF()
+        else:
+            self._stable_fit_bounds = QRectF(0, 0, right + START_Y, bottom + START_Y)
+
+    def stable_fit_bounds(self) -> QRectF:
+        return QRectF(self._stable_fit_bounds)
 
     def _clear_edges(self):
         for edge in self._edge_items:
@@ -109,6 +146,10 @@ class MemoryCanvas:
             self._stack_items.append(item)
             for addr, var_item in item.var_items.items():
                 self._address_to_item[addr] = var_item
+            for addr, member_item in item.member_items.items():
+                self._address_to_item[addr] = member_item
+            for addr, element_item in item.element_items.items():
+                self._address_to_item[addr] = element_item
             stack_y += item.rect().height() + ITEM_GAP
 
         heap_y = START_Y
@@ -119,7 +160,7 @@ class MemoryCanvas:
                 preferred_pos = self._position_cache.get(("heap", block.address, 0))
                 if preferred_pos is None and idx < len(self._heap_index_cache):
                     preferred_pos = self._heap_index_cache[idx]
-                item.setPos(preferred_pos if preferred_pos is not None else QPointF(HEAP_ITEM_X, heap_y))
+                item.setPos(preferred_pos if preferred_pos is not None else QPointF(self._heap_column_x, heap_y))
                 self._scene.addItem(item)
                 self._register_layout_frame(item, fixed_zero=False)
             else:
@@ -128,6 +169,10 @@ class MemoryCanvas:
                 item.update_block(block)
             self._heap_items.append(item)
             self._address_to_item[block.address] = item
+            for addr, member_item in item.member_items.items():
+                self._address_to_item[addr] = member_item
+            for addr, element_item in item.element_items.items():
+                self._address_to_item[addr] = element_item
             heap_y += item.rect().height() + ITEM_GAP
 
         # remove items that are no longer present
@@ -172,10 +217,14 @@ class MemoryCanvas:
     def _on_item_moved(self, item: QGraphicsItem, cause: str = "move"):
         # Update edges for moved/changed item
         if isinstance(item, StackItem):
-            for addr in item.var_items:
+            for addr in list(item.var_items) + list(item.member_items) + list(item.element_items):
                 self._update_edges_for_address(addr)
         elif isinstance(item, HeapItem):
             self._update_edges_for_address(item.address)
+            for addr in item.member_items:
+                self._update_edges_for_address(addr)
+            for addr in item.element_items:
+                self._update_edges_for_address(addr)
 
         # Only attempt layout reordering when the item changed size/content.
         # Do not attempt during interactive moves to avoid re-entrant moves.
@@ -271,10 +320,14 @@ class MemoryCanvas:
 
         for item in moved_items:
             if isinstance(item, StackItem):
-                for addr in item.var_items:
+                for addr in list(item.var_items) + list(item.member_items) + list(item.element_items):
                     self._update_edges_for_address(addr)
             elif isinstance(item, HeapItem):
                 self._update_edges_for_address(item.address)
+                for addr in item.member_items:
+                    self._update_edges_for_address(addr)
+                for addr in item.element_items:
+                    self._update_edges_for_address(addr)
 
     def _update_edges_for_address(self, address: str):
         for edge in self._edge_by_source.get(address, []):

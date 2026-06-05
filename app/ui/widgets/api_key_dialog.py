@@ -22,9 +22,9 @@ PROVIDER_LABELS = {
 
 
 class ApiKeyDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config_path: Path | None = None):
         super().__init__(parent)
-        self._config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+        self._config_path = config_path or Path(__file__).parent.parent.parent.parent / "config.yaml"
         self._config = self._load_config()
         load_language(self._config_path)
 

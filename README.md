@@ -11,6 +11,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Windows setup and native-debugger validation notes are in [`docs/windows.md`](docs/windows.md).
+
 ## Features
 
 - **Code Execution** — Write C++ code, click Run, see memory state step by step
@@ -53,6 +55,12 @@ Or set environment variable: `DEEPSEEK_API_KEY=sk-xxx`
 python tests/unit/test_fixes.py
 ```
 
+Native debugger smoke test, including direct canvas rendering:
+
+```bash
+python tools/native_debug_smoke.py
+```
+
 ## Documentation
 
 - `AGENTS.md` — Agent instructions and conventions
@@ -60,6 +68,8 @@ python tests/unit/test_fixes.py
 - `MVP建设文档.md` — Implementation roadmap (Chinese)
 - `架构设计文档v2.md` — Architecture document (Chinese)
 - `FUTURE_WORK.md` — Planned features
+- `docs/roadshow_demo.md` — Roadshow demo code and talk track
+- `docs/windows.md` — Windows setup and native-debugger validation notes
 - `docs/` — Detailed feature docs
 
 ## Requirements
