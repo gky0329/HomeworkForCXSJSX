@@ -52,6 +52,7 @@ class _PreparedSource:
     line_map: dict[int, int]
     heap_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
     std_arrays: dict[str, tuple[str, int]] = field(default_factory=dict)
+    declared_types: dict[str, str] = field(default_factory=dict)
     step_in_lines: set[int] = field(default_factory=set)
     class_info: dict[str, _ClassInfo] = field(default_factory=dict)
     source_path: str = ""
@@ -484,6 +485,7 @@ class DebugExecutor:
     def _prepare_source(self, code: str) -> _PreparedSource:
         original_lines = code.splitlines()
         class_info = self._class_metadata(original_lines)
+        declared_types = self._declaration_types(original_lines)
         if re.search(r"\bmain\s*\(", code):
             line_map = {i: i for i in range(1, len(original_lines) + 1)}
             return _PreparedSource(
@@ -492,6 +494,7 @@ class DebugExecutor:
                 line_map=line_map,
                 heap_arrays=self._heap_array_declarations(original_lines),
                 std_arrays=self._std_array_declarations(original_lines),
+                declared_types=declared_types,
                 step_in_lines=self._step_in_lines(original_lines, line_map),
                 class_info=class_info,
             )
@@ -503,6 +506,7 @@ class DebugExecutor:
             line_map=line_map,
             heap_arrays=self._heap_array_declarations(original_lines),
             std_arrays=self._std_array_declarations(original_lines),
+            declared_types=declared_types,
             step_in_lines=self._step_in_lines(source.splitlines(), line_map),
             class_info=class_info,
         )
@@ -993,6 +997,7 @@ class DebugExecutor:
                 allocated_heap=allocated_heap,
                 freed_heap=freed_heap,
                 class_info=prepared.class_info,
+                declared_types=prepared.declared_types,
             ))
 
         return ExecutionTrace(steps=states)
@@ -1099,6 +1104,7 @@ class DebugExecutor:
                 allocated_heap=allocated_heap,
                 freed_heap=freed_heap,
                 class_info=prepared.class_info,
+                declared_types=prepared.declared_types,
             )
             states.append(state)
 
@@ -1118,8 +1124,10 @@ class DebugExecutor:
         allocated_heap: set[str],
         freed_heap: set[str],
         class_info: dict[str, _ClassInfo] | None = None,
+        declared_types: dict[str, str] | None = None,
     ) -> MemoryState:
         class_info = class_info or {}
+        declared_types = declared_types or {}
         actual_stack_lookup: dict[str, str] = {}
         frame_variables: list[tuple[str, list[Variable]]] = []
         pointer_edges: list[PointerEdge] = []
@@ -1145,8 +1153,14 @@ class DebugExecutor:
             for parsed in parsed_frame.variables:
                 stack_addr = stack_addr_map[parsed.actual_addr]
                 value = parsed.value
-                is_reference = self._is_reference_type(parsed.type)
-                is_pointer = self._is_pointer_type(parsed.type) or (self._is_hex_addr(value) and not is_reference)
+                display_type = self._display_type_for_parsed(
+                    parsed.type,
+                    parsed.name,
+                    declared_types,
+                    class_info,
+                )
+                is_reference = self._is_reference_type(display_type)
+                is_pointer = self._is_pointer_type(display_type) or (self._is_hex_addr(value) and not is_reference)
                 is_function_object = self._is_lambda_type(parsed.type) and bool(parsed.members)
                 elements = (
                     parsed.elements
@@ -1201,7 +1215,7 @@ class DebugExecutor:
                 object_info = class_info.get(object_class, _ClassInfo())
                 variables.append(Variable(
                     name=parsed.name,
-                    type="lambda" if is_function_object else self._clean_type(parsed.type),
+                    type="lambda" if is_function_object else display_type,
                     value="<lambda>" if is_function_object else value,
                     address=stack_addr,
                     is_pointer=is_pointer,
@@ -2290,6 +2304,112 @@ class DebugExecutor:
             if match:
                 declarations.setdefault(match.group(1), idx)
         return declarations
+
+    @staticmethod
+    def _declaration_types(lines: list[str]) -> dict[str, str]:
+        declarations: dict[str, str] = {}
+        for line in lines:
+            stmt = DebugExecutor._strip_line_comment(line).strip().rstrip(";")
+            if not stmt:
+                continue
+            if stmt.startswith(("#", "return", "using ", "class ", "struct ", "enum ", "namespace ")):
+                continue
+            if stmt in {"public:", "protected:", "private:", "{", "}"}:
+                continue
+            if "(" in stmt and not re.search(r"=\s*[^;]*\(", stmt):
+                continue
+
+            parts = DebugExecutor._split_top_level_commas(stmt)
+            if not parts:
+                continue
+
+            first = parts[0].strip()
+            first_match = re.match(
+                r"^(?P<prefix>.+?)(?P<name>[A-Za-z_]\w*)"
+                r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                first,
+            )
+            if first_match is None:
+                continue
+            prefix = first_match.group("prefix").strip()
+            if not DebugExecutor._looks_like_decl_type_prefix(prefix):
+                continue
+
+            declarations[first_match.group("name")] = DebugExecutor._clean_type(prefix)
+            base_type = re.sub(r"[\s*&]+$", "", prefix).strip()
+            for declaration in parts[1:]:
+                decl = declaration.strip()
+                decl_match = re.match(
+                    r"^(?P<symbols>[\s*&]*)(?P<name>[A-Za-z_]\w*)"
+                    r"(?:\s*\[[^\]]*\])?\s*(?:=.*)?$",
+                    decl,
+                )
+                if decl_match is None:
+                    continue
+                symbols = decl_match.group("symbols").replace(" ", "")
+                declarations[decl_match.group("name")] = DebugExecutor._clean_type(base_type + symbols)
+        return declarations
+
+    @staticmethod
+    def _looks_like_decl_type_prefix(prefix: str) -> bool:
+        if not prefix or not re.search(r"[A-Za-z_]", prefix):
+            return False
+        if any(token in prefix for token in ('"', "'", "[", "]", ".", "->", "=")):
+            return False
+        return bool(re.match(
+            r"^(?:const\s+|static\s+|volatile\s+|mutable\s+|constexpr\s+)*"
+            r"[A-Za-z_]\w*(?:::\w+)?(?:\s*<[^;=()]+>)?(?:\s+const)?[\s*&]*$",
+            prefix,
+        ))
+
+    @staticmethod
+    def _display_type_for_parsed(
+        parsed_type: str,
+        name: str,
+        declared_types: dict[str, str],
+        class_info: dict[str, _ClassInfo],
+    ) -> str:
+        parsed_clean = DebugExecutor._clean_type(parsed_type)
+        declared_clean = DebugExecutor._clean_type(declared_types.get(name, ""))
+        if not declared_clean or declared_clean == "auto":
+            return parsed_clean
+        if not (
+            DebugExecutor._is_pointer_type(declared_clean)
+            and DebugExecutor._is_pointer_type(parsed_clean)
+        ):
+            return parsed_clean
+
+        declared_class = DebugExecutor._object_class_name(declared_clean)
+        parsed_class = DebugExecutor._object_class_name(parsed_clean)
+        if (
+            declared_class
+            and parsed_class
+            and declared_class != parsed_class
+            and DebugExecutor._class_inherits_from(parsed_class, declared_class, class_info)
+        ):
+            return declared_clean
+        return parsed_clean
+
+    @staticmethod
+    def _class_inherits_from(
+        derived: str,
+        base: str,
+        class_info: dict[str, _ClassInfo],
+        seen: set[str] | None = None,
+    ) -> bool:
+        if derived == base:
+            return True
+        seen = seen or set()
+        if derived in seen:
+            return False
+        seen.add(derived)
+        info = class_info.get(derived)
+        if info is None:
+            return False
+        return any(
+            candidate == base or DebugExecutor._class_inherits_from(candidate, base, class_info, seen)
+            for candidate in info.base_classes
+        )
 
     @staticmethod
     def _class_metadata(lines: list[str]) -> dict[str, _ClassInfo]:

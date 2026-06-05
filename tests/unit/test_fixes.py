@@ -804,6 +804,7 @@ __CXXMV_FRAME__0__{l7 + 1}__main
         ("Animal", "{age=3}"),
         ("bones", "4"),
     ]
+    assert pointer.type == "Animal*"
     assert pointer.value == dog.address
     assert pointer.address != dog.address
     assert state.edges[0].source_address == pointer.address
@@ -4146,6 +4147,7 @@ __CXXMV_FRAMEV__0
         ("Animal", "{age=3}"),
         ("bones", "4"),
     ]
+    assert pointer.type == "Animal*"
     assert pointer.value == dog.address
     assert pointer.address != dog.address
     assert state.edges[0].source_address == pointer.address
