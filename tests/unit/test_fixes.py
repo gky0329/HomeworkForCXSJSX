@@ -3553,11 +3553,11 @@ __CXXMV_FRAMEDX__0
 
 
 def test_debug_executor_parses_cdb_container_adapters_as_array_variables():
-    """CDB/PDB stack/priority_queue adapter storage should unwrap to elements."""
+    """CDB/PDB stack/queue adapter storage should unwrap to elements and edges."""
     from app.core.debug_executor import DebugExecutor
 
     executor = DebugExecutor()
-    prepared = executor._prepare_source(
+    stack_prepared = executor._prepare_source(
         "#include <stack>\n"
         "using namespace std;\n"
         "stack<int> s;\n"
@@ -3565,9 +3565,9 @@ def test_debug_executor_parses_cdb_container_adapters_as_array_variables():
         "s.push(2);\n"
         "s.pop();\n"
     )
-    generated_lines = {orig: generated for generated, orig in prepared.line_map.items()}
+    generated_lines = {orig: generated for generated, orig in stack_prepared.line_map.items()}
     l6 = generated_lines[6]
-    output = rf"""
+    stack_output = rf"""
 __CXXMV_BEFORE__0
 00 000000aa`0000f000 program!main+0x10 [C:\tmp\program.cpp @ {l6}]
 __CXXMV_AFTER__0
@@ -3580,8 +3580,8 @@ __CXXMV_FRAMEDX__0
         c : {{[0]=1}} [Type: std::deque<int>]
 """
 
-    trace = executor._parse_cdb_output(output, prepared)
-    var = trace.steps[0].stack[0].variables[0]
+    stack_trace = executor._parse_cdb_output(stack_output, stack_prepared)
+    var = stack_trace.steps[0].stack[0].variables[0]
 
     assert var.name == "s"
     assert var.is_array is True
@@ -3589,6 +3589,49 @@ __CXXMV_FRAMEDX__0
     assert var.value == "{[0]=1}"
     assert [(element.index, element.value) for element in var.elements] == [(0, "1")]
     assert var.members == []
+
+    queue_prepared = executor._prepare_source(
+        "#include <queue>\n"
+        "using namespace std;\n"
+        "int a = 1;\n"
+        "int b = 2;\n"
+        "queue<int*> q;\n"
+        "q.push(&a);\n"
+        "q.push(&b);\n"
+        "*q.front() = 7;\n"
+        "q.pop();\n"
+        "*q.front() = 9;\n"
+    )
+    generated_lines = {orig: generated for generated, orig in queue_prepared.line_map.items()}
+    l10 = generated_lines[10]
+    queue_output = rf"""
+__CXXMV_BEFORE__0
+00 000000aa`0000f000 program!main+0x20 [C:\tmp\program.cpp @ {l10}]
+__CXXMV_AFTER__0
+00 000000aa`0000f000 program!main+0x2b [C:\tmp\program.cpp @ {l10 + 1}]
+__CXXMV_FRAMEV__0
+000000aa`0000efd0 int a = 7
+000000aa`0000efd4 int b = 9
+000000aa`0000efe0 std::queue<int *> q = {{}}
+__CXXMV_FRAMEDX__0
+@$curframe.Locals
+    a : 7 [Type: int]
+    b : 9 [Type: int]
+    q : {{...}} [Type: std::queue<int *>]
+        c : {{[0]=0x000000aa0000efd4}} [Type: std::deque<int *>]
+"""
+    queue_trace = executor._parse_cdb_output(queue_output, queue_prepared)
+    queue_values = {var.name: var for var in queue_trace.steps[0].stack[0].variables}
+    q = queue_values["q"]
+
+    assert queue_values["a"].value == "7"
+    assert queue_values["b"].value == "9"
+    assert q.is_array is True
+    assert q.is_object is False
+    assert q.value == "{[0]=0xS002}"
+    assert [(element.index, element.type, element.value) for element in q.elements] == [(0, "int*", "0xS002")]
+    assert q.members == []
+    assert any(edge.source_address == "0xS003[0]" and edge.target_address == "0xS002" for edge in queue_trace.steps[0].edges)
 
 
 def test_debug_executor_parses_cdb_vector_of_pointers_as_array_not_pointer():
@@ -7274,9 +7317,16 @@ def test_native_debug_smoke_requires_std_array_object_pointer_edges():
 
 
 def test_native_debug_smoke_requires_container_adapter_elements():
-    """Native smoke should prove stack and priority_queue unwrap adapter storage."""
-    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, StackFrame, StructMember, Variable
-    from tools.native_debug_smoke import _validate_priority_queue_adapter, _validate_stack_adapter
+    """Native smoke should prove stack/queue/priority_queue unwrap adapter storage."""
+    from app.core.memory_model import ArrayElement, ExecutionTrace, MemoryState, PointerEdge, StackFrame, StructMember, Variable
+    from tools.native_debug_smoke import (
+        CASES,
+        _validate_priority_queue_adapter,
+        _validate_queue_pointer_adapter,
+        _validate_stack_adapter,
+    )
+
+    assert "queue_pointer_stack" in CASES
 
     weak_stack = ExecutionTrace(steps=[
         MemoryState(
@@ -7368,6 +7418,56 @@ def test_native_debug_smoke_requires_container_adapter_elements():
     assert "priority_queue pq should be marked as an array/container" in pq_errors
     assert "priority_queue should unwrap adapter storage instead of showing c as a member" in pq_errors
     assert _validate_priority_queue_adapter(strong_pq) == []
+
+    weak_queue = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="*q.front() = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="7", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="q",
+                    type="std::queue<int*>",
+                    value="{c={[0]=0x000000aa0000efd4}}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_object=True,
+                    members=[StructMember(name="c", type="std::deque<int*>", value="{[0]=0x000000aa0000efd4}")],
+                ),
+            ])],
+            heap=[],
+            edges=[],
+        ),
+    ])
+    strong_queue = ExecutionTrace(steps=[
+        MemoryState(
+            line_number=10,
+            source_code="*q.front() = 9;",
+            stack=[StackFrame(frame_name="main", variables=[
+                Variable(name="a", type="int", value="7", address="0xS001", is_pointer=False),
+                Variable(name="b", type="int", value="9", address="0xS002", is_pointer=False),
+                Variable(
+                    name="q",
+                    type="std::queue<int*>",
+                    value="{[0]=0xS002}",
+                    address="0xS003",
+                    is_pointer=False,
+                    is_array=True,
+                    elements=[ArrayElement(index=0, type="int*", value="0xS002", address="0xS003[0]")],
+                ),
+            ])],
+            heap=[],
+            edges=[PointerEdge(source_address="0xS003[0]", target_address="0xS002")],
+        ),
+    ])
+    queue_errors = _validate_queue_pointer_adapter(weak_queue)
+    assert "queue q should be marked as an array/container" in queue_errors
+    assert "queue should unwrap adapter storage instead of showing c as a member" in queue_errors
+    weak_queue_no_edge = strong_queue.model_copy(deep=True)
+    weak_queue_no_edge.steps[0].edges = []
+    assert "missing queue front element -> b pointer edge" in _validate_queue_pointer_adapter(weak_queue_no_edge)
+    assert _validate_queue_pointer_adapter(strong_queue) == []
 
 
 def test_native_debug_smoke_requires_vector_pointer_elements_not_pointer_container():

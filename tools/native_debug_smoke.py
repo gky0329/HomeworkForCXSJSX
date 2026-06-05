@@ -685,6 +685,37 @@ def _validate_stack_adapter(trace: ExecutionTrace) -> list[str]:
     return errors
 
 
+def _validate_queue_pointer_adapter(trace: ExecutionTrace) -> list[str]:
+    state = _last_observed_state(trace)
+    if state is None:
+        return ["trace has no observed state"]
+    values = {var.name: var for var in _all_variables(state)}
+    a = values.get("a")
+    b = values.get("b")
+    q = values.get("q")
+    errors: list[str] = []
+    if a is None or a.value != "7":
+        errors.append(f"a expected 7 after first front write, got {a.value if a else None!r}")
+    if b is None or b.value != "9":
+        errors.append(f"b expected 9 after pop/front write, got {b.value if b else None!r}")
+    if q is None:
+        return errors + ["missing queue variable q"]
+    if not q.is_array:
+        errors.append("queue q should be marked as an array/container")
+    if q.is_object or q.members:
+        errors.append("queue should unwrap adapter storage instead of showing c as a member")
+    elements = list(q.elements)
+    if len(elements) != 1:
+        errors.append(f"queue should contain exactly one logical element after pop, got {[element.value for element in elements]!r}")
+    elif b is not None:
+        element = elements[0]
+        if element.value != b.address:
+            errors.append(f"queue front element should target b {b.address}, got {element.value!r}")
+        if not any(edge.source_address == element.address and edge.target_address == b.address for edge in state.edges):
+            errors.append("missing queue front element -> b pointer edge")
+    return errors
+
+
 def _validate_priority_queue_adapter(trace: ExecutionTrace) -> list[str]:
     match = _last_var(trace, "pq")
     if match is None:
@@ -2060,6 +2091,22 @@ CASES: dict[str, SmokeCase] = {
             "s.pop();\n"
         ),
         validate=_validate_stack_adapter,
+    ),
+    "queue_pointer_stack": SmokeCase(
+        name="queue_pointer_stack",
+        code=(
+            "#include <queue>\n"
+            "using namespace std;\n"
+            "int a = 1;\n"
+            "int b = 2;\n"
+            "queue<int*> q;\n"
+            "q.push(&a);\n"
+            "q.push(&b);\n"
+            "*q.front() = 7;\n"
+            "q.pop();\n"
+            "*q.front() = 9;\n"
+        ),
+        validate=_validate_queue_pointer_adapter,
     ),
     "priority_queue_int": SmokeCase(
         name="priority_queue_int",
