@@ -226,7 +226,7 @@ class ApiKeyDialog(QDialog):
             cfg = self._config or {}
             llm_cfg = cfg.setdefault("llm", {})
             llm_cfg["provider"] = provider
-            llm_cfg.setdefault("max_tokens", 4096)
+            llm_cfg.setdefault("max_tokens", 8192)
             llm_cfg.setdefault("temperature", 0.0)
 
             providers = llm_cfg.setdefault("providers", {})
