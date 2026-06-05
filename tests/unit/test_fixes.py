@@ -5787,6 +5787,76 @@ def test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run():
     assert executor.execution_summary == "AI fallback after native debugger failed: unsupported code"
 
 
+def test_ai_executor_retries_truncated_ai_json_with_larger_budget():
+    """Long demo traces should get one larger-token retry instead of failing immediately."""
+    import asyncio
+
+    class FailingDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            from app.core.debug_executor import DebugExecutionError
+
+            raise DebugExecutionError("native backend unavailable")
+
+    class FlakyAIService:
+        api_key = ""
+        max_tokens = 4096
+
+        def __init__(self):
+            self.calls = []
+
+        async def chat_json(self, **kwargs):
+            self.calls.append(kwargs.get("max_tokens"))
+            if len(self.calls) == 1:
+                raise RuntimeError(
+                    "AI returned invalid JSON. This usually means the model response was truncated."
+                )
+            return '{"steps":[]}'
+
+    ai_service = FlakyAIService()
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FailingDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=ai_service):
+            from app.core.ai_executor import AIExecutor
+
+            executor = AIExecutor()
+            result = asyncio.run(executor.run_code("int a = 1;"))
+
+    assert result.steps == []
+    assert ai_service.calls == [None, 8192]
+    assert executor.execution_summary == "AI fallback after native debugger failed: native backend unavailable"
+
+
+def test_ai_executor_error_preserves_native_fallback_reason():
+    """If both native and AI fail, the UI error should still explain the native failure."""
+    import asyncio
+
+    class FailingDebugExecutor:
+        def run_code(self, code, stdin_text=""):
+            from app.core.debug_executor import DebugExecutionError
+
+            raise DebugExecutionError("MSVC/PDB backend is disabled")
+
+    class FailingAIService:
+        api_key = ""
+        max_tokens = 4096
+
+        async def chat_json(self, **kwargs):
+            raise RuntimeError("AI returned invalid JSON. truncated")
+
+    with patch("app.core.ai_executor.DebugExecutor", return_value=FailingDebugExecutor()):
+        with patch("app.core.ai_executor.AIService", return_value=FailingAIService()):
+            from app.core.ai_executor import AIExecutor
+
+            try:
+                asyncio.run(AIExecutor().run_code("int a = 1;"))
+            except RuntimeError as exc:
+                message = str(exc)
+            else:
+                raise AssertionError("AI failure should propagate")
+
+    assert "Native debugger failed first: MSVC/PDB backend is disabled" in message
+    assert "AI fallback failed" in message
+
+
 def test_ai_executor_skips_complex_native_when_ai_key_is_configured():
     """Complex programs should use AI immediately when an API key is available."""
     import asyncio
@@ -9463,6 +9533,8 @@ if __name__ == "__main__":
         test_debug_executor_lldb_timeout_is_debug_execution_error,
         test_ai_executor_prefers_debug_executor_without_ai_call,
         test_ai_executor_falls_back_to_ai_when_debug_executor_cannot_run,
+        test_ai_executor_retries_truncated_ai_json_with_larger_budget,
+        test_ai_executor_error_preserves_native_fallback_reason,
         test_ai_executor_skips_complex_native_when_ai_key_is_configured,
         test_ai_executor_keeps_native_for_complex_code_without_ai_key,
         test_heap_item_object_sets_value_label,
