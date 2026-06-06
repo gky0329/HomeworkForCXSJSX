@@ -2,7 +2,7 @@ import re
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QPushButton, QScrollArea,
+    QPushButton, QScrollArea, QGridLayout,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
@@ -32,6 +32,11 @@ CARD_BG = (
     f"QFrame#statCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; }}"
     f"QFrame#statCard:hover {{ border-color: {STACK_BORDER}; }}"
     f"QFrame#statCard QLabel {{ border: none; background: transparent; outline: none; }}"
+)
+ELEMENT_CARD_BG = (
+    f"QFrame#elementCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; padding: 12px; }}"
+    f"QFrame#elementCard:hover {{ border-color: {SUCCESS}; background-color: {SURFACE_HOVER}; }}"
+    f"QFrame#elementCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 
 TAB_NAMES = {
@@ -139,6 +144,47 @@ class HomePage(QWidget):
 
         main.addSpacing(8)
 
+        element_label = QLabel(tr("C++ Workbench Elements"))
+        self._element_label = element_label
+        element_label.setStyleSheet(
+            f"color: {STACK_BORDER}; font-size: 18px; font-weight: bold; padding: 4px 0;"
+        )
+        main.addWidget(element_label)
+
+        elements_grid = QGridLayout()
+        elements_grid.setSpacing(10)
+        self._element_cards: list[tuple[QLabel, QLabel, str, str]] = []
+        for index, (label, desc, icon_name) in enumerate([
+            (
+                "Code Forge",
+                "Write, run, and step through C++ snippets",
+                "nav_code",
+            ),
+            (
+                "Memory Canvas",
+                "Stack, heap, pointer, object and vtable relationships on one canvas",
+                "action_search",
+            ),
+            (
+                "OJ Analyzer",
+                "Turn problem statements and code into guided explanations",
+                "nav_oj",
+            ),
+            (
+                "Knowledge Loop",
+                "Import course files, build a graph, and review mistakes",
+                "nav_knowledge",
+            ),
+        ]):
+            elements_grid.addWidget(
+                self._element_card(label, desc, icon_name),
+                index // 2,
+                index % 2,
+            )
+        main.addLayout(elements_grid)
+
+        main.addSpacing(8)
+
         actions = QHBoxLayout()
         actions.setSpacing(12)
 
@@ -233,6 +279,40 @@ class HomePage(QWidget):
         self._stat_title_labels[label] = l
         return card
 
+    def _element_card(self, title_key: str, desc_key: str, icon_name: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("elementCard")
+        card.setStyleSheet(ELEMENT_CARD_BG)
+
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(12)
+
+        icon = QLabel()
+        icon.setFixedSize(46, 46)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
+            40, 40, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        ))
+        layout.addWidget(icon, 0)
+
+        text_box = QVBoxLayout()
+        text_box.setSpacing(3)
+
+        title = QLabel(tr(title_key))
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: 800;")
+        text_box.addWidget(title)
+
+        desc = QLabel(tr(desc_key))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600;")
+        text_box.addWidget(desc)
+
+        layout.addLayout(text_box, 1)
+        self._element_cards.append((title, desc, title_key, desc_key))
+        return card
+
     def refresh(self):
         stats = error_store.get_all_stats()
         activities = error_store.get_recent_activity()
@@ -285,8 +365,12 @@ class HomePage(QWidget):
         self._title.setText(tr("C++rafting Table"))
         self._subtitle.setText(tr("Visualize memory, learn pointers, master C++"))
         self._quick_label.setText(tr("Quick Start"))
+        self._element_label.setText(tr("C++ Workbench Elements"))
         self._activity_title.setText(tr("Recent Activity"))
         for title_lbl, desc_lbl, title_key, desc_key in self._quick_cards:
+            title_lbl.setText(tr(title_key))
+            desc_lbl.setText(tr(desc_key))
+        for title_lbl, desc_lbl, title_key, desc_key in self._element_cards:
             title_lbl.setText(tr(title_key))
             desc_lbl.setText(tr(desc_key))
         for btn, key in self._action_buttons:

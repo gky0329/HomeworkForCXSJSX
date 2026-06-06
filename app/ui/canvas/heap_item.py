@@ -23,6 +23,7 @@ class HeapItem(QGraphicsRectItem):
     WIDTH = 100
     HEIGHT = 78
     RADIUS = 8
+    OBJECT_SECTION_GAP = 8.0
 
     def __init__(self, block: HeapBlock, on_item_moved=None):
         super().__init__()
@@ -295,10 +296,11 @@ class HeapItem(QGraphicsRectItem):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
         title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
-        body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
-        member_h = QFontMetricsF(member_font).lineSpacing() + 6
+        body_line_h = max(QFontMetricsF(body_font).lineSpacing() + 2, 24.0)
+        member_h = max(QFontMetricsF(member_font).lineSpacing() + 6, 26.0)
         derived_members = derived_object_members(block.base_classes, block.members)
         vtable = vtable_rows(block.class_name, block.type, block.base_classes, block.virtual_methods)
+        base_parts = base_subobjects(block.base_classes, block.members)
         width_candidates = [
             _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
@@ -306,7 +308,7 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width("  💀 destroyed", body_font))
         elif block.is_constructed:
             width_candidates.append(_text_width("  ⚡ constructed", body_font))
-        for base, member in base_subobjects(block.base_classes, block.members):
+        for base, member in base_parts:
             width_candidates.append(_text_width(f"  base subobject: {base}", body_font))
             state = member.value if member is not None and member.value else "<base layout>"
             width_candidates.append(_text_width(f"    contains {base} = {state}", body_font))
@@ -322,12 +324,18 @@ class HeapItem(QGraphicsRectItem):
         extra_height = 0.0
         if block.is_destroyed or block.is_constructed:
             extra_height += body_line_h
-        extra_height += len(base_subobjects(block.base_classes, block.members)) * body_line_h * 2
+        extra_height += len(base_parts) * body_line_h * 2
         if vtable:
             extra_height += body_line_h * (1 + len(vtable))
         if block.base_classes and derived_members:
             extra_height += body_line_h
+        section_count = (
+            len(base_parts)
+            + (1 if vtable else 0)
+            + (1 if block.base_classes and derived_members else 0)
+        )
         h = 26 + extra_height + max(1, len(derived_members)) * member_h + 6
+        h += section_count * self.OBJECT_SECTION_GAP
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, w), h)
 
@@ -351,7 +359,7 @@ class HeapItem(QGraphicsRectItem):
             badge.setPos(6, y)
             y += body_line_h
 
-        for base, member in base_subobjects(block.base_classes, block.members):
+        for base, member in base_parts:
             section_items: list[QGraphicsTextItem] = []
             base_label = self._keep_text(QGraphicsTextItem(f"  base subobject: {base}", self))
             base_label.setDefaultTextColor(QColor(HEAP_TEXT))
@@ -371,6 +379,7 @@ class HeapItem(QGraphicsRectItem):
             self._value_label = state_label
             y += body_line_h
             self._make_object_section(HEAP_TEXT, section_items)
+            y += self.OBJECT_SECTION_GAP
 
         if vtable:
             section_items = []
@@ -389,6 +398,7 @@ class HeapItem(QGraphicsRectItem):
                 self._value_label = slot_label
                 y += body_line_h
             self._make_object_section(WARN, section_items)
+            y += self.OBJECT_SECTION_GAP
 
         derived_section_items: list[QGraphicsTextItem] = []
         if block.base_classes and derived_members:
@@ -411,6 +421,8 @@ class HeapItem(QGraphicsRectItem):
                 self.member_items[m.address] = label
             self._value_label = label
             y += member_h
+        if derived_section_items:
+            y += self.OBJECT_SECTION_GAP
 
         self._refresh_geometry()
 
@@ -497,10 +509,11 @@ class HeapItem(QGraphicsRectItem):
         body_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9)
         member_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10)
         title_font = QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9, QFont.Weight.Bold)
-        body_line_h = QFontMetricsF(body_font).lineSpacing() + 2
-        member_h = QFontMetricsF(member_font).lineSpacing() + 6
+        body_line_h = max(QFontMetricsF(body_font).lineSpacing() + 2, 24.0)
+        member_h = max(QFontMetricsF(member_font).lineSpacing() + 6, 26.0)
         derived_members = derived_object_members(block.base_classes, block.members)
         vtable = vtable_rows(block.class_name, block.type, block.base_classes, block.virtual_methods)
+        base_parts = base_subobjects(block.base_classes, block.members)
         width_candidates = [
             _text_width(f"[{block.address}] {block.class_name or block.type}", title_font),
         ]
@@ -508,7 +521,7 @@ class HeapItem(QGraphicsRectItem):
             width_candidates.append(_text_width("  💀 destroyed", body_font))
         elif block.is_constructed:
             width_candidates.append(_text_width("  ⚡ constructed", body_font))
-        for base, member in base_subobjects(block.base_classes, block.members):
+        for base, member in base_parts:
             width_candidates.append(_text_width(f"  base subobject: {base}", body_font))
             state = member.value if member is not None and member.value else "<base layout>"
             width_candidates.append(_text_width(f"    contains {base} = {state}", body_font))
@@ -524,12 +537,18 @@ class HeapItem(QGraphicsRectItem):
         extra_height = 0.0
         if block.is_destroyed or block.is_constructed:
             extra_height += body_line_h
-        extra_height += len(base_subobjects(block.base_classes, block.members)) * body_line_h * 2
+        extra_height += len(base_parts) * body_line_h * 2
         if vtable:
             extra_height += body_line_h * (1 + len(vtable))
         if block.base_classes and derived_members:
             extra_height += body_line_h
+        section_count = (
+            len(base_parts)
+            + (1 if vtable else 0)
+            + (1 if block.base_classes and derived_members else 0)
+        )
         height = 26 + extra_height + max(1, len(derived_members)) * member_h + 6
+        height += section_count * self.OBJECT_SECTION_GAP
         self.prepareGeometryChange()
         self.setRect(0, 0, max(180, width), height)
         self._layout_object_sections()

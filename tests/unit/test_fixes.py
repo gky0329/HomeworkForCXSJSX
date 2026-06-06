@@ -275,6 +275,81 @@ def test_memory_canvas_registers_array_element_pointer_edge_sources():
     assert len(canvas.get_edge_items()) == 1
 
 
+def test_memory_canvas_fans_out_edges_to_same_target():
+    """Multiple pointers to one target should not draw on the exact same path."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 1000, 700)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=3,
+        source_code="int* q = p;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="p", type="int*", value="0xH001", address="0xS001", is_pointer=True),
+            Variable(name="q", type="int*", value="0xH001", address="0xS002", is_pointer=True),
+        ])],
+        heap=[HeapBlock(address="0xH001", type="int", value="42")],
+        edges=[
+            PointerEdge(source_address="0xS001", target_address="0xH001"),
+            PointerEdge(source_address="0xS002", target_address="0xH001"),
+        ],
+    )
+
+    canvas.render_state(state)
+    edges = canvas.get_edge_items()
+
+    assert len(edges) == 2
+    first_curve_y = edges[0].path().elementAt(1).y
+    second_curve_y = edges[1].path().elementAt(1).y
+    assert first_curve_y != second_curve_y
+
+
+def test_memory_canvas_first_heap_does_not_overlap_main_frame():
+    """The first heap item should not share main's fixed layout frame id."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 1200, 800)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=2,
+        source_code="int* p = new int(42);",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="very_long_name_to_expand_the_stack_frame", type="int", value="1", address="0xS001", is_pointer=False),
+            Variable(name="p", type="int*", value="0xH001", address="0xS002", is_pointer=True),
+        ])],
+        heap=[HeapBlock(address="0xH001", type="int", value="42")],
+        edges=[PointerEdge(source_address="0xS002", target_address="0xH001")],
+    )
+
+    canvas.render_state(state)
+    stack_item = canvas.get_stack_items()[0]
+    heap_item = canvas.get_heap_items()[0]
+
+    assert stack_item.data(0) == 0
+    assert heap_item.data(0) != 0
+    assert not stack_item.sceneBoundingRect().intersects(heap_item.sceneBoundingRect())
+
+
 def test_canvas_view_uses_stable_fit_bounds():
     """Auto-fit should use trace-wide bounds instead of per-step item bounds."""
     from PySide6.QtCore import QRectF
@@ -314,13 +389,14 @@ def test_code_editor_defaults_to_roadshow_demo():
 
     from app.core.demo_examples import ROADSHOW_DEMO_CODE
     from app.ui.main_window import DEFAULT_EXAMPLE_KEY, MainWindow
+    from app.ui.theme.colors import EDITOR_BG
 
     window = MainWindow()
     try:
         assert DEFAULT_EXAMPLE_KEY == "Roadshow Demo"
         assert window._example_combo.currentData() == "Roadshow Demo"
         assert window.get_code() == ROADSHOW_DEMO_CODE.strip()
-        assert "background-color: #1E1E1E" in window.code_editor.styleSheet()
+        assert f"background-color: {EDITOR_BG}" in window.code_editor.styleSheet()
     finally:
         window.close()
 
@@ -375,6 +451,35 @@ def test_code_editor_auto_fit_defaults_to_initial_fit_only():
         window.auto_fit_check.setChecked(True)
         engine._on_prev()
         assert fit_calls == ["fit"]
+    finally:
+        window.close()
+
+
+def test_canvas_fullscreen_restores_canvas_view():
+    """The canvas fullscreen mode should move the same view back into the editor."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window._ensure_tab(window._code_tab_index)
+        host_layout = window._canvas_host_layout
+        assert host_layout.indexOf(window.canvas_view) >= 0
+
+        window._toggle_canvas_fullscreen()
+        app.processEvents()
+        assert window._canvas_fullscreen_window is not None
+        assert host_layout.indexOf(window.canvas_view) < 0
+
+        window._canvas_fullscreen_window.close()
+        app.processEvents()
+        assert window._canvas_fullscreen_window is None
+        assert host_layout.indexOf(window.canvas_view) >= 0
+        assert window.btn_canvas_fullscreen.isEnabled()
     finally:
         window.close()
 
@@ -6078,6 +6183,14 @@ def test_stack_item_object_draws_inheritance_and_vtable_layout():
     assert "0xS001.Animal" in item.member_items
     assert "0xS001.bones" in item.member_items
     assert len(item._object_sections) == 3
+    rects = sorted(
+        (section["rect"].rect() for section in item._object_sections),
+        key=lambda rect: rect.top(),
+    )
+    assert all(
+        upper.bottom() + 4.0 <= lower.top()
+        for upper, lower in zip(rects, rects[1:])
+    )
 
 
 def test_heap_item_object_draws_inheritance_and_vtable_layout():
@@ -6118,6 +6231,14 @@ def test_heap_item_object_draws_inheritance_and_vtable_layout():
     assert "0xH001.Animal" in item.member_items
     assert "0xH001.bones" in item.member_items
     assert len(item._object_sections) == 3
+    rects = sorted(
+        (section["rect"].rect() for section in item._object_sections),
+        key=lambda rect: rect.top(),
+    )
+    assert all(
+        upper.bottom() + 4.0 <= lower.top()
+        for upper, lower in zip(rects, rects[1:])
+    )
 
 
 # ── Phase 3: No double JSON serialize ──────────────────────────────────
@@ -6209,6 +6330,50 @@ def test_graph_page_named_canvas_class():
 
     from app.ui.pages.knowledge_page import _GraphCanvas
     assert _GraphCanvas.__name__ == "_GraphCanvas"
+
+
+def test_knowledge_graph_clusters_and_links_concepts(monkeypatch):
+    """Graph view should cluster concepts and create inferred links when deps are sparse."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.services import error_store
+    from app.ui.pages.knowledge_page import KnowledgePage
+
+    kps = [
+        {"name": "变量与类型", "count": 4, "description": "基础", "source": "test"},
+        {"name": "指针", "count": 8, "description": "基础", "source": "test"},
+        {"name": "动态内存 new delete", "count": 3, "description": "基础", "source": "test"},
+        {"name": "类和对象", "count": 6, "description": "基础", "source": "test"},
+        {"name": "继承", "count": 5, "description": "基础", "source": "test"},
+        {"name": "多态 virtual", "count": 2, "description": "基础", "source": "test"},
+    ]
+    monkeypatch.setattr(error_store, "get_knowledge_points", lambda: list(kps))
+    monkeypatch.setattr(error_store, "get_error_frequency", lambda: {"指针": 2})
+    monkeypatch.setattr(error_store, "get_all_stats", lambda: {
+        "knowledge_points": len(kps),
+        "total_errors": 2,
+        "unreviewed": 0,
+        "error_frequency": {"指针": 2},
+    })
+    monkeypatch.setattr(error_store, "get_dependencies", lambda name: [])
+    monkeypatch.setattr(error_store, "get_ucb_queue", lambda: [])
+
+    page = KnowledgePage()
+    try:
+        page._set_view(True)
+        page._graph_timer.stop()
+        clusters = {node.cluster for node in page._graph_nodes}
+        edge_kinds = {kind for _, _, _, kind in page._graph_edges}
+
+        assert {"basics", "memory", "oop"} <= clusters
+        assert "semantic" in edge_kinds
+        assert "cluster" in edge_kinds
+        assert page._graph_cluster_centers
+    finally:
+        page._graph_timer.stop()
+        page.close()
 
 
 def test_native_debug_smoke_summarizes_and_dumps_trace():
