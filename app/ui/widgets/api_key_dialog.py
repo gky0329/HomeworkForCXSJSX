@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from app.services.ai_service import DEFAULT_PROVIDERS
 from app.services.i18n import LANGUAGE_LABELS, get_language, load_language, tr
+from app.ui.theme.colors import TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
 
 logger = logging.getLogger(__name__)
 
@@ -67,29 +68,13 @@ class ApiKeyDialog(QDialog):
         layout.setSpacing(10)
 
         title = QLabel(tr("AI Settings"))
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #569CD6;")
+        title.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(title)
 
-        arrow_icon = (
-            Path(__file__).parent.parent / "theme" / "icons" / "chevron-down.svg"
-        ).as_posix()
-        input_style = (
-            "QLineEdit { padding: 8px; font-size: 13px; border: 1px solid #3E3E3E; border-radius: 5px; "
-            "background-color: #1E1E1E; color: #D4D4D4; }"
-        )
-        combo_style = (
-            "QComboBox { padding: 6px 30px 6px 8px; font-size: 13px; border: 1px solid #3E3E3E; border-radius: 5px; "
-            "background-color: #1E1E1E; color: #D4D4D4; } "
-            "QComboBox:hover { border-color: #007ACC; } "
-            "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; "
-            "width: 24px; border-left: 1px solid #3E3E3E; background-color: #252526; "
-            "border-top-right-radius: 5px; border-bottom-right-radius: 5px; } "
-            f"QComboBox::down-arrow {{ image: url({arrow_icon}); width: 10px; height: 6px; }} "
-            "QComboBox QAbstractItemView { background-color: #1E1E1E; color: #D4D4D4; "
-            "border: 1px solid #3E3E3E; border-radius: 5px; selection-background-color: #007ACC; }"
-        )
-        label_style = "color: #D4D4D4; font-size: 12px; font-weight: bold; margin-top: 6px;"
-        hint_style = "color: #808080; font-size: 11px;"
+        input_style = ""
+        combo_style = ""
+        label_style = f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: bold; margin-top: 6px;"
+        hint_style = f"color: {TEXT_MUTED}; font-size: 13px; font-weight: 600;"
 
         self._provider_combo = QComboBox()
         for provider in DEFAULT_PROVIDERS:

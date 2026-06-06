@@ -6,10 +6,10 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QPlainTextEdit, QFileDialog, QScrollArea, QFrame, QComboBox,
-    QSplitter,
+    QSplitter, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtGui import QFont, QIcon
 
 from app.services.file_service import (
     extract_text, SUPPORTED_EXTENSIONS, file_type_label,
@@ -19,12 +19,15 @@ from app.services import error_store
 from app.services.i18n import tr
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
 from app.ui.widgets.helpers import clear_layout, build_code_block
+from app.ui.widgets.empty_state import PixelEmptyState
 from app.ui.widgets.error_dialog import show_error_dialog
 from app.ui.widgets.threading import retire_worker
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, ACCENT_HOVER, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
+    TEXT_INVERSE, TEXT_BUTTON_PRIMARY, SUCCESS, SUCCESS_BG, ERROR_BG,
 )
+from app.ui.theme.minecraft_assets import asset_path
 
 logger = logging.getLogger(__name__)
 
@@ -44,27 +47,28 @@ def _file_filter() -> str:
 PAGE_STYLE = f"""
 QFrame#resultCard {{
     background-color: {SURFACE};
-    border: 1px solid {BORDER};
+    border: 2px solid {BORDER};
     
     padding: 12px;
     margin: 4px 0;
 }}
 QPushButton#visualizeBtn {{
     background-color: {ACCENT};
-    color: #FFFFFF;
-    border: none;
+    color: {TEXT_BUTTON_PRIMARY};
+    border: 2px solid {BORDER};
     
     padding: 3px 10px;
-    font-size: 11px;
+    font-size: 14px;
+    font-weight: 700;
 }}
 QLabel#conceptName {{
     color: {STACK_BORDER};
-    font-size: 14px;
+    font-size: 17px;
     font-weight: bold;
 }}
 QLabel#quizQuestion {{
     color: {HEAP_BORDER};
-    font-size: 13px;
+    font-size: 15px;
     font-weight: bold;
 }}
 """
@@ -73,8 +77,8 @@ BTN_OPT = (
     f"QPushButton {{ background-color: {CANVAS_BG}; "
     f"color: {TEXT_PRIMARY}; border: 1px solid {BORDER}; "
     f"padding: 6px 14px; "
-    f"font-size: 12px; text-align: left; }}"
-    f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
+    f"font-size: 14px; font-weight: 600; text-align: left; }}"
+    f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; }}"
 )
 
 
@@ -122,30 +126,30 @@ class FileImportPage(QWidget):
         toolbar = QHBoxLayout()
 
         self._type_label = QLabel(tr("File type:"))
-        self._type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        self._type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600;")
         toolbar.addWidget(self._type_label)
 
         self._type_combo = QComboBox()
         self._populate_type_combo()
-        self._type_combo.setStyleSheet(
-            f"QComboBox {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
-            f"border: 1px solid {BORDER}; padding: 4px 8px; }}"
-        )
         toolbar.addWidget(self._type_combo)
 
         toolbar.addSpacing(8)
 
         self._upload_btn = QPushButton(tr("Upload File"))
+        self._upload_btn.setIcon(QIcon(asset_path("icons", "action_upload")))
+        self._upload_btn.setIconSize(QSize(18, 18))
         self._upload_btn.clicked.connect(self._on_upload)
         toolbar.addWidget(self._upload_btn)
 
         self._file_label = QLabel(tr("No file selected"))
-        self._file_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        self._file_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600;")
         toolbar.addWidget(self._file_label)
 
         toolbar.addStretch()
 
         self._process_btn = QPushButton(tr("Extract Knowledge Points"))
+        self._process_btn.setIcon(QIcon(asset_path("icons", "empty_book")))
+        self._process_btn.setIconSize(QSize(18, 18))
         self._process_btn.setEnabled(False)
         self._process_btn.clicked.connect(self._on_process)
         toolbar.addWidget(self._process_btn)
@@ -154,11 +158,19 @@ class FileImportPage(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        self._preview_stack = QStackedWidget()
+        self._preview_empty = PixelEmptyState(
+            "empty_scroll",
+            tr("No file uploaded"),
+            tr("Upload a supported source or document file to preview it here."),
+        )
         self._preview = QPlainTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setPlaceholderText(tr("File content appears here after upload..."))
         self._preview.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
-        splitter.addWidget(self._preview)
+        self._preview_stack.addWidget(self._preview_empty)
+        self._preview_stack.addWidget(self._preview)
+        splitter.addWidget(self._preview_stack)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -166,9 +178,16 @@ class FileImportPage(QWidget):
 
         self._status = QLabel(tr("Upload a file to begin"))
         self._status.setStyleSheet(
-            f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 4px;"
+            f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600; padding: 4px;"
         )
         right_layout.addWidget(self._status)
+
+        self._result_stack = QStackedWidget()
+        self._result_empty = PixelEmptyState(
+            "empty_book",
+            tr("Extraction results will appear here"),
+            tr("After upload, AI will extract knowledge points and quiz questions here."),
+        )
 
         self._result_scroll = QScrollArea()
         self._result_scroll.setWidgetResizable(True)
@@ -179,7 +198,9 @@ class FileImportPage(QWidget):
         self._result_layout = QVBoxLayout(self._result_container)
         self._result_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._result_scroll.setWidget(self._result_container)
-        right_layout.addWidget(self._result_scroll)
+        self._result_stack.addWidget(self._result_empty)
+        self._result_stack.addWidget(self._result_scroll)
+        right_layout.addWidget(self._result_stack)
 
         splitter.addWidget(right)
         splitter.setSizes([400, 500])
@@ -227,6 +248,7 @@ class FileImportPage(QWidget):
                     )
                 )
             self._preview.setPlainText(preview)
+            self._preview_stack.setCurrentWidget(self._preview)
             self._process_btn.setEnabled(True)
             self._status.setText(
                 tr(
@@ -300,16 +322,12 @@ class FileImportPage(QWidget):
 
         if kps:
             gen_quiz_btn = QPushButton(tr("Generate Quiz Questions"))
-            gen_quiz_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
-                f"padding: 8px 16px; font-size: 12px; margin: 8px 0; }}"
-                f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
-            )
             gen_quiz_btn.clicked.connect(self._on_generate_quiz)
             self._gen_quiz_btn = gen_quiz_btn
             self._result_layout.addWidget(gen_quiz_btn)
 
         self._result_layout.addStretch()
+        self._result_stack.setCurrentWidget(self._result_scroll)
 
     def _build_kp_card(self, kp: dict) -> QFrame:
         card = QFrame()
@@ -326,7 +344,7 @@ class FileImportPage(QWidget):
         if expl:
             label = QLabel(expl)
             label.setWordWrap(True)
-            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
+            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: 600;")
             layout.addWidget(label)
 
         code = kp.get("code_snippet", "")
@@ -370,7 +388,7 @@ class FileImportPage(QWidget):
         expl_label.setWordWrap(True)
         expl_label.setVisible(False)
         expl_label.setStyleSheet(
-            f"color: {TEXT_SECONDARY}; font-size: 11px; padding-left: 12px;"
+            f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600; padding-left: 12px;"
         )
         layout.addWidget(expl_label)
 
@@ -390,24 +408,24 @@ class FileImportPage(QWidget):
                 if i == choice_idx:
                     if correct:
                         btn.setStyleSheet(
-                            f"QPushButton {{ background-color: #1A3A2A; "
-                            f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                            f"QPushButton {{ background-color: {SUCCESS_BG}; "
+                            f"color: {SUCCESS}; border: 2px solid {SUCCESS}; "
                             f"padding: 6px 14px; "
-                            f"font-size: 12px; text-align: left; font-weight: bold; }}"
+                            f"font-size: 14px; text-align: left; font-weight: bold; }}"
                         )
                     else:
                         btn.setStyleSheet(
-                            f"QPushButton {{ background-color: #3A1A1A; "
-                            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
+                            f"QPushButton {{ background-color: {ERROR_BG}; "
+                            f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
                             f"padding: 6px 14px; "
-                            f"font-size: 12px; text-align: left; font-weight: bold; }}"
+                            f"font-size: 14px; text-align: left; font-weight: bold; }}"
                         )
                 elif i == answer_idx:
                     btn.setStyleSheet(
-                        f"QPushButton {{ background-color: #1A3A2A; "
-                        f"color: #4EC9B0; border: 1px solid #4EC9B0; "
+                        f"QPushButton {{ background-color: {SUCCESS_BG}; "
+                        f"color: {SUCCESS}; border: 2px solid {SUCCESS}; "
                         f"padding: 6px 14px; "
-                        f"font-size: 12px; text-align: left; }}"
+                        f"font-size: 14px; font-weight: 600; text-align: left; }}"
                     )
                 else:
                     btn.setStyleSheet(
@@ -418,7 +436,7 @@ class FileImportPage(QWidget):
             if correct:
                 result_label.setText("✓ " + tr("Correct!"))
                 result_label.setStyleSheet(
-                    f"color: #4EC9B0; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                    f"color: {SUCCESS}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
             else:
                 result_label.setText(
@@ -428,15 +446,15 @@ class FileImportPage(QWidget):
                     )
                 )
                 result_label.setStyleSheet(
-                    f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                    f"color: {EDGE_DANGLING}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
 
                 wrong_btn = QPushButton(tr("Add to My Errors"))
                 wrong_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
-                    f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-                    f"padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
-                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+                    f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
+                    f"padding: 4px 12px; font-size: 13px; font-weight: 600; margin-top: 4px; }}"
+                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: {TEXT_BUTTON_PRIMARY}; }}"
                 )
                 q_text = q.get("question", "")
                 kp_name = q.get("knowledge_point", "quiz")
@@ -456,9 +474,9 @@ class FileImportPage(QWidget):
                     )
                     wrong_btn.setText("✓ " + tr("Added"))
                     wrong_btn.setStyleSheet(
-                        f"QPushButton {{ background-color: #1A3A2A; "
-                        f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                        f"padding: 3px 12px; font-size: 10px; margin-top: 4px; }}"
+                        f"QPushButton {{ background-color: {SUCCESS_BG}; "
+                        f"color: {SUCCESS}; border: 2px solid {SUCCESS}; "
+                        f"padding: 4px 12px; font-size: 13px; font-weight: 600; margin-top: 4px; }}"
                     )
                     wrong_btn.setEnabled(False)
                 wrong_btn.clicked.connect(lambda: save_and_feedback())

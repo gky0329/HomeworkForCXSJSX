@@ -5,7 +5,7 @@ from PySide6.QtGui import QFont, QColor, QPen, QBrush, QFontMetricsF
 from app.core.memory_model import Variable, StackFrame
 from app.ui.theme.colors import (
     STACK_BORDER, STACK_BG, STACK_TITLE, STACK_VAR_TEXT,
-    HEAP_BORDER, HEAP_BG, EDGE_DANGLING,
+    HEAP_BORDER, HEAP_BG, HEAP_TEXT, EDGE_DANGLING, EDGE_REF, WARN,
 )
 from app.ui.canvas.object_layout import (
     base_subobjects,
@@ -146,7 +146,7 @@ class StackItem(QGraphicsRectItem):
         self.refresh_geometry()
 
         if any(v.is_temporary for v in frame.variables):
-            self.setPen(QPen(QColor("#DCDCAA"), 1.5, Qt.PenStyle.DashLine))
+            self.setPen(QPen(QColor(WARN), 1.5, Qt.PenStyle.DashLine))
 
     def _clear_children(self):
         for child in list(self.childItems()):
@@ -410,7 +410,7 @@ class StackItem(QGraphicsRectItem):
             label = QGraphicsTextItem(
                 f"    .{m.name}: {m.type} = {m.value}", self
             )
-            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setDefaultTextColor(QColor(STACK_BORDER))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(self.PADDING + 16, y)
             self._layout_items.append(label)
@@ -451,14 +451,14 @@ class StackItem(QGraphicsRectItem):
             y += 16
         elif var.is_constructed:
             badge = QGraphicsTextItem("  ⚡ constructed", self)
-            badge.setDefaultTextColor(QColor("#4EC9B0"))
+            badge.setDefaultTextColor(QColor(EDGE_REF))
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(self.PADDING + 12, y)
             self._layout_items.append(badge)
             y += 16
         if var.is_temporary:
             badge = QGraphicsTextItem("  ⏳ temporary", self)
-            badge.setDefaultTextColor(QColor("#DCDCAA"))
+            badge.setDefaultTextColor(QColor(WARN))
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(self.PADDING + 12, y)
             self._layout_items.append(badge)
@@ -468,7 +468,7 @@ class StackItem(QGraphicsRectItem):
         for base, member in base_subobjects(var.base_classes, var.members):
             section_items: list[QGraphicsTextItem] = []
             base_label = QGraphicsTextItem(f"  base subobject: {base}", self)
-            base_label.setDefaultTextColor(QColor("#CE9178"))
+            base_label.setDefaultTextColor(QColor(HEAP_TEXT))
             base_label.setFont(body_font)
             base_label.setPos(self.PADDING + 12, y)
             self._layout_items.append(base_label)
@@ -477,7 +477,7 @@ class StackItem(QGraphicsRectItem):
 
             state = member.value if member is not None and member.value else "<base layout>"
             state_label = QGraphicsTextItem(f"    contains {base} = {state}", self)
-            state_label.setDefaultTextColor(QColor("#CE9178"))
+            state_label.setDefaultTextColor(QColor(HEAP_TEXT))
             state_label.setFont(body_font)
             state_label.setPos(self.PADDING + 20, y)
             self._layout_items.append(state_label)
@@ -485,13 +485,13 @@ class StackItem(QGraphicsRectItem):
             if member is not None and member.address:
                 self.member_items[member.address] = state_label
             y += 16
-            self._make_object_section("#CE9178", section_items)
+            self._make_object_section(HEAP_TEXT, section_items)
 
         rows = vtable_rows(var.class_name, var.type, var.base_classes, var.virtual_methods)
         if rows:
             section_items = []
             vtable_label = QGraphicsTextItem(f"  vptr -> {(var.class_name or var.type)} vtable", self)
-            vtable_label.setDefaultTextColor(QColor("#DCDCAA"))
+            vtable_label.setDefaultTextColor(QColor(WARN))
             vtable_label.setFont(body_font)
             vtable_label.setPos(self.PADDING + 12, y)
             self._layout_items.append(vtable_label)
@@ -499,25 +499,25 @@ class StackItem(QGraphicsRectItem):
             y += 16
             for row in rows:
                 slot_label = QGraphicsTextItem(f"    {row}", self)
-                slot_label.setDefaultTextColor(QColor("#DCDCAA"))
+                slot_label.setDefaultTextColor(QColor(WARN))
                 slot_label.setFont(body_font)
                 slot_label.setPos(self.PADDING + 20, y)
                 self._layout_items.append(slot_label)
                 section_items.append(slot_label)
                 y += 16
-            self._make_object_section("#DCDCAA", section_items)
+            self._make_object_section(WARN, section_items)
 
         derived_members = derived_object_members(var.base_classes, var.members)
         if var.base_classes and derived_members:
             section_items = []
             derived_label = QGraphicsTextItem(f"  derived fields: {var.class_name or var.type}", self)
-            derived_label.setDefaultTextColor(QColor("#9CDCFE"))
+            derived_label.setDefaultTextColor(QColor(STACK_BORDER))
             derived_label.setFont(body_font)
             derived_label.setPos(self.PADDING + 12, y)
             self._layout_items.append(derived_label)
             section_items.append(derived_label)
             y += 16
-            self._make_object_section("#9CDCFE", section_items)
+            self._make_object_section(STACK_BORDER, section_items)
         else:
             section_items = []
 
@@ -525,7 +525,7 @@ class StackItem(QGraphicsRectItem):
             label = QGraphicsTextItem(
                 f"    .{m.name}: {m.type} = {m.value}", self
             )
-            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setDefaultTextColor(QColor(STACK_BORDER))
             label.setFont(member_font)
             label.setPos(self.PADDING + 12, y)
             self._layout_items.append(label)
@@ -539,7 +539,7 @@ class StackItem(QGraphicsRectItem):
     def _draw_function_object(self, var, y_offset: float) -> float:
         y = y_offset
         lambda_label = QGraphicsTextItem("  λ [callable]", self)
-        lambda_label.setDefaultTextColor(QColor("#DCDCAA"))
+        lambda_label.setDefaultTextColor(QColor(WARN))
         lambda_label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
         lambda_label.setPos(self.PADDING + 12, y)
         self._layout_items.append(lambda_label)
@@ -549,7 +549,7 @@ class StackItem(QGraphicsRectItem):
             label = QGraphicsTextItem(
                 f"    [{ref}capture] {c.name}: {c.type} = {c.value}", self
             )
-            label.setDefaultTextColor(QColor("#CE9178"))
+            label.setDefaultTextColor(QColor(HEAP_TEXT))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             label.setPos(self.PADDING + 12, y)
             self._layout_items.append(label)

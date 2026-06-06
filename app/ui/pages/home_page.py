@@ -5,29 +5,31 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea,
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
 
 from app.services import error_store
 from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
+from app.ui.theme.minecraft_assets import asset_path
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, ACCENT, SUCCESS,
+    STACK_BORDER, ACCENT, SUCCESS, SURFACE_HOVER,
 )
 
 
-HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 28px; font-weight: 800; padding: 6px 0;"
-SUBTITLE = f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 400; padding: 2px 0;"
+HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 32px; font-weight: 800; padding: 6px 0;"
+SUBTITLE = f"color: {TEXT_SECONDARY}; font-size: 15px; font-weight: 600; padding: 2px 0;"
 STAT_NUM = f"color: {STACK_BORDER}; font-size: 36px; font-weight: 800;"
-STAT_LABEL = f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 400;"
+STAT_LABEL = f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600;"
 LINK_BTN = (
     f"QPushButton {{ background-color: {SURFACE}; color: {ACCENT}; "
-    f"border: 1px solid {BORDER}; "
-    f"padding: 14px 24px; font-size: 15px; font-weight: 700; text-align: left; }}"
-    f"QPushButton:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; color: {STACK_BORDER}; }}"
+    f"border: 2px solid {BORDER}; "
+    f"padding: 14px 24px; font-size: 16px; font-weight: 700; text-align: left; }}"
+    f"QPushButton:hover {{ border-color: {ACCENT}; background-color: {SURFACE_HOVER}; color: {STACK_BORDER}; }}"
 )
 
 CARD_BG = (
-    f"QFrame#statCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; }}"
+    f"QFrame#statCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; }}"
     f"QFrame#statCard:hover {{ border-color: {STACK_BORDER}; }}"
     f"QFrame#statCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
@@ -59,7 +61,7 @@ class HomePage(QWidget):
         main.setContentsMargins(24, 20, 24, 20)
         main.setSpacing(16)
 
-        title = QLabel(tr("C++ Memory Visualizer"))
+        title = QLabel(tr("C++rafting Table"))
         self._title = title
         title.setStyleSheet(HEADLINE)
         main.addWidget(title)
@@ -74,7 +76,7 @@ class HomePage(QWidget):
         quick_label = QLabel(tr("Quick Start"))
         self._quick_label = quick_label
         quick_label.setStyleSheet(
-            f"color: {STACK_BORDER}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+            f"color: {STACK_BORDER}; font-size: 18px; font-weight: bold; padding: 4px 0;"
         )
         main.addWidget(quick_label)
 
@@ -82,34 +84,53 @@ class HomePage(QWidget):
         quick_row.setSpacing(10)
 
         self._quick_cards: list[tuple[QLabel, QLabel, str, str]] = []
-        for label, tab, desc in [
-            ("Write Code", "Code Editor", "Run C++ code and watch\nmemory state step by step"),
-            ("Import & Learn", "File Import", "Upload PDF/DOCX/CPP files\nand extract knowledge points"),
-            ("Review Mistakes", "Review", "Practice with spaced repetition\nto master C++ concepts"),
+        for label, tab, desc, icon_name in [
+            ("Write Code", "Code Editor", "Run C++ code and watch\nmemory state step by step", "nav_code"),
+            ("Import & Learn", "File Import", "Upload PDF/DOCX/CPP files\nand extract knowledge points", "nav_file"),
+            ("Review Mistakes", "Review", "Practice with spaced repetition\nto master C++ concepts", "empty_chest"),
         ]:
             card = QFrame()
             card.setObjectName("quickCard")
             card.setStyleSheet(
-                f"QFrame#quickCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+                f"QFrame#quickCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; "
                 f"padding: 10px 14px; }}"
-                f"QFrame#quickCard:hover {{ border-color: {ACCENT}; background-color: #2A3A4A; }}"
+                f"QFrame#quickCard:hover {{ border-color: {ACCENT}; background-color: {SURFACE_HOVER}; }}"
                 f"QFrame#quickCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )
             card.setCursor(Qt.CursorShape.PointingHandCursor)
             idx = TAB_NAMES.get(tab, 0)
             card.mousePressEvent = lambda e, i=idx: self.tab_switch_requested.emit(i)
 
-            card_layout = QVBoxLayout(card)
+            card_layout = QHBoxLayout(card)
             card_layout.setContentsMargins(0, 0, 0, 0)
-            card_layout.setSpacing(4)
+            card_layout.setSpacing(10)
+
+            icon = QLabel()
+            icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
+                38, 38, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            ))
+            card_layout.addWidget(icon)
+
+            text_box = QVBoxLayout()
+            text_box.setSpacing(2)
 
             title_lbl = QLabel(tr(label))
-            title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 15px; font-weight: 700;")
-            card_layout.addWidget(title_lbl)
+            title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 17px; font-weight: 700;")
+            text_box.addWidget(title_lbl)
 
             desc_lbl = QLabel(tr(desc))
-            desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; font-weight: 400;")
-            card_layout.addWidget(desc_lbl)
+            desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600;")
+            text_box.addWidget(desc_lbl)
+            card_layout.addLayout(text_box)
+            card_layout.addStretch()
+
+            arrow = QLabel()
+            arrow.setPixmap(QPixmap(asset_path("icons", "item_arrow")).scaled(
+                24, 24, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            ))
+            card_layout.addWidget(arrow)
             self._quick_cards.append((title_lbl, desc_lbl, label, desc))
 
             quick_row.addWidget(card)
@@ -122,12 +143,14 @@ class HomePage(QWidget):
         actions.setSpacing(12)
 
         self._action_buttons: list[tuple[QPushButton, str]] = []
-        for label, tab in [("Code Editor", "Code Editor"),
-                           ("OJ Analysis", "OJ Analysis"),
-                           ("File Import", "File Import")]:
+        for label, tab, icon_name in [
+            ("Code Editor", "Code Editor", "nav_code"),
+            ("OJ Analysis", "OJ Analysis", "nav_oj"),
+            ("File Import", "File Import", "nav_file"),
+        ]:
             btn = QPushButton(tr(label))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(LINK_BTN)
+            btn.setIcon(QIcon(asset_path("icons", icon_name)))
             idx = TAB_NAMES.get(tab, 0)
             btn.clicked.connect(lambda checked=None, i=idx: self.tab_switch_requested.emit(i))
             actions.addWidget(btn)
@@ -140,9 +163,9 @@ class HomePage(QWidget):
         stats_row = QHBoxLayout()
         stats_row.setSpacing(12)
 
-        self._error_card = self._stat_card("0", "Pending Review", "Review")
-        self._kp_card = self._stat_card("0", "Knowledge Points", "Knowledge Base")
-        self._act_card = self._stat_card("0", "Recent Activities", None)
+        self._error_card = self._stat_card("0", "Pending Review", "Review", "empty_chest")
+        self._kp_card = self._stat_card("0", "Knowledge Points", "Knowledge Base", "nav_knowledge")
+        self._act_card = self._stat_card("0", "Recent Activities", None, "block_grass")
 
         stats_row.addWidget(self._error_card)
         stats_row.addWidget(self._kp_card)
@@ -154,7 +177,7 @@ class HomePage(QWidget):
         activity_label = QLabel(tr("Recent Activity"))
         self._activity_title = activity_label
         activity_label.setStyleSheet(
-            f"color: {STACK_BORDER}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+            f"color: {STACK_BORDER}; font-size: 18px; font-weight: bold; padding: 4px 0;"
         )
         main.addWidget(activity_label)
 
@@ -168,7 +191,7 @@ class HomePage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-    def _stat_card(self, num: str, label: str, tab_name: str | None) -> QFrame:
+    def _stat_card(self, num: str, label: str, tab_name: str | None, icon_name: str) -> QFrame:
         card = QFrame()
         card.setObjectName("statCard")
         card.setStyleSheet(CARD_BG)
@@ -186,6 +209,14 @@ class HomePage(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon = QLabel()
+        icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
+            42, 42, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        ))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon)
 
         n = QLabel(num)
         n.setStyleSheet(STAT_NUM)
@@ -217,7 +248,7 @@ class HomePage(QWidget):
 
         if not activities:
             placeholder = QLabel(tr("No activity yet - start by running some code or importing a file"))
-            placeholder.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; padding: 8px 0;")
+            placeholder.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600; padding: 8px 0;")
             self._activity_list.addWidget(placeholder)
             self._activity_list.addStretch()
             return
@@ -226,22 +257,32 @@ class HomePage(QWidget):
             ts = a.get("timestamp", "")[:19].replace("T", " ")
             act = tr(a.get("action", "?"))
             detail = self._translate_activity_detail(a.get("detail", ""))
-            row = QLabel(f"  {ts}   {act}  -  {detail}")
-            row.setStyleSheet(
-                f"color: {TEXT_PRIMARY}; font-size: 11px; "
-                f"padding: 3px 8px;"
-            )
-            self._activity_list.addWidget(row)
+            row_frame = QFrame()
+            row_frame.setProperty("panel", "card")
+            row_layout = QHBoxLayout(row_frame)
+            row_layout.setContentsMargins(8, 4, 8, 4)
+            row_layout.setSpacing(8)
+            icon = QLabel()
+            icon.setPixmap(QPixmap(asset_path("icons", "block_grass")).scaled(
+                18, 18, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            ))
+            row_layout.addWidget(icon)
+            row = QLabel(f"{ts}   {act}  -  {detail}")
+            row.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 600;")
+            row_layout.addWidget(row)
+            row_layout.addStretch()
+            self._activity_list.addWidget(row_frame)
 
         if len(activities) > 15:
             more = QLabel(tr("... and {count} more", count=len(activities) - 15))
-            more.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px; padding: 3px 8px;")
+            more.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 600; padding: 3px 8px;")
             self._activity_list.addWidget(more)
 
         self._activity_list.addStretch()
 
     def retranslate_ui(self):
-        self._title.setText(tr("C++ Memory Visualizer"))
+        self._title.setText(tr("C++rafting Table"))
         self._subtitle.setText(tr("Visualize memory, learn pointers, master C++"))
         self._quick_label.setText(tr("Quick Start"))
         self._activity_title.setText(tr("Recent Activity"))

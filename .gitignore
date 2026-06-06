@@ -13,3 +13,4 @@ config.yaml
 data/user/
 .vscode/
 data/user/
+debug_screenshots/

@@ -1,4 +1,4 @@
-# MVP 建设文档 — C++ Memory Visualizer
+# MVP 建设文档 — C++rafting Table
 
 > **Status: MVP COMPLETE + Post-MVP features added (2026-05-30)**
 > Post-MVP additions: OJ Analysis, File Import, Review (SM-2), Knowledge Base + Graph, Settings, AI explanations (markdown), Auto-play, Lazy API prompt

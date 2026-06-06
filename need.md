@@ -2,7 +2,7 @@
 
 # 🤖 面向 Agent 的开发需求文档 (Agent-Ready PRD)
 
-> **项目名称**: C++ Memory Visualizer (C++ 内存可视化沙盒)
+> **项目名称**: C++rafting Table
 > **目标**: 构建一个基于 PySide6 的桌面端应用，利用 LLM 解析 C++ 代码并驱动 QGraphicsView 进行内存状态可视化。
 > **Agent 开发指令**: 请严格遵守本文档定义的**数据结构、类名和状态流转逻辑**。在 MVP 阶段，禁止引入复杂的第三方 AST 库，严格执行“本地正则速通 + LLM 预执行缓存”双轨架构。
 

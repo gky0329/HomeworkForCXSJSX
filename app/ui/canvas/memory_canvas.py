@@ -6,6 +6,7 @@ from app.core.memory_model import MemoryState, PointerEdge
 from app.ui.canvas.stack_item import StackItem
 from app.ui.canvas.heap_item import HeapItem
 from app.ui.canvas.edge_item import EdgeItem
+from app.ui.theme.colors import EDGE_REF
 
 
 STACK_ITEM_X = 20
@@ -208,7 +209,7 @@ class MemoryCanvas:
                     is_dangling=False,
                     address_map=self._address_to_item,
                 )
-                edge.setPen(QPen(QColor("#4EC9B0"), 1, Qt.PenStyle.DotLine))
+                edge.setPen(QPen(QColor(EDGE_REF), 1, Qt.PenStyle.DotLine))
                 self._scene.addItem(edge)
                 self._edge_items.append(edge)
                 self._edge_by_source.setdefault(var.address, []).append(edge)

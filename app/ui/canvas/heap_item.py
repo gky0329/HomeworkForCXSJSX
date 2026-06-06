@@ -5,7 +5,7 @@ from PySide6.QtGui import QFont, QColor, QPen, QBrush, QPainter, QFontMetricsF
 from app.core.memory_model import HeapBlock
 from app.ui.theme.colors import (
     HEAP_BORDER, HEAP_BG, HEAP_TEXT, EDGE_DANGLING, CANVAS_BG,
-    STACK_VAR_TEXT,
+    STACK_VAR_TEXT, STACK_BORDER, EDGE_REF, WARN,
 )
 from app.ui.canvas.object_layout import (
     base_subobjects,
@@ -147,7 +147,7 @@ class HeapItem(QGraphicsRectItem):
                 f"  size={block.container_size} cap={block.container_capacity}",
                 self
             ))
-            sz_label.setDefaultTextColor(QColor("#DCDCAA"))
+            sz_label.setDefaultTextColor(QColor(WARN))
             sz_label.setFont(index_font)
             sz_label.setPos(4, y)
             y += QFontMetricsF(index_font).lineSpacing() + 2
@@ -160,7 +160,7 @@ class HeapItem(QGraphicsRectItem):
             cell = QGraphicsRectItem(0, 0, cell_w, cell_h, self)
             cell.setPos(x, cy)
             cell.setPen(QPen(QColor(HEAP_BORDER), 1))
-            cell.setBrush(QBrush(QColor("#4A3626")))
+            cell.setBrush(QBrush(QColor(HEAP_BG)))
             self._array_cells.append(cell)
             if elem.address:
                 self.element_items[elem.address] = cell
@@ -172,7 +172,7 @@ class HeapItem(QGraphicsRectItem):
             self._array_value_labels.append(value_label)
 
             index_label = self._keep_text(QGraphicsTextItem("", cell))
-            index_label.setDefaultTextColor(QColor("#DCDCAA"))
+            index_label.setDefaultTextColor(QColor(WARN))
             index_label.setFont(index_font)
             index_label.setPlainText(f"[{elem.index}]")
             self._array_index_labels.append(index_label)
@@ -261,7 +261,7 @@ class HeapItem(QGraphicsRectItem):
             label = self._keep_text(QGraphicsTextItem(
                 f"  .{m.name}: {m.type} = {m.value}", self
             ))
-            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setDefaultTextColor(QColor(STACK_BORDER))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, title_bottom + i * member_h)
             if m.address:
@@ -346,7 +346,7 @@ class HeapItem(QGraphicsRectItem):
             y += body_line_h
         elif block.is_constructed:
             badge = self._keep_text(QGraphicsTextItem("  ⚡ constructed", self))
-            badge.setDefaultTextColor(QColor("#4EC9B0"))
+            badge.setDefaultTextColor(QColor(EDGE_REF))
             badge.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 9))
             badge.setPos(6, y)
             y += body_line_h
@@ -354,7 +354,7 @@ class HeapItem(QGraphicsRectItem):
         for base, member in base_subobjects(block.base_classes, block.members):
             section_items: list[QGraphicsTextItem] = []
             base_label = self._keep_text(QGraphicsTextItem(f"  base subobject: {base}", self))
-            base_label.setDefaultTextColor(QColor("#CE9178"))
+            base_label.setDefaultTextColor(QColor(HEAP_TEXT))
             base_label.setFont(body_font)
             base_label.setPos(6, y)
             section_items.append(base_label)
@@ -362,7 +362,7 @@ class HeapItem(QGraphicsRectItem):
 
             state = member.value if member is not None and member.value else "<base layout>"
             state_label = self._keep_text(QGraphicsTextItem(f"    contains {base} = {state}", self))
-            state_label.setDefaultTextColor(QColor("#CE9178"))
+            state_label.setDefaultTextColor(QColor(HEAP_TEXT))
             state_label.setFont(body_font)
             state_label.setPos(14, y)
             section_items.append(state_label)
@@ -370,39 +370,39 @@ class HeapItem(QGraphicsRectItem):
                 self.member_items[member.address] = state_label
             self._value_label = state_label
             y += body_line_h
-            self._make_object_section("#CE9178", section_items)
+            self._make_object_section(HEAP_TEXT, section_items)
 
         if vtable:
             section_items = []
             vl = self._keep_text(QGraphicsTextItem(f"  vptr -> {(block.class_name or block.type)} vtable", self))
-            vl.setDefaultTextColor(QColor("#DCDCAA"))
+            vl.setDefaultTextColor(QColor(WARN))
             vl.setFont(body_font)
             vl.setPos(6, y)
             section_items.append(vl)
             y += body_line_h
             for row in vtable:
                 slot_label = self._keep_text(QGraphicsTextItem(f"    {row}", self))
-                slot_label.setDefaultTextColor(QColor("#DCDCAA"))
+                slot_label.setDefaultTextColor(QColor(WARN))
                 slot_label.setFont(body_font)
                 slot_label.setPos(14, y)
                 section_items.append(slot_label)
                 self._value_label = slot_label
                 y += body_line_h
-            self._make_object_section("#DCDCAA", section_items)
+            self._make_object_section(WARN, section_items)
 
         derived_section_items: list[QGraphicsTextItem] = []
         if block.base_classes and derived_members:
             derived_label = self._keep_text(QGraphicsTextItem(f"  derived fields: {block.class_name or block.type}", self))
-            derived_label.setDefaultTextColor(QColor("#9CDCFE"))
+            derived_label.setDefaultTextColor(QColor(STACK_BORDER))
             derived_label.setFont(body_font)
             derived_label.setPos(6, y)
             derived_section_items.append(derived_label)
             y += body_line_h
-            self._make_object_section("#9CDCFE", derived_section_items)
+            self._make_object_section(STACK_BORDER, derived_section_items)
 
         for m in derived_members:
             label = self._keep_text(QGraphicsTextItem(f"  .{m.name}: {m.type} = {m.value}", self))
-            label.setDefaultTextColor(QColor("#9CDCFE"))
+            label.setDefaultTextColor(QColor(STACK_BORDER))
             label.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
             label.setPos(6, y)
             if derived_section_items:

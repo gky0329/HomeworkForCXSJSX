@@ -1,4 +1,4 @@
-# C++ Memory Visualizer — 支持的可视化类型
+# C++rafting Table — 支持的可视化类型
 
 > 本文档描述 LLM 执行引擎支持输出的内存状态格式，以及 Canvas 对应的渲染效果。
 

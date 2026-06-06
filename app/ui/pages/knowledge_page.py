@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
     QGraphicsLineItem, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QMargins, QTimer
+from PySide6.QtCore import Qt, QMargins, QTimer, QSize
 from PySide6.QtGui import (
-    QFont, QColor, QPen, QBrush, QPainter, QLinearGradient, QMouseEvent,
+    QFont, QColor, QPen, QBrush, QPainter, QLinearGradient, QMouseEvent, QIcon,
 )
 
 from app.services import error_store
@@ -20,10 +20,12 @@ from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.widgets.threading import retire_worker
 import shiboken6
+from app.ui.theme.minecraft_assets import asset_path
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     STACK_BORDER, HEAP_BORDER, ACCENT, ACCENT_HOVER, EDGE_DANGLING, SUCCESS,
-    EDITOR_BG,
+    SUCCESS_BG, ERROR_BG, EDITOR_BG, TEXT_INVERSE, TEXT_BUTTON_PRIMARY, HEAP_TEXT, EDITOR_LINE_NUM,
+    EDGE_SOLID, PARCHMENT_TEXT, PARCHMENT_MUTED,
 )
 
 
@@ -36,14 +38,14 @@ def _md_to_html(text: str) -> str:
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     html = re.sub(r"```(\w*)\n(.*?)```", _code_block, html, flags=re.DOTALL)
-    html = re.sub(r"`([^`\n]+)`", r"<code style='background:#2D2D2D;color:#CE9178;padding:1px 5px;font-family:monospace;'>\1</code>", html)
-    html = re.sub(r"^\*\*\*(.+?)\*\*\*$", r"<h2 style='color:#9CDCFE;font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid #3E3E3E;padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^## (.+)$", r"<h2 style='color:#9CDCFE;font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid #3E3E3E;padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^### (.+)$", r"<h3 style='color:#569CD6;font-size:16px;font-weight:600;margin:12px 0 4px 0;'>\1</h3>", html, flags=re.MULTILINE)
+    html = re.sub(r"`([^`\n]+)`", fr"<code style='background:{EDITOR_BG};color:{HEAP_TEXT};padding:1px 5px;font-family:monospace;'>\1</code>", html)
+    html = re.sub(r"^\*\*\*(.+?)\*\*\*$", fr"<h2 style='color:{STACK_BORDER};font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid {BORDER};padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^## (.+)$", fr"<h2 style='color:{STACK_BORDER};font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid {BORDER};padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
+    html = re.sub(r"^### (.+)$", fr"<h3 style='color:{ACCENT};font-size:18px;font-weight:700;margin:12px 0 4px 0;'>\1</h3>", html, flags=re.MULTILINE)
     html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html)
     html = re.sub(r"^- (.+)$", r"<li style='margin:2px 0;'>\1</li>", html, flags=re.MULTILINE)
     html = re.sub(r"^(\d+)\. (.+)$", r"<li style='margin:2px 0;'>\2</li>", html, flags=re.MULTILINE)
-    html = re.sub(r"---", r"<hr style='border:none;border-top:1px solid #3E3E3E;margin:10px 0;'>", html)
+    html = re.sub(r"---", fr"<hr style='border:none;border-top:1px solid {BORDER};margin:10px 0;'>", html)
     html = re.sub(r"\n\n", "<br><br>", html)
     html = re.sub(r"\n", "<br>", html)
     return f"<div style='line-height:1.7;'>{html}</div>"
@@ -55,24 +57,24 @@ def _code_block(match: re.Match) -> str:
     code_escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     lines = code_escaped.split("\n")
     numbered = "".join(
-        f"<span style='color:#808080;'>{i+1:>2} </span>{line}<br>"
+        f"<span style='color:{EDITOR_LINE_NUM};'>{i+1:>2} </span>{line}<br>"
         for i, line in enumerate(lines)
     )
     return (
-        f"<div style='background:#1E1E1E;border:1px solid #3E3E3E;"
-        f"padding:10px 14px;margin:8px 0;font-family:monospace;font-size:12px;"
-        f"color:#D4D4D4;line-height:1.5;'>{numbered}</div>"
+        f"<div style='background:{EDITOR_BG};border:1px solid {BORDER};"
+        f"padding:10px 14px;margin:8px 0;font-family:monospace;font-size:14px;"
+        f"color:{TEXT_PRIMARY};line-height:1.5;'>{numbered}</div>"
     )
 
 
 TOGGLE_ACTIVE = (
-    f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-    f"border: none; padding: 4px 12px; font-size: 12px; font-weight: bold; }}"
+    f"QPushButton {{ background-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; "
+    f"border: 2px solid {BORDER}; padding: 6px 14px; font-size: 15px; font-weight: bold; }}"
 )
 TOGGLE_INACTIVE = (
     f"QPushButton {{ background-color: transparent; "
-    f"color: {TEXT_SECONDARY}; border: 1px solid {BORDER}; "
-    f"padding: 4px 12px; font-size: 12px; }}"
+    f"color: {TEXT_SECONDARY}; border: 2px solid {BORDER}; "
+    f"padding: 6px 14px; font-size: 15px; font-weight: 600; }}"
     f"QPushButton:hover {{ color: {TEXT_PRIMARY}; border-color: {ACCENT}; }}"
 )
 
@@ -102,7 +104,7 @@ class GraphNode(QGraphicsEllipseItem):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._text = QGraphicsTextItem(label, self)
-        self._text.setDefaultTextColor(QColor("#FFFFFF"))
+        self._text.setDefaultTextColor(QColor(TEXT_PRIMARY))
         self._text.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
         trect = self._text.boundingRect()
         self._text.setPos(-trect.width() / 2, -trect.height() / 2)
@@ -138,7 +140,10 @@ class KnowledgePage(QWidget):
         self._refresh()
 
     def hideEvent(self, event):
-        self._graph_timer.stop()
+        try:
+            self._graph_timer.stop()
+        except RuntimeError:
+            pass
         super().hideEvent(event)
 
     # ── UI setup ────────────────────────────────────────────────────────
@@ -167,12 +172,7 @@ class KnowledgePage(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText(tr("Search concepts..."))
         self._search.setFixedWidth(220)
-        self._search.setStyleSheet(
-            f"QLineEdit {{ background-color: transparent; "
-            f"color: {TEXT_PRIMARY}; border: none; border-bottom: 1px solid {BORDER}; "
-            f"padding: 6px 4px; font-size: 14px; }}"
-            f"QLineEdit:focus {{ border-bottom: 1px solid {ACCENT}; }}"
-        )
+        self._search.addAction(QIcon(asset_path("icons", "action_search")), QLineEdit.ActionPosition.LeadingPosition)
         self._search.textChanged.connect(self._on_search)
         header.addWidget(self._search)
 
@@ -191,10 +191,10 @@ class KnowledgePage(QWidget):
         self._concept_list.setStyleSheet(
             f"QListWidget {{ background-color: transparent; "
             f"color: {TEXT_PRIMARY}; border: none; "
-            f"font-size: 14px; }}"
+            f"font-size: 16px; font-weight: 600; }}"
             f"QListWidget::item {{ padding: 10px 14px; min-height: 32px; "
             f"border-bottom: 1px solid {BORDER}; }}"
-            f"QListWidget::item:selected {{ background-color: #1A3A5C; }}"
+            f"QListWidget::item:selected {{ background-color: {SUCCESS_BG}; color: {SUCCESS}; }}"
         )
         self._concept_list.currentRowChanged.connect(self._on_select)
         list_layout.addWidget(self._concept_list)
@@ -206,11 +206,6 @@ class KnowledgePage(QWidget):
         right_layout.addWidget(self._detail_label)
         self._detail = QFrame()
         self._detail.setObjectName("kbDetail")
-        self._detail.setStyleSheet(
-            f"QFrame#kbDetail {{ background-color: {SURFACE}; "
-            f"border: none; padding: 16px; }}"
-            f"QFrame#kbDetail QLabel {{ border: none; background: transparent; outline: none; }}"
-        )
         self._detail_layout = QVBoxLayout(self._detail)
         self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         detail_scroll = QScrollArea()
@@ -242,6 +237,8 @@ class KnowledgePage(QWidget):
         bottom = QHBoxLayout()
         bottom.addStretch()
         self._refresh_btn = QPushButton(tr("Refresh"))
+        self._refresh_btn.setIcon(QIcon(asset_path("icons", "action_refresh")))
+        self._refresh_btn.setIconSize(QSize(18, 18))
         self._refresh_btn.clicked.connect(self._refresh)
         bottom.addWidget(self._refresh_btn)
         layout.addLayout(bottom)
@@ -297,6 +294,7 @@ class KnowledgePage(QWidget):
             if errs:
                 label += f"  ({errs})"
             item = QListWidgetItem(label)
+            item.setIcon(QIcon(asset_path("icons", self._concept_icon(name))))
             item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 6, 0, 6)))
             if errs > 0:
                 item.setForeground(QColor(EDGE_DANGLING))
@@ -304,6 +302,20 @@ class KnowledgePage(QWidget):
                 item.setForeground(QColor(SUCCESS))
             item.setData(Qt.ItemDataRole.UserRole, kp)
             self._concept_list.addItem(item)
+
+    def _concept_icon(self, name: str) -> str:
+        key = name.lower()
+        if "pointer" in key or "指针" in name or "引用" in name:
+            return "nav_code"
+        if "array" in key or "数组" in name:
+            return "block_grass"
+        if "heap" in key or "堆" in name:
+            return "nav_file"
+        if "输入" in name or "输出" in name or "io" in key:
+            return "empty_book"
+        if "构造" in name or "析构" in name or "class" in key:
+            return "nav_knowledge"
+        return "item_arrow"
 
     def _on_search(self, text: str):
         self._populate_list(text)
@@ -334,7 +346,7 @@ class KnowledgePage(QWidget):
         title = QLabel(name)
         title.setWordWrap(True)
         title.setStyleSheet(
-            f"color: {STACK_BORDER}; font-size: 32px; font-weight: 800; "
+            f"color: {PARCHMENT_TEXT}; font-size: 32px; font-weight: 800; "
             f"padding: 0 0 10px 0; border-bottom: 1px solid {BORDER};"
         )
         self._detail_layout.addWidget(title)
@@ -342,7 +354,7 @@ class KnowledgePage(QWidget):
         source = kp.get("source", "")
         if source:
             src = QLabel(tr("via {source}", source=source))
-            src.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; padding: 2px 0 8px 0;")
+            src.setStyleSheet(f"color: {PARCHMENT_MUTED}; font-size: 13px; font-weight: 600; padding: 2px 0 8px 0;")
             self._detail_layout.addWidget(src)
 
         desc = kp.get("description", "")
@@ -351,7 +363,7 @@ class KnowledgePage(QWidget):
             explanation.setWordWrap(True)
             explanation.setTextFormat(Qt.TextFormat.RichText)
             explanation.setStyleSheet(
-                f"color: {TEXT_PRIMARY}; font-size: 14px; line-height: 1.6; "
+                f"color: {PARCHMENT_TEXT}; font-size: 15px; line-height: 1.6; "
                 f"padding: 8px 0;"
             )
             self._detail_layout.addWidget(explanation)
@@ -365,27 +377,31 @@ class KnowledgePage(QWidget):
         if deps:
             dep_label = QLabel(tr("Related: {deps}", deps=", ".join(deps)))
             dep_label.setWordWrap(True)
-            dep_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; padding: 4px 0;")
+            dep_label.setStyleSheet(f"color: {PARCHMENT_MUTED}; font-size: 13px; font-weight: 600; padding: 4px 0;")
             self._detail_layout.addWidget(dep_label)
 
         self._detail_layout.addSpacing(4)
         self._add_review_button(name)
 
         quiz_btn = QPushButton(tr("Quiz Me"))
+        quiz_btn.setIcon(QIcon(asset_path("icons", "action_quiz")))
+        quiz_btn.setIconSize(QSize(18, 18))
         quiz_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
-            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"padding: 4px 14px; font-size: 11px; }}"
-            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+            f"color: {ACCENT}; border: 2px solid {ACCENT}; "
+            f"padding: 6px 14px; font-size: 14px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; }}"
         )
         quiz_btn.clicked.connect(lambda: self._generate_quiz_for_concept(name, quiz_btn))
         self._detail_layout.addWidget(quiz_btn)
 
         del_btn = QPushButton(tr("Delete"))
+        del_btn.setIcon(QIcon(asset_path("icons", "action_delete")))
+        del_btn.setIconSize(QSize(16, 16))
         del_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
-            f"color: {TEXT_MUTED}; border: 1px solid {BORDER}; "
-            f"padding: 4px 12px; font-size: 10px; }}"
+            f"color: {TEXT_MUTED}; border: 2px solid {BORDER}; "
+            f"padding: 5px 12px; font-size: 13px; font-weight: 600; }}"
             f"QPushButton:hover {{ color: {EDGE_DANGLING}; border-color: {EDGE_DANGLING}; }}"
         )
         del_btn.clicked.connect(lambda: self._delete_concept(name))
@@ -395,11 +411,8 @@ class KnowledgePage(QWidget):
 
     def _add_explain_button(self, concept_name: str):
         btn = QPushButton(tr("Explain with AI"))
-        btn.setStyleSheet(
-            f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-            f"border: none; padding: 8px 18px; font-size: 13px; }}"
-            f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
-        )
+        btn.setIcon(QIcon(asset_path("icons", "action_ai")))
+        btn.setIconSize(QSize(18, 18))
 
         def on_explain():
             kps = error_store.get_knowledge_points()
@@ -408,7 +421,7 @@ class KnowledgePage(QWidget):
                 explanation = QLabel(_md_to_html(cached))
                 explanation.setWordWrap(True)
                 explanation.setTextFormat(Qt.TextFormat.RichText)
-                explanation.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; padding: 8px 0;")
+                explanation.setStyleSheet(f"color: {PARCHMENT_TEXT}; font-size: 15px; padding: 8px 0;")
                 self._detail_layout.addWidget(explanation)
                 self._detail_layout.addStretch()
                 btn.hide()
@@ -436,7 +449,7 @@ class KnowledgePage(QWidget):
                 explanation = QLabel(_md_to_html(text))
                 explanation.setWordWrap(True)
                 explanation.setTextFormat(Qt.TextFormat.RichText)
-                explanation.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; padding: 8px 0;")
+                explanation.setStyleSheet(f"color: {PARCHMENT_TEXT}; font-size: 15px; padding: 8px 0;")
                 self._detail_layout.addWidget(explanation)
                 self._detail_layout.addStretch()
                 btn.hide()
@@ -456,11 +469,13 @@ class KnowledgePage(QWidget):
 
     def _add_review_button(self, name: str):
         btn = QPushButton(tr("Add to Review"))
+        btn.setIcon(QIcon(asset_path("icons", "action_add")))
+        btn.setIconSize(QSize(18, 18))
         btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
-            f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-            f"padding: 6px 14px; font-size: 12px; }}"
-            f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+            f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
+            f"padding: 6px 14px; font-size: 14px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: {TEXT_BUTTON_PRIMARY}; }}"
         )
 
         def add():
@@ -482,8 +497,8 @@ class KnowledgePage(QWidget):
             )
             btn.setText("✓ " + tr("Added"))
             btn.setStyleSheet(
-                f"QPushButton {{ background-color: #1A3A2A; color: #4EC9B0; "
-                f"border: 1px solid #4EC9B0; padding: 4px 12px; font-size: 11px; }}"
+                f"QPushButton {{ background-color: {SUCCESS_BG}; color: {SUCCESS}; "
+                f"border: 2px solid {SUCCESS}; padding: 5px 12px; font-size: 13px; font-weight: 600; }}"
             )
             btn.setEnabled(False)
 
@@ -493,7 +508,7 @@ class KnowledgePage(QWidget):
     def _build_interactive_quiz(self, num: int, q: dict, kp_name: str) -> QFrame:
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background-color: {EDITOR_BG}; border: 1px solid {BORDER}; }}"
+            f"QFrame {{ background-color: {EDITOR_BG}; border: 2px solid {BORDER}; }}"
         )
         layout = QVBoxLayout(card)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -501,7 +516,7 @@ class KnowledgePage(QWidget):
 
         question = QLabel(f"Q{num}: {q.get('question', '')}")
         question.setWordWrap(True)
-        question.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: bold;")
+        question.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 15px; font-weight: bold;")
         layout.addWidget(question)
 
         options = q.get("options", [])
@@ -525,7 +540,7 @@ class KnowledgePage(QWidget):
                 ans_text = f"{labels[answer_idx]}) {options[answer_idx]}" if 0 <= answer_idx < len(options) else ""
                 result_label.setText("✓ " + tr("Correct!") + f"  {ans_text}")
                 result_label.setStyleSheet(
-                    f"color: #4EC9B0; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                    f"color: {SUCCESS}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
             else:
                 result_label.setText(
@@ -533,14 +548,16 @@ class KnowledgePage(QWidget):
                     answer=f"{labels[answer_idx]}) {options[answer_idx]}" if 0 <= answer_idx < len(options) else "?")
                 )
                 result_label.setStyleSheet(
-                    f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: bold; padding: 4px 0;"
+                    f"color: {EDGE_DANGLING}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
                 add_btn = QPushButton(tr("Add to Review"))
+                add_btn.setIcon(QIcon(asset_path("icons", "action_add")))
+                add_btn.setIconSize(QSize(16, 16))
                 add_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
-                    f"color: {EDGE_DANGLING}; border: 1px solid {EDGE_DANGLING}; "
-                    f"padding: 3px 10px; font-size: 10px; margin-top: 2px; }}"
-                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: #FFFFFF; }}"
+                    f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
+                    f"padding: 4px 10px; font-size: 13px; font-weight: 600; margin-top: 2px; }}"
+                    f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: {TEXT_BUTTON_PRIMARY}; }}"
                 )
                 def save_error(q_text=q.get("question",""), o=options, a_i=answer_idx, c_i=choice_idx):
                     opts_text = "\n".join(f"  {labels[i]}) {o[i]}" for i in range(len(o)))
@@ -562,7 +579,7 @@ class KnowledgePage(QWidget):
             btn = QPushButton(f"{labels[ci]}) {opt}")
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: transparent; color: {TEXT_PRIMARY}; "
-                f"border: 1px solid {BORDER}; padding: 6px 10px; font-size: 12px; text-align: left; }}"
+                f"border: 2px solid {BORDER}; padding: 7px 10px; font-size: 14px; font-weight: 600; text-align: left; }}"
                 f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT_PRIMARY}; }}"
                 f"QPushButton:disabled {{ color: {TEXT_MUTED}; border-color: {BORDER}; }}"
             )
@@ -751,7 +768,7 @@ class KnowledgePage(QWidget):
                     parent_node.pos().x(), parent_node.pos().y(),
                     child_node.pos().x(), child_node.pos().y(),
                 )
-                edge.setPen(QPen(QColor("#444444"), 1))
+                edge.setPen(QPen(QColor(EDGE_SOLID), 1))
                 edge.setZValue(-1)
                 self._graph_scene.addItem(edge)
                 self._graph_edges.append((edge, parent_node, child_node))

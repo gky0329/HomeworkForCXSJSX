@@ -10,45 +10,28 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QStatusBar, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTabWidget, QCheckBox, QComboBox, QSlider,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer
-from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent
+from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer, QSize
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent, QIcon
 
-from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT, ACCENT_HOVER, ACCENT_PRESSED, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT, TEXT_PRIMARY, ACCENT
-from app.ui.pages.file_import_page import FileImportPage
-from app.ui.pages.oj_page import OJPage
-from app.ui.pages.review_page import ReviewPage
+from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT
+from app.ui.theme.minecraft_assets import asset_path
 from app.ui.pages.home_page import HomePage
-from app.ui.pages.knowledge_page import KnowledgePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
 from app.services.i18n import load_language, tr
 from app.core.demo_examples import ROADSHOW_DEMO_CODE
+from app.utils.startup_profiler import StartupProfiler
 
 
 ZOOM_FACTOR = 1.15
 ZOOM_MIN = 0.1
 ZOOM_MAX = 10.0
-ZOOM_BTN_STYLE = (
-    f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
-    "border-radius: 5px; "
-    "padding: 2px 4px; font-size: 16px; font-weight: bold; "
-    "min-height: 24px; min-width: 28px; } "
-    f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
-    f"QPushButton:pressed {{ background-color: {ACCENT_PRESSED}; }}"
-)
+ZOOM_BTN_STYLE = ""
 
 SCENE_W = 1600
 SCENE_H = 2000
 
-TAB_STYLE = (
-    f"QTabWidget::pane {{ border: none; background: {CANVAS_BG}; }}"
-    f"QTabBar::tab {{ background: transparent; color: {TEXT_SECONDARY}; "
-    f"padding: 10px 20px; margin: 4px 2px 0 2px; border: none; "
-    f"border-bottom: 3px solid transparent; font-size: 13px; font-weight: 600; }}"
-    f"QTabBar::tab:selected {{ color: {TEXT_PRIMARY}; border-bottom: 3px solid {ACCENT}; "
-    f"background: transparent; }}"
-    f"QTabBar::tab:hover:!selected {{ color: {TEXT_PRIMARY}; border-bottom: 3px solid {BORDER}; }}"
-)
+TAB_STYLE = ""
 
 EXAMPLE_CODES = {
     "Roadshow Demo": ROADSHOW_DEMO_CODE,
@@ -255,20 +238,28 @@ class CanvasView(QGraphicsView):
 
 
 class MainWindow(QMainWindow):
+    code_page_ready = Signal()
 
-    def __init__(self, config_path: Path | None = None):
+    def __init__(self, config_path: Path | None = None, startup_profiler: StartupProfiler | None = None):
         super().__init__()
         self._config_path = config_path
-        load_language(config_path)
+        self._startup_profiler = startup_profiler
+        if self._startup_profiler is not None:
+            with self._startup_profiler.span("language"):
+                load_language(config_path)
+        else:
+            load_language(config_path)
         self._global_shortcuts: ShortcutRegistry | None = None
         self._code_shortcuts: ShortcutRegistry | None = None
         self._code_key_actions: dict[int, Callable[[], None]] = {}
         self._load_start_time: float = 0.0
         self._elapsed_timer: QTimer | None = None
-        self.setWindowTitle(tr("C++ Memory Visualizer"))
+        self._lazy_tabs: dict[int, str] = {}
+        self._replacing_lazy_tab = False
+        self.setWindowTitle(tr("C++rafting Table"))
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "icons" / "app_icon.png")))
         self.setMinimumSize(1200, 700)
         self._setup_ui()
-        self._setup_shortcuts()
         self._setup_statusbar()
         self._setup_overlay()
         self._retranslate_ui()
@@ -280,36 +271,103 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(TAB_STYLE)
+        self._tabs.setIconSize(QSize(28, 28))
 
         self._home_tab = self._build_home_tab()
-        self._code_tab = self._build_code_tab()
-        self._file_tab = self._build_file_tab()
-        self._oj_tab = self._build_oj_tab()
-        self._review_tab = self._build_review_tab()
-        self._kb_tab = self._build_kb_tab()
+        self._code_tab = None
+        self._file_tab = None
+        self._oj_tab = None
+        self._review_tab = None
+        self._kb_tab = None
 
-        self._tabs.addTab(self._home_tab, tr("Home"))
-        self._tabs.addTab(self._code_tab, tr("Code Editor"))
-        self._tabs.addTab(self._oj_tab, tr("OJ Analysis"))
-        self._tabs.addTab(self._file_tab, tr("File Import"))
-        self._tabs.addTab(self._review_tab, tr("Review"))
-        self._tabs.addTab(self._kb_tab, tr("Knowledge Base"))
-        self._review_tab_index = self._tabs.indexOf(self._review_tab)
-        self._home_tab_index = self._tabs.indexOf(self._home_tab)
+        self._home_tab_index = self._tabs.addTab(self._home_tab, QIcon(asset_path("icons", "nav_home")), tr("Home"))
+        self._code_tab_index = self._add_lazy_tab("code", "nav_code", "Code Editor")
+        self._oj_tab_index = self._add_lazy_tab("oj", "nav_oj", "OJ Analysis")
+        self._file_tab_index = self._add_lazy_tab("file", "nav_file", "File Import")
+        self._review_tab_index = self._add_lazy_tab("review", "nav_review", "Review")
+        self._kb_tab_index = self._add_lazy_tab("knowledge", "nav_knowledge", "Knowledge Base")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
-        self.btn_settings = QPushButton(tr("Settings"))
-        self.btn_settings.clicked.connect(self._on_api_settings)
-        self._tabs.setCornerWidget(self.btn_settings, Qt.Corner.TopRightCorner)
+        self._settings_btn = QPushButton(tr("Settings"))
+        self._settings_btn.setIcon(QIcon(asset_path("icons", "nav_settings")))
+        self._settings_btn.setIconSize(QSize(24, 24))
+        self._settings_btn.setProperty("variant", "secondary")
+        self._settings_btn.clicked.connect(self._on_api_settings)
+        self._tabs.setCornerWidget(self._settings_btn, Qt.Corner.TopRightCorner)
 
         central = QWidget()
+        central.setObjectName("appShell")
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tabs)
         self.setCentralWidget(central)
 
+    def _add_lazy_tab(self, key: str, icon_name: str, label_key: str) -> int:
+        tab = self._build_loading_tab(label_key)
+        index = self._tabs.addTab(tab, QIcon(asset_path("icons", icon_name)), tr(label_key))
+        self._lazy_tabs[index] = key
+        return index
+
+    def _build_loading_tab(self, label_key: str) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label = QLabel(tr("Loading {name}...", name=tr(label_key)))
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 18px; font-weight: 700;")
+        layout.addWidget(label)
+        return tab
+
+    def _ensure_tab(self, index: int) -> QWidget | None:
+        key = self._lazy_tabs.get(index)
+        if key is None:
+            return self._tabs.widget(index)
+
+        builders = {
+            "code": self._build_code_tab,
+            "oj": self._build_oj_tab,
+            "file": self._build_file_tab,
+            "review": self._build_review_tab,
+            "knowledge": self._build_kb_tab,
+        }
+        builder = builders[key]
+        if self._startup_profiler is not None:
+            with self._startup_profiler.span(f"lazy build page {key}"):
+                widget = builder()
+        else:
+            widget = builder()
+
+        icon_names = {
+            "code": "nav_code",
+            "oj": "nav_oj",
+            "file": "nav_file",
+            "review": "nav_review",
+            "knowledge": "nav_knowledge",
+        }
+        label_keys = {
+            "code": "Code Editor",
+            "oj": "OJ Analysis",
+            "file": "File Import",
+            "review": "Review",
+            "knowledge": "Knowledge Base",
+        }
+        self._replacing_lazy_tab = True
+        self._tabs.removeTab(index)
+        self._tabs.insertTab(index, widget, QIcon(asset_path("icons", icon_names[key])), tr(label_keys[key]))
+        self._tabs.setCurrentIndex(index)
+        self._replacing_lazy_tab = False
+        self._lazy_tabs.pop(index, None)
+        if key == "code":
+            self._setup_shortcuts()
+            self.code_page_ready.emit()
+        return widget
+
     def _build_home_tab(self) -> QWidget:
-        self.home_page = HomePage()
+        if self._startup_profiler is not None:
+            with self._startup_profiler.span("build page home"):
+                self.home_page = HomePage()
+        else:
+            self.home_page = HomePage()
         self.home_page.tab_switch_requested.connect(self._tabs.setCurrentIndex)
         return self.home_page
 
@@ -319,7 +377,7 @@ class MainWindow(QMainWindow):
         header.setSpacing(6)
 
         example_label = QLabel(tr("Example:"))
-        example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px;")
+        example_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600;")
         header.addWidget(example_label)
 
         self._example_combo = QComboBox()
@@ -327,19 +385,13 @@ class MainWindow(QMainWindow):
             self._example_combo.addItem(tr(key), key)
         self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
         self._example_combo.currentIndexChanged.connect(self._on_example_changed)
-        self._example_combo.setStyleSheet(
-            f"QComboBox {{ padding: 3px 6px; font-size: 12px; border: none; "
-            f"border-bottom: 1px solid {BORDER}; background: transparent; color: {TEXT_PRIMARY}; }}"
-            f"QComboBox:focus {{ border-bottom: 1px solid {ACCENT}; }}"
-            f"QComboBox::drop-down {{ border: none; width: 16px; }}"
-            f"QComboBox QAbstractItemView {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
-            f"selection-background-color: {ACCENT}; }}"
-        )
         header.addWidget(self._example_combo)
         header.addStretch()
 
         self.btn_run = QPushButton(tr("Run"))
         self.btn_run.setObjectName("run")
+        self.btn_run.setIcon(QIcon(asset_path("icons", "action_run")))
+        self.btn_run.setIconSize(QSize(18, 18))
         header.addWidget(self.btn_run)
 
         self.btn_prev = QPushButton(tr("Prev"))
@@ -359,7 +411,7 @@ class MainWindow(QMainWindow):
         self.btn_zoom_fit = QPushButton("\u21C5")
         for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_zoom_fit):
             b.setFixedSize(28, 28)
-            b.setStyleSheet(ZOOM_BTN_STYLE)
+            b.setProperty("variant", "icon")
         self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
         self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
         self.btn_zoom_fit.setToolTip(tr("Fit to View"))
@@ -373,7 +425,7 @@ class MainWindow(QMainWindow):
         header.addWidget(self.auto_fit_check)
 
         self.step_label = QLabel(tr("Ready"))
-        self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 13px; padding: 0 4px;")
+        self.step_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600; padding: 0 4px;")
         header.addWidget(self.step_label)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -393,14 +445,14 @@ class MainWindow(QMainWindow):
 
         self.stdin_label = QLabel(tr("Program Input (stdin)"))
         self.stdin_label.setStyleSheet(
-            f"color: {TEXT_SECONDARY}; font-size: 11px; padding: 4px 8px; "
+            f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600; padding: 4px 8px; "
             f"background-color: {SURFACE}; border-top: 1px solid {BORDER};"
         )
         left_layout.addWidget(self.stdin_label, 0)
 
         self.stdin_editor = QPlainTextEdit()
         self.stdin_editor.setFixedHeight(92)
-        self.stdin_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", max(10, font_size - 2)))
+        self.stdin_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", max(13, font_size - 1)))
         self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
         self.stdin_editor.setStyleSheet(
             f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
@@ -430,18 +482,13 @@ class MainWindow(QMainWindow):
         step_bar.setContentsMargins(8, 4, 8, 4)
         step_bar.setSpacing(8)
 
-        self.btn_prev_big = QPushButton()
-        self.btn_prev_big.setStyleSheet(
-            f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; border: none; "
-            f"border-radius: 5px; padding: 6px 16px; font-size: 13px; font-weight: bold; }} "
-            f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }} "
-            f"QPushButton:disabled {{ background-color: {BORDER}; color: {TEXT_SECONDARY}; }}"
-        )
+        self.btn_prev_big = QPushButton(f"< {tr('Prev Step')}")
+        self.btn_prev_big.setProperty("variant", "secondary")
         self.btn_prev_big.setEnabled(False)
         step_bar.addWidget(self.btn_prev_big)
 
-        self.btn_next_big = QPushButton()
-        self.btn_next_big.setStyleSheet(self.btn_prev_big.styleSheet())
+        self.btn_next_big = QPushButton(f"{tr('Next Step')} >")
+        self.btn_next_big.setProperty("variant", "secondary")
         self.btn_next_big.setEnabled(False)
         step_bar.addWidget(self.btn_next_big)
 
@@ -460,7 +507,7 @@ class MainWindow(QMainWindow):
 
         speed_label = QLabel(tr("speed"))
         self._speed_label = speed_label
-        speed_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10px;")
+        speed_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 600;")
         step_bar.addWidget(speed_label)
 
         step_bar.addStretch()
@@ -483,29 +530,39 @@ class MainWindow(QMainWindow):
         layout.addLayout(header, 0)
         layout.addWidget(splitter, 1)
         layout.addWidget(self.tracker_panel, 0)
+        self._code_tab = tab
         return tab
 
     def _build_file_tab(self) -> QWidget:
+        from app.ui.pages.file_import_page import FileImportPage
         self.file_page = FileImportPage(self._config_path)
+        self._file_tab = self.file_page
         self.file_page.visualize_requested.connect(self._on_visualize_from_file)
         return self.file_page
 
     def _build_oj_tab(self) -> QWidget:
+        from app.ui.pages.oj_page import OJPage
         self.oj_page = OJPage(self._config_path)
+        self._oj_tab = self.oj_page
         self.oj_page.visualize_requested.connect(self._on_visualize_from_file)
         return self.oj_page
 
     def _build_review_tab(self) -> QWidget:
+        from app.ui.pages.review_page import ReviewPage
         self.review_page = ReviewPage()
+        self._review_tab = self.review_page
         return self.review_page
 
     def _build_kb_tab(self) -> QWidget:
+        from app.ui.pages.knowledge_page import KnowledgePage
         self.knowledge_page = KnowledgePage()
+        self._kb_tab = self.knowledge_page
         return self.knowledge_page
 
     def _on_visualize_from_file(self, code: str):
+        self._ensure_tab(self._code_tab_index)
         self.code_editor.setPlainText(code)
-        self._tabs.setCurrentWidget(self._code_tab)
+        self._tabs.setCurrentIndex(self._code_tab_index)
         self.statusBar().showMessage(tr("Code loaded - click Run to visualize"))
 
     def _setup_overlay(self):
@@ -521,25 +578,21 @@ class MainWindow(QMainWindow):
         self._overlay_label = QLabel(tr("Analyzing code..."))
         self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_label.setStyleSheet(
-            f"QLabel {{ color: {HIGHLIGHT}; font-size: 24px; font-weight: bold; background: transparent; }}"
+            f"QLabel {{ color: {HIGHLIGHT}; font-size: 26px; font-weight: bold; background: transparent; }}"
         )
         layout.addWidget(self._overlay_label)
 
         self._overlay_time = QLabel("")
         self._overlay_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._overlay_time.setStyleSheet(
-            "QLabel { color: #808080; font-size: 14px; background: transparent; }"
+            f"QLabel {{ color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600; background: transparent; }}"
         )
         layout.addWidget(self._overlay_time)
 
         self._overlay_cancel_btn = QPushButton(tr("Cancel"))
         cancel_btn = self._overlay_cancel_btn
         cancel_btn.setFixedWidth(120)
-        cancel_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {BORDER}; color: {TEXT_PRIMARY}; border: 1px solid; "
-            f"border-radius: 5px; padding: 6px 16px; font-size: 13px; }} "
-            f"QPushButton:hover {{ background-color: #555; }}"
-        )
+        cancel_btn.setProperty("variant", "secondary")
         cancel_layout = QHBoxLayout()
         cancel_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cancel_layout.addWidget(cancel_btn)
@@ -586,6 +639,8 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _setup_shortcuts(self):
+        if self._global_shortcuts is not None or self._code_tab is None:
+            return
         self._global_shortcuts = ShortcutRegistry(self)
         self._global_shortcuts.register_many([
             ShortcutBinding(
@@ -651,11 +706,14 @@ class MainWindow(QMainWindow):
             self.code_editor.setPlainText(EXAMPLE_CODES[key])
 
     def _on_tab_changed(self, index: int):
+        if self._replacing_lazy_tab:
+            return
+        self._ensure_tab(index)
         if index == self._home_tab_index:
             self.home_page.refresh()
-        elif index == self._review_tab_index:
+        elif index == self._review_tab_index and hasattr(self, "review_page"):
             self.review_page._refresh()
-        if self._overlay.isVisible():
+        if hasattr(self, "_overlay") and self._overlay.isVisible():
             self._overlay.setGeometry(self.centralWidget().rect())
 
     def _on_api_settings(self):
@@ -666,14 +724,16 @@ class MainWindow(QMainWindow):
         self._retranslate()
 
     def _retranslate(self):
-        self.setWindowTitle(tr("C++ Memory Visualizer"))
+        self.setWindowTitle(tr("C++rafting Table"))
         self._tabs.setTabText(self._home_tab_index, tr("Home"))
-        self._tabs.setTabText(self._tabs.indexOf(self._code_tab), tr("Code Editor"))
-        self._tabs.setTabText(self._tabs.indexOf(self._oj_tab), tr("OJ Analysis"))
-        self._tabs.setTabText(self._tabs.indexOf(self._file_tab), tr("File Import"))
-        self._tabs.setTabText(self._tabs.indexOf(self._review_tab), tr("Review"))
-        self._tabs.setTabText(self._tabs.indexOf(self._kb_tab), tr("Knowledge Base"))
-        self.btn_settings.setText(tr("Settings"))
+        self._tabs.setTabText(self._code_tab_index, tr("Code Editor"))
+        self._tabs.setTabText(self._oj_tab_index, tr("OJ Analysis"))
+        self._tabs.setTabText(self._file_tab_index, tr("File Import"))
+        self._tabs.setTabText(self._review_tab_index, tr("Review"))
+        self._tabs.setTabText(self._kb_tab_index, tr("Knowledge Base"))
+        self._settings_btn.setText(tr("Settings"))
+        if self._code_tab is None:
+            return
         self.btn_run.setText(tr("Run"))
         self.btn_prev.setText(tr("Prev"))
         self.btn_next.setText(tr("Next"))
@@ -688,15 +748,19 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
 
     def set_step_info(self, current: int, total: int):
+        if self._code_tab is None:
+            return
         if total > 0:
             self.step_label.setText(tr("Step {current}/{total}", current=current, total=total))
         else:
             self.step_label.setText(tr("Ready"))
 
     def get_code(self) -> str:
+        self._ensure_tab(self._code_tab_index)
         return self.code_editor.toPlainText().strip()
 
     def get_stdin(self) -> str:
+        self._ensure_tab(self._code_tab_index)
         return self.stdin_editor.toPlainText()
 
     def eventFilter(self, obj, event):
@@ -719,22 +783,19 @@ class MainWindow(QMainWindow):
         return self._tabs.currentWidget() is self._code_tab
 
     def _retranslate_ui(self):
-        self.setWindowTitle(tr("C++ Memory Visualizer"))
+        self.setWindowTitle(tr("C++rafting Table"))
 
-        tab_names = [
-            (self._home_tab, "Home"),
-            (self._code_tab, "Code Editor"),
-            (self._oj_tab, "OJ Analysis"),
-            (self._file_tab, "File Import"),
-            (self._review_tab, "Review"),
-            (self._kb_tab, "Knowledge Base"),
-        ]
-        for widget, key in tab_names:
-            index = self._tabs.indexOf(widget)
-            if index >= 0:
-                self._tabs.setTabText(index, tr(key))
-
-        self.btn_settings.setText(tr("Settings"))
+        self._tabs.setTabText(self._home_tab_index, tr("Home"))
+        self._tabs.setTabText(self._code_tab_index, tr("Code Editor"))
+        self._tabs.setTabText(self._oj_tab_index, tr("OJ Analysis"))
+        self._tabs.setTabText(self._file_tab_index, tr("File Import"))
+        self._tabs.setTabText(self._review_tab_index, tr("Review"))
+        self._tabs.setTabText(self._kb_tab_index, tr("Knowledge Base"))
+        self._settings_btn.setText(tr("Settings"))
+        if self._code_tab is None:
+            if hasattr(self, "home_page"):
+                self.home_page.retranslate_ui()
+            return
         self.btn_run.setText(tr("Run"))
         self.btn_prev.setText(tr("Prev"))
         self.btn_next.setText(tr("Next"))
@@ -771,7 +832,7 @@ class MainWindow(QMainWindow):
             if config_path.exists():
                 with open(config_path, "r") as f:
                     cfg = yaml.safe_load(f) or {}
-                return int(cfg.get("ui", {}).get("code_font_size", 14))
+                return max(15, int(cfg.get("ui", {}).get("code_font_size", 16)))
         except Exception:
             logger.exception("Failed to read code font size from config")
-        return 14
+        return 16

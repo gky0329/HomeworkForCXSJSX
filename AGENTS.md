@@ -1,4 +1,4 @@
-# AGENTS.md — C++ Memory Visualizer (C++ 内存可视化沙盒)
+# AGENTS.md — C++rafting Table
 
 A PySide6 desktop app that uses DeepSeek LLM to execute C++ code line-by-line and display memory state (stack/heap/pointers) on a QGraphicsView canvas.
 

@@ -1,4 +1,4 @@
-# FUTURE WORK — C++ Memory Visualizer
+# FUTURE WORK — C++rafting Table
 
 > Last updated: 2026-05-30
 

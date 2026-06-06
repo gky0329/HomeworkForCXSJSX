@@ -1,4 +1,4 @@
-# C++ Memory Visualizer
+# C++rafting Table
 
 A PySide6 desktop app that visualizes C++ memory state (stack/heap/pointers) step by step using AI-powered code execution.
 

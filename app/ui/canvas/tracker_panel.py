@@ -11,6 +11,7 @@ from app.ui.widgets.helpers import clear_layout
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, HIGHLIGHT,
+    STACK_BG, HEAP_BG, HIGHLIGHT_BG, TEXT_INVERSE, TEXT_BUTTON_PRIMARY,
 )
 
 
@@ -25,25 +26,25 @@ CHIP = (
     f"QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}"
 )
 CHIP_TRACKED = (
-    f"QPushButton {{ background-color: #1A3A5C; color: {STACK_BORDER}; "
+    f"QPushButton {{ background-color: {STACK_BG}; color: {STACK_BORDER}; "
     f"border: 2px solid {STACK_BORDER}; "
     f"padding: 5px 16px; font-size: 13px; font-weight: bold; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; }}"
 )
 CHIP_PTR = (
-    f"QPushButton {{ background-color: #3D2916; color: {HEAP_BORDER}; "
+    f"QPushButton {{ background-color: {HEAP_BG}; color: {HEAP_BORDER}; "
     f"border: 2px solid {HEAP_BORDER}; "
     f"padding: 5px 16px; font-size: 13px; }}"
     f"QPushButton:hover {{ border-color: {ACCENT}; }}"
 )
 TRACK_ALL_BTN = (
     f"QPushButton {{ background-color: transparent; color: {ACCENT}; "
-    f"border: 1px solid {ACCENT}; "
-    f"padding: 4px 12px; font-size: 12px; }}"
-    f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+    f"border: 2px solid {ACCENT}; "
+    f"padding: 5px 12px; font-size: 14px; font-weight: 600; }}"
+    f"QPushButton:hover {{ background-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; }}"
 )
 CARD_STYLE = (
-    f"QFrame#trackCard {{ background-color: #1E2A38; border: 2px solid {STACK_BORDER}; "
+    f"QFrame#trackCard {{ background-color: {STACK_BG}; border: 2px solid {STACK_BORDER}; "
     f"}}"
     f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
@@ -105,14 +106,14 @@ class TrackerPanel(QWidget):
         title = QLabel()
         self._title = title
         title.setStyleSheet(
-            f"color: {STACK_BORDER}; font-size: 12px; font-weight: bold; "
+            f"color: {STACK_BORDER}; font-size: 14px; font-weight: bold; "
             f"background: transparent; border: none;"
         )
         header.addWidget(title)
 
         self._hint = QLabel(tr("Run code to see variables"))
         self._hint.setStyleSheet(
-            f"color: {TEXT_SECONDARY}; font-size: 11px; "
+            f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600; "
             f"background: transparent; border: none;"
         )
         header.addWidget(self._hint)
@@ -283,11 +284,11 @@ class TrackerPanel(QWidget):
             card.setStyleSheet(CARD_DESTROYED)
             nl = QLabel(self._addr_name(address))
             nl.setStyleSheet(
-                f"color: {EDGE_DANGLING}; font-size: 12px; font-weight: bold;"
+                f"color: {EDGE_DANGLING}; font-size: 14px; font-weight: bold;"
             )
             vbox.addWidget(nl)
             dl = QLabel(tr("out of scope"))
-            dl.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 10px;")
+            dl.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; font-weight: 600;")
             vbox.addWidget(dl)
             return card
 
@@ -301,14 +302,14 @@ class TrackerPanel(QWidget):
         vbox.addWidget(nl)
 
         il = QLabel(f"{var.type}  =  {var.value}")
-        il.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+        il.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 12))
         il.setWordWrap(True)
         il.setStyleSheet(f"color: {TEXT_PRIMARY};")
         vbox.addWidget(il)
         il.setObjectName("value_label")
 
         sl = QLabel(tr("scope: {frame}  [{address}]", frame=frame_name, address=var.address))
-        sl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9px;")
+        sl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 600;")
         sl.setObjectName("scope_label")
         vbox.addWidget(sl)
 
@@ -327,7 +328,7 @@ class TrackerPanel(QWidget):
             if value_label:
                 value_label.setText(tr("out of scope"))
                 value_label.setStyleSheet(
-                    f"color: {EDGE_DANGLING}; font-size: 10px;"
+                    f"color: {EDGE_DANGLING}; font-size: 12px; font-weight: 600;"
                 )
             return
 
@@ -344,7 +345,7 @@ class TrackerPanel(QWidget):
                 f"color: {HIGHLIGHT}; font-weight: bold;"
             )
             card.setStyleSheet(
-                f"QFrame#trackCard {{ background-color: #2A2A10; "
+                f"QFrame#trackCard {{ background-color: {HIGHLIGHT_BG}; "
                 f"border: 2px solid {HIGHLIGHT}; }}"
                 f"QFrame#trackCard QLabel {{ border: none; background: transparent; outline: none; }}"
             )

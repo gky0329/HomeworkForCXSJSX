@@ -16,7 +16,7 @@ _language = LANG_EN
 
 TRANSLATIONS = {
     LANG_ZH: {
-        "C++ Memory Visualizer": "C++ 内存可视化器",
+        "C++rafting Table": "C++rafting Table",
         "Visualize memory, learn pointers, master C++": "可视化内存，理解指针，掌握 C++",
         "Home": "首页",
         "Code Editor": "代码编辑器",

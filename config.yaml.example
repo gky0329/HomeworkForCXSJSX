@@ -1,5 +1,5 @@
 app:
-  name: C++ Memory Visualizer
+  name: C++rafting Table
   version: 0.1.0
 llm:
   provider: deepseek  # deepseek | openai | anthropic | gemini
@@ -32,7 +32,7 @@ llm:
       api_key_env: GEMINI_API_KEY
       model: gemini-2.5-flash
 ui:
-  code_font_size: 14
+  code_font_size: 16
   font_family: JetBrains Mono, Menlo, SF Mono, Courier New, monospace
   font_size: 13
   language: en  # en | zh

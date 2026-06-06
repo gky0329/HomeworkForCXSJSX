@@ -3,19 +3,22 @@ from PySide6.QtWidgets import (
     QFrame, QTextEdit, QDialog, QLineEdit,
     QDialogButtonBox, QComboBox, QSizePolicy, QScrollArea,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QTextDocument
+from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtGui import QTextDocument, QIcon
 
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
+from app.ui.widgets.empty_state import PixelEmptyState
 from app.ui.widgets.threading import retire_worker
 import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, SUCCESS_BG,
+    TEXT_INVERSE, TEXT_BUTTON_PRIMARY, ERROR_BG, WARN, WARN_BG, INFO, INFO_BG,
 )
+from app.ui.theme.minecraft_assets import asset_path
 
 
 def _fmt_interval(days: float) -> str:
@@ -47,33 +50,33 @@ def _predict_sm2(n: int, ef: float, interval: int, quality: int) -> str:
 
 RATE_STYLES = {
     "again": (
-        f"QPushButton {{ background-color: #3A1A1A; color: {EDGE_DANGLING}; "
-        f"border: 1px solid {EDGE_DANGLING}; "
-        f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
-        f"QPushButton:hover {{ background-color: #4A2A2A; }}"
+        f"QPushButton {{ background-color: {ERROR_BG}; color: {EDGE_DANGLING}; "
+        f"border: 2px solid {EDGE_DANGLING}; "
+        f"padding: 12px 20px; font-size: 15px; font-weight: bold; }}"
+        f"QPushButton:hover {{ background-color: {EDGE_DANGLING}; color: {TEXT_BUTTON_PRIMARY}; }}"
     ),
     "hard": (
-        f"QPushButton {{ background-color: #3A2A1A; color: #DCDCAA; "
-        f"border: 1px solid #DCDCAA; "
-        f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
-        f"QPushButton:hover {{ background-color: #4A3A2A; }}"
+        f"QPushButton {{ background-color: {WARN_BG}; color: {WARN}; "
+        f"border: 2px solid {WARN}; "
+        f"padding: 12px 20px; font-size: 15px; font-weight: bold; }}"
+        f"QPushButton:hover {{ background-color: {WARN}; color: {TEXT_BUTTON_PRIMARY}; }}"
     ),
     "good": (
-        f"QPushButton {{ background-color: #1A3A2A; color: {SUCCESS}; "
-        f"border: 1px solid {SUCCESS}; "
-        f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
-        f"QPushButton:hover {{ background-color: #2A4A3A; }}"
+        f"QPushButton {{ background-color: {SUCCESS_BG}; color: {SUCCESS}; "
+        f"border: 2px solid {SUCCESS}; "
+        f"padding: 12px 20px; font-size: 15px; font-weight: bold; }}"
+        f"QPushButton:hover {{ background-color: {SUCCESS}; color: {TEXT_BUTTON_PRIMARY}; }}"
     ),
     "easy": (
-        f"QPushButton {{ background-color: #1A2A3A; color: #569CD6; "
-        f"border: 1px solid #569CD6; "
-        f"padding: 12px 20px; font-size: 13px; font-weight: bold; }}"
-        f"QPushButton:hover {{ background-color: #2A3A4A; }}"
+        f"QPushButton {{ background-color: {INFO_BG}; color: {INFO}; "
+        f"border: 2px solid {INFO}; "
+        f"padding: 12px 20px; font-size: 15px; font-weight: bold; }}"
+        f"QPushButton:hover {{ background-color: {INFO}; color: {TEXT_BUTTON_PRIMARY}; }}"
     ),
 }
 
 CARD_STYLE = (
-    f"QFrame#reviewCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"QFrame#reviewCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; "
     f"}}"
     f"QFrame#reviewCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
@@ -81,7 +84,7 @@ CARD_STYLE = (
 NOTES_STYLE = (
     f"QTextEdit {{ background-color: {CANVAS_BG}; color: {TEXT_PRIMARY}; "
     f"border: 1px solid {BORDER}; padding: 8px; "
-    f"font-size: 12px; }}"
+    f"font-size: 14px; }}"
 )
 
 
@@ -142,26 +145,15 @@ class ReviewPage(QWidget):
         self._deck_combo = QComboBox()
         self._deck_combo.setMinimumWidth(200)
         self._deck_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self._deck_combo.setStyleSheet(
-            f"QComboBox {{ background-color: transparent; color: {TEXT_PRIMARY}; "
-            f"border: none; border-bottom: 1px solid {BORDER}; padding: 4px 8px; font-size: 12px; }}"
-            f"QComboBox:focus {{ border-bottom: 1px solid {ACCENT}; }}"
-            f"QComboBox::drop-down {{ border: none; }}"
-            f"QComboBox QAbstractItemView {{ background-color: {SURFACE}; color: {TEXT_PRIMARY}; "
-            f"selection-background-color: {ACCENT}; "
-            f"padding: 6px 10px; min-height: 28px; outline: none; }}"
-        )
         self._deck_combo.currentTextChanged.connect(self._on_deck_changed)
         header.addWidget(self._deck_combo)
 
         header.addStretch()
 
         self._add_btn = QPushButton(tr("+ Add"))
-        self._add_btn.setStyleSheet(
-            f"QPushButton {{ background-color: transparent; color: {TEXT_SECONDARY}; "
-            f"border: 1px solid {BORDER}; padding: 4px 12px; font-size: 11px; }}"
-            f"QPushButton:hover {{ border-color: {ACCENT}; color: {TEXT_PRIMARY}; }}"
-        )
+        self._add_btn.setProperty("variant", "secondary")
+        self._add_btn.setIcon(QIcon(asset_path("icons", "action_add")))
+        self._add_btn.setIconSize(QSize(18, 18))
         self._add_btn.clicked.connect(self._on_add_error)
         header.addWidget(self._add_btn)
 
@@ -261,13 +253,12 @@ class ReviewPage(QWidget):
         if not self._cards:
             self._progress.setText("")
             self._empty_state.addStretch()
-            empty = mlabel(tr("No cards due - great job!"), SUCCESS, 16, True)
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._empty_state.addWidget(empty)
-            self._empty_state.addWidget(mlabel(
+            empty = PixelEmptyState(
+                "empty_chest",
+                tr("No cards due - great job!"),
                 tr("Come back later or add errors via OJ / File Import"),
-                TEXT_SECONDARY, 12
-            ))
+            )
+            self._empty_state.addWidget(empty)
             self._empty_state.addStretch()
             return
 
@@ -347,8 +338,8 @@ class ReviewPage(QWidget):
             kpl.setWordWrap(True)
             kpl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
             kpl.setStyleSheet(
-                f"color: {HEAP_BORDER}; font-size: 12px; font-weight: bold; "
-                f"background-color: #3D2916; "
+                f"color: {HEAP_BORDER}; font-size: 14px; font-weight: bold; "
+                f"background-color: {WARN_BG}; "
                 f"padding: 6px 14px;"
             )
             v.addWidget(kpl, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -373,18 +364,20 @@ class ReviewPage(QWidget):
             ul.setAlignment(Qt.AlignmentFlag.AlignCenter)
             ul.setMargin(6)
             ul.setStyleSheet(
-                f"color: {EDGE_DANGLING}; font-size: 12px; font-style: italic; padding: 0;"
+                f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: 600; font-style: italic; padding: 0;"
             )
             v.addWidget(ul)
 
         v.addSpacing(12)
 
-        hint_btn = QPushButton(f"💡 {tr('Hint')}")
+        hint_btn = QPushButton(tr("Hint"))
+        hint_btn.setIcon(QIcon(asset_path("icons", "action_hint")))
+        hint_btn.setIconSize(QSize(18, 18))
         hint_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
-            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"padding: 6px 16px; font-size: 12px; }}"
-            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+            f"color: {ACCENT}; border: 2px solid {ACCENT}; "
+            f"padding: 6px 16px; font-size: 14px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; }}"
         )
         q_text = card.get("question", "")
         kp_text = card.get("knowledge_point", "")
@@ -394,7 +387,7 @@ class ReviewPage(QWidget):
         hint_label.setVisible(False)
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_label.setMargin(6)
-        hint_label.setStyleSheet(f"color: {ACCENT}; font-size: 12px; padding: 0;")
+        hint_label.setStyleSheet(f"color: {ACCENT}; font-size: 14px; font-weight: 600; padding: 0;")
         hint_btn.clicked.connect(self._make_hint_handler(hint_btn, hint_label, kp_text, q_text))
         v.addWidget(hint_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addWidget(hint_label)
@@ -402,12 +395,6 @@ class ReviewPage(QWidget):
         v.addSpacing(8)
 
         reveal_btn = QPushButton(tr("Show Answer"))
-        reveal_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {ACCENT}; color: #FFFFFF; "
-            f"border: none; padding: 12px 32px; "
-            f"font-size: 15px; font-weight: bold; }}"
-            f"QPushButton:hover {{ background-color: #1A8CD8; }}"
-        )
         reveal_btn.clicked.connect(lambda: self._reveal_answer(card))
         v.addWidget(reveal_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -515,14 +502,14 @@ class ReviewPage(QWidget):
                 if not shiboken6.isValid(btn) or not shiboken6.isValid(label):
                     return
                 btn.setEnabled(True)
-                btn.setText(f"💡 {tr('Hint')}")
-                label.setText(f"💡 {tr('Hint: {hint}', hint=text)}")
+                btn.setText(tr("Hint"))
+                label.setText(tr("Hint: {hint}", hint=text))
                 label.setVisible(True)
             def on_err(msg):
                 if not shiboken6.isValid(btn):
                     return
                 btn.setEnabled(True)
-                btn.setText(f"💡 {tr('Hint (failed)')}")
+                btn.setText(tr("Hint (failed)"))
             self._hint_worker.finished.connect(on_done)
             self._hint_worker.error.connect(on_err)
             self._hint_worker.start()

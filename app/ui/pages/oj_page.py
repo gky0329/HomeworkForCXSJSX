@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QGraphicsView, QGraphicsScene,
     QSplitter, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QRectF
-from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent
+from PySide6.QtCore import Qt, QThread, Signal, QRectF, QSize
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QIcon
 
 from app.core.memory_model import ExecutionTrace
 from app.core.state_diff import StateDiffEngine
@@ -26,7 +26,9 @@ from app.ui.widgets.threading import retire_worker
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT, EDGE_DANGLING,
+    TEXT_INVERSE, TEXT_BUTTON_PRIMARY, SUCCESS, SUCCESS_BG,
 )
+from app.ui.theme.minecraft_assets import asset_path
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +36,16 @@ SCENE_W = 1000
 SCENE_H = 1200
 
 CARD = (
-    f"QFrame#ojCard {{ background-color: {SURFACE}; border: 1px solid {BORDER}; "
+    f"QFrame#ojCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; "
     f"margin: 3px 0; }}"
     f"QFrame#ojCard QLabel {{ border: none; background: transparent; outline: none; }}"
 )
 SECTION_TITLE = (
-    f"color: {STACK_BORDER}; font-size: 16px; font-weight: 700; "
+    f"color: {STACK_BORDER}; font-size: 19px; font-weight: 700; "
     f"padding: 6px 0;"
 )
-BODY_TEXT = f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 400;"
-MUTED_TEXT = f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 400;"
+BODY_TEXT = f"color: {TEXT_PRIMARY}; font-size: 15px; font-weight: 500;"
+MUTED_TEXT = f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600;"
 CODE_BG = (
     f"background-color: {CANVAS_BG}; border: 1px solid {BORDER}; "
     f"padding: 6px; margin: 4px 0;"
@@ -156,6 +158,8 @@ class OJPage(QWidget):
 
         toolbar = QHBoxLayout()
         self._run_btn = QPushButton(tr("Run Analysis"))
+        self._run_btn.setIcon(QIcon(asset_path("icons", "action_run")))
+        self._run_btn.setIconSize(QSize(18, 18))
         self._run_btn.clicked.connect(self._on_run)
         toolbar.addWidget(self._run_btn)
 
@@ -377,10 +381,10 @@ class OJPage(QWidget):
         review_btn = QPushButton(tr("Add to Review"))
         review_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
-            f"color: {ACCENT}; border: 1px solid {ACCENT}; "
-            f"padding: 2px 10px; font-size: 10px; "
+            f"color: {ACCENT}; border: 2px solid {ACCENT}; "
+            f"padding: 4px 12px; font-size: 13px; font-weight: 600; "
             f"margin-top: 4px; }}"
-            f"QPushButton:hover {{ background-color: {ACCENT}; color: #FFFFFF; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT}; color: {TEXT_BUTTON_PRIMARY}; }}"
         )
         kp_name = kp.get("name", "")
         kp_expl = kp.get("explanation", "")
@@ -393,9 +397,9 @@ class OJPage(QWidget):
             )
             review_btn.setText("✓ " + tr("Added"))
             review_btn.setStyleSheet(
-                f"QPushButton {{ background-color: #1A3A2A; "
-                f"color: #4EC9B0; border: 1px solid #4EC9B0; "
-                f"padding: 2px 10px; font-size: 10px; "
+                f"QPushButton {{ background-color: {SUCCESS_BG}; "
+                f"color: {SUCCESS}; border: 2px solid {SUCCESS}; "
+                f"padding: 4px 12px; font-size: 13px; font-weight: 600; "
                 f"margin-top: 4px; }}"
             )
             review_btn.setEnabled(False)
@@ -408,7 +412,7 @@ class OJPage(QWidget):
         card = QFrame()
         card.setObjectName("ojRefCard")
         card.setStyleSheet(
-            f"QFrame#ojRefCard {{ background-color: #1A2A1A; border: 1px solid #4EC9B0; "
+            f"QFrame#ojRefCard {{ background-color: {SUCCESS_BG}; border: 2px solid {SUCCESS}; "
             f"margin: 3px 0; }}"
             f"QFrame#ojRefCard QLabel {{ border: none; background: transparent; outline: none; }}"
         )
@@ -417,7 +421,7 @@ class OJPage(QWidget):
         vbox.setSpacing(3)
 
         name = QLabel(ref.get("approach", ""))
-        name.setStyleSheet("color: #4EC9B0; font-weight: bold; font-size: 13px;")
+        name.setStyleSheet(f"color: {SUCCESS}; font-weight: bold; font-size: 13px;")
         vbox.addWidget(name)
 
         expl = ref.get("explanation", "")
@@ -434,12 +438,6 @@ class OJPage(QWidget):
             vbox.addWidget(cf)
 
             viz = QPushButton(tr("Visualize this code"))
-            viz.setStyleSheet(
-                f"QPushButton {{ background-color: #007ACC; color: white; "
-                f"border: none; padding: 3px 10px; "
-                f"font-size: 11px; margin-top: 4px; }}"
-                f"QPushButton:hover {{ background-color: #1A8CD8; }}"
-            )
             viz.clicked.connect(lambda: self.visualize_requested.emit(code))
             vbox.addWidget(viz)
 
@@ -517,6 +515,8 @@ class OJPage(QWidget):
         self._test_expected.setMaximumHeight(50)
         self._test_expected.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         self._add_case_btn = QPushButton(tr("Add Case"))
+        self._add_case_btn.setIcon(QIcon(asset_path("icons", "action_add")))
+        self._add_case_btn.setIconSize(QSize(18, 18))
         self._add_case_btn.clicked.connect(self._on_add_test_case)
         test_header.addWidget(self._test_input)
         test_header.addWidget(self._test_expected)
@@ -529,6 +529,8 @@ class OJPage(QWidget):
 
         run_row = QHBoxLayout()
         self._run_tests_btn = QPushButton(tr("Run Tests"))
+        self._run_tests_btn.setIcon(QIcon(asset_path("icons", "action_run")))
+        self._run_tests_btn.setIconSize(QSize(18, 18))
         self._run_tests_btn.clicked.connect(self._on_compile_run)
         self._run_tests_btn.setVisible(False)
         run_row.addWidget(self._run_tests_btn)
@@ -559,7 +561,7 @@ class OJPage(QWidget):
                 input=tc['input'][:30],
                 output=tc['expected'][:30],
             ))
-            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 12px;")
+            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: 600;")
             row.addWidget(label)
             del_btn = QPushButton("×")
             del_btn.setFixedSize(24, 24)
@@ -584,14 +586,14 @@ class OJPage(QWidget):
         compile_ok = result["compile"]
         if not compile_ok.success:
             err = QLabel(tr("Compile error:\n{error}", error=compile_ok.error))
-            err.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
+            err.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: 600; white-space: pre-wrap;")
             err.setWordWrap(True)
             self._test_results.addWidget(err)
             return
         for t in result["tests"]:
             if t.passed:
                 r = QLabel(tr("Case #{index} passed", index=t.case_index))
-                r.setStyleSheet(f"color: #4EC9B0; font-size: 13px; font-weight: bold;")
+                r.setStyleSheet(f"color: {SUCCESS}; font-size: 14px; font-weight: bold;")
             else:
                 r = QLabel(tr(
                     "Case #{index} FAILED\nExpected: {expected}\nGot:      {actual}",
@@ -599,7 +601,7 @@ class OJPage(QWidget):
                     expected=t.expected,
                     actual=t.actual,
                 ))
-                r.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 12px; white-space: pre-wrap;")
+                r.setStyleSheet(f"color: {EDGE_DANGLING}; font-size: 13px; font-weight: 600; white-space: pre-wrap;")
                 r.setWordWrap(True)
             self._test_results.addWidget(r)
 
