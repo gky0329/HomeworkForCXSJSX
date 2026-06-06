@@ -3,7 +3,7 @@ app:
   version: 0.1.0
 llm:
   provider: deepseek  # deepseek | openai | anthropic | gemini
-  max_tokens: 4096
+  max_tokens: 8192
   temperature: 0.0
   # proxy: http://127.0.0.1:7890  # optional shared proxy
 

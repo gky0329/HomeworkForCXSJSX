@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF, QTimer, QSize
 from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent, QIcon
 
-from app.ui.theme.colors import CANVAS_BG, TEXT_SECONDARY, TEXT_PRIMARY, BORDER, SURFACE, EDITOR_BG, HIGHLIGHT
+from app.ui.theme.colors import (
+    BORDER, CANVAS_BG, EDITOR_BG, EDITOR_SELECTION, HIGHLIGHT, SURFACE,
+    TEXT_PRIMARY, TEXT_SECONDARY,
+)
 from app.ui.theme.minecraft_assets import asset_path
 from app.ui.pages.home_page import HomePage
 from app.ui.canvas.tracker_panel import TrackerPanel
@@ -99,6 +102,7 @@ EXAMPLE_CODES = {
         "delete a;\n"
     ),
 }
+DEFAULT_EXAMPLE_KEY = "Roadshow Demo"
 
 
 class CanvasView(QGraphicsView):
@@ -239,6 +243,13 @@ class CanvasView(QGraphicsView):
 
 class MainWindow(QMainWindow):
     code_page_ready = Signal()
+    _CODE_PAGE_ATTRS = {
+        "_example_combo", "btn_run", "btn_prev", "btn_next", "btn_reset",
+        "btn_zoom_out", "btn_zoom_in", "btn_zoom_fit", "auto_fit_check",
+        "step_label", "code_editor", "stdin_label", "stdin_editor",
+        "canvas_view", "canvas_scene", "btn_prev_big", "btn_next_big",
+        "btn_autoplay", "_speed_slider", "_speed_label", "tracker_panel",
+    }
 
     def __init__(self, config_path: Path | None = None, startup_profiler: StartupProfiler | None = None):
         super().__init__()
@@ -267,6 +278,13 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+
+    def __getattr__(self, name: str):
+        if name in MainWindow._CODE_PAGE_ATTRS and "_code_tab_index" in self.__dict__:
+            self._ensure_tab(self.__dict__["_code_tab_index"])
+            if name in self.__dict__:
+                return self.__dict__[name]
+        raise AttributeError(f"{type(self).__name__!s} object has no attribute {name!r}")
 
     def _setup_ui(self):
         self._tabs = QTabWidget()
@@ -383,7 +401,7 @@ class MainWindow(QMainWindow):
         self._example_combo = QComboBox()
         for key in EXAMPLE_CODES:
             self._example_combo.addItem(tr(key), key)
-        self._example_combo.setCurrentIndex(self._example_combo.findData("Pointers"))
+        self._example_combo.setCurrentIndex(self._example_combo.findData(DEFAULT_EXAMPLE_KEY))
         self._example_combo.currentIndexChanged.connect(self._on_example_changed)
         header.addWidget(self._example_combo)
         header.addStretch()
@@ -432,10 +450,14 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(2)
 
         self.code_editor = QPlainTextEdit()
-        self.code_editor.setPlainText(EXAMPLE_CODES["Pointers"])
+        self.code_editor.setPlainText(EXAMPLE_CODES[DEFAULT_EXAMPLE_KEY])
         font_size = self._read_config_font_size()
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
+        self.code_editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
+            f"selection-background-color: {EDITOR_SELECTION}; border: none; padding: 6px; }}"
+        )
 
         left_pane = QWidget()
         left_layout = QVBoxLayout(left_pane)

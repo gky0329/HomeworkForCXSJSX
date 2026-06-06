@@ -81,6 +81,7 @@ class AIService:
         user_message: str,
         max_retries: int = 2,
         model: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         if self.provider in ("deepseek", "openai"):
             return await self._chat_openai_compatible(
@@ -89,6 +90,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=True,
+                max_tokens=max_tokens,
             )
         if self.provider == "anthropic":
             return await self._chat_anthropic(
@@ -97,6 +99,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=True,
+                max_tokens=max_tokens,
             )
         if self.provider == "gemini":
             return await self._chat_gemini(
@@ -105,6 +108,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=True,
+                max_tokens=max_tokens,
             )
         raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
 
@@ -114,6 +118,7 @@ class AIService:
         user_message: str,
         max_retries: int = 1,
         model: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         if self.provider in ("deepseek", "openai"):
             return await self._chat_openai_compatible(
@@ -122,6 +127,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=False,
+                max_tokens=max_tokens,
             )
         if self.provider == "anthropic":
             return await self._chat_anthropic(
@@ -130,6 +136,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=False,
+                max_tokens=max_tokens,
             )
         if self.provider == "gemini":
             return await self._chat_gemini(
@@ -138,6 +145,7 @@ class AIService:
                 max_retries,
                 model,
                 json_mode=False,
+                max_tokens=max_tokens,
             )
         raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
 
@@ -157,6 +165,7 @@ class AIService:
         max_retries: int,
         model: str | None,
         json_mode: bool,
+        max_tokens: int | None,
     ) -> str:
         self._require_key()
 
@@ -172,13 +181,16 @@ class AIService:
                 {"role": "user", "content": user_message},
             ],
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens if json_mode else 2048,
+            "max_tokens": self._token_limit(json_mode, max_tokens),
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
         data = await self._post_json(url, headers, payload, max_retries)
-        text = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        text = choice["message"]["content"]
+        if json_mode and self._finish_reason_is_truncated(choice.get("finish_reason")):
+            raise self._truncated_response_error(text, payload["max_tokens"])
         return self._normalize_json(text) if json_mode else text
 
     async def _chat_anthropic(
@@ -188,6 +200,7 @@ class AIService:
         max_retries: int,
         model: str | None,
         json_mode: bool,
+        max_tokens: int | None,
     ) -> str:
         self._require_key()
 
@@ -203,7 +216,7 @@ class AIService:
 
         payload = {
             "model": model or self.model,
-            "max_tokens": self.max_tokens if json_mode else 2048,
+            "max_tokens": self._token_limit(json_mode, max_tokens),
             "temperature": self.temperature,
             "system": system,
             "messages": [
@@ -217,6 +230,8 @@ class AIService:
             for block in data.get("content", [])
             if block.get("type") == "text"
         )
+        if json_mode and self._finish_reason_is_truncated(data.get("stop_reason")):
+            raise self._truncated_response_error(text, payload["max_tokens"])
         return self._normalize_json(text) if json_mode else text
 
     async def _chat_gemini(
@@ -226,6 +241,7 @@ class AIService:
         max_retries: int,
         model: str | None,
         json_mode: bool,
+        max_tokens: int | None,
     ) -> str:
         self._require_key()
 
@@ -237,7 +253,7 @@ class AIService:
         headers = {"Content-Type": "application/json"}
         generation_config = {
             "temperature": self.temperature,
-            "maxOutputTokens": self.max_tokens if json_mode else 2048,
+            "maxOutputTokens": self._token_limit(json_mode, max_tokens),
         }
         if json_mode:
             generation_config["responseMimeType"] = "application/json"
@@ -256,9 +272,28 @@ class AIService:
         }
 
         data = await self._post_json(url, headers, payload, max_retries)
-        parts = data["candidates"][0]["content"].get("parts", [])
+        candidate = data["candidates"][0]
+        parts = candidate["content"].get("parts", [])
         text = "".join(part.get("text", "") for part in parts)
+        if json_mode and self._finish_reason_is_truncated(candidate.get("finishReason")):
+            raise self._truncated_response_error(text, generation_config["maxOutputTokens"])
         return self._normalize_json(text) if json_mode else text
+
+    def _token_limit(self, json_mode: bool, max_tokens: int | None) -> int:
+        if max_tokens is not None:
+            return int(max_tokens)
+        return self.max_tokens if json_mode else 2048
+
+    @staticmethod
+    def _finish_reason_is_truncated(reason: object) -> bool:
+        return str(reason or "").strip().lower() in {"length", "max_tokens", "max_tokens_limit", "max_output_tokens"}
+
+    @staticmethod
+    def _truncated_response_error(text: str, max_tokens: int) -> RuntimeError:
+        return RuntimeError(
+            "AI response was cut off by the token limit before valid JSON completed. "
+            f"max_tokens={max_tokens}\n\n---RAW RESPONSE---\n{text[:4000]}"
+        )
 
     async def _post_json(
         self,

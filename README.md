@@ -69,6 +69,7 @@ python tools/native_debug_smoke.py
 - `架构设计文档v2.md` — Architecture document (Chinese)
 - `FUTURE_WORK.md` — Planned features
 - `docs/roadshow_demo.md` — Roadshow demo code and talk track
+- `docs/mac_demo.md` — Mac recording preflight and demo flow
 - `docs/windows.md` — Windows setup and native-debugger validation notes
 - `docs/` — Detailed feature docs
 
