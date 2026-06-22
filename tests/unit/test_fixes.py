@@ -314,6 +314,34 @@ def test_memory_canvas_fans_out_edges_to_same_target():
     assert first_curve_y != second_curve_y
 
 
+def test_edge_item_path_stops_at_arrow_base_center():
+    """The bezier path should meet the arrow base, not run all the way to the tip."""
+    from PySide6.QtWidgets import QApplication, QGraphicsRectItem
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.canvas.edge_item import EdgeItem
+
+    source = QGraphicsRectItem(0, 0, 20, 20)
+    target = QGraphicsRectItem(100, 0, 20, 20)
+    edge = EdgeItem("0xS001", "0xH001", False, {
+        "0xS001": source,
+        "0xH001": target,
+    })
+
+    path_end = edge.path().elementAt(edge.path().elementCount() - 1)
+    tip = edge._arrow_polygon[0]
+    base_a = edge._arrow_polygon[1]
+    base_b = edge._arrow_polygon[2]
+    base_center_x = (base_a.x() + base_b.x()) / 2
+    base_center_y = (base_a.y() + base_b.y()) / 2
+
+    assert abs(path_end.x - base_center_x) < 0.000001
+    assert abs(path_end.y - base_center_y) < 0.000001
+    assert abs(tip.x() - target.sceneBoundingRect().left()) < 0.000001
+
+
 def test_memory_canvas_first_heap_does_not_overlap_main_frame():
     """The first heap item should not share main's fixed layout frame id."""
     from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
@@ -523,8 +551,8 @@ def test_code_editor_status_shows_execution_diagnostics():
         window.close()
 
 
-def test_settings_dialog_does_not_write_debugger_config():
-    """Main settings should not expose the experimental Windows PDB flag."""
+def test_settings_dialog_writes_theme_and_debugger_config():
+    """Main settings should persist theme choice and the experimental PDB flag."""
     from PySide6.QtWidgets import QApplication
     import sys
     import yaml
@@ -548,14 +576,20 @@ def test_settings_dialog_does_not_write_debugger_config():
         )
         dialog = ApiKeyDialog(config_path=config_path)
         try:
-            assert not hasattr(dialog, "_pdb_check")
+            assert hasattr(dialog, "_pdb_check")
+            assert hasattr(dialog, "_theme_combo")
+            theme_index = dialog._theme_combo.findData("minimal_light")
+            assert theme_index >= 0
+            dialog._theme_combo.setCurrentIndex(theme_index)
+            dialog._pdb_check.setChecked(True)
             dialog._save_and_accept()
         finally:
             dialog.close()
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-    assert "debugger" not in saved
+    assert saved["ui"]["theme"] == "minimal_light"
+    assert saved["debugger"]["enable_experimental_pdb"] is True
 
 
 def test_memory_canvas_prepares_trace_wide_fit_bounds():
@@ -696,6 +730,74 @@ def test_oj_page_autogen_passes_empty_code_to_worker():
     assert captured["code"] == ""
     assert captured["started"] is True
     assert page._autogen is True
+
+
+def test_oj_worker_uses_larger_analysis_token_budget():
+    """OJ analysis should request more output tokens than the shared default."""
+    calls = []
+
+    class FakeAIService:
+        max_tokens = 123
+
+        def __init__(self, config_path=None):
+            self.config_path = config_path
+
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return '{"steps":[],"overview":"ok","solution_approach":"ok","complexity":"ok","common_mistakes":["ok"],"reference_answers":["ok"]}'
+
+    with patch("app.ui.pages.oj_page.AIService", new=FakeAIService):
+        from app.ui.pages.oj_page import OJ_ANALYSIS_TOKEN_MULTIPLIER, OJWorker
+
+        worker = OJWorker("problem", "int main(){return 0;}")
+        worker.run()
+
+    assert calls
+    assert calls[0]["max_tokens"] == 123 * OJ_ANALYSIS_TOKEN_MULTIPLIER
+
+
+def test_quiz_output_normalizes_ai_answer_formats():
+    """AI quiz answers may arrive as labels, 1-based D, or missing option text."""
+    from app.services.quiz_utils import normalize_quiz_question
+
+    label_answer = normalize_quiz_question({
+        "question": "Which option is correct?",
+        "options": ["A) wrong", "B) right", "C) wrong", "D) wrong"],
+        "answer": "B",
+    })
+    assert label_answer["options"] == ["wrong", "right", "wrong", "wrong"]
+    assert label_answer["answer"] == 1
+
+    one_based_d = normalize_quiz_question({
+        "question": "Which option is correct?",
+        "options": ["wrong", "wrong", "wrong", "right"],
+        "answer": 4,
+    })
+    assert one_based_d["answer"] == 3
+
+    missing_correct_option = normalize_quiz_question({
+        "question": "What does delete do?",
+        "options": ["Declares a pointer", "Allocates stack memory", "Copies an object", "Calls main"],
+        "answer": "Releases dynamically allocated memory",
+    })
+    assert missing_correct_option["answer"] == 3
+    assert missing_correct_option["options"][3] == "Releases dynamically allocated memory"
+
+
+def test_quiz_prompts_guard_against_all_wrong_options():
+    """Quiz prompts should force a semantic correct answer, not just valid JSON."""
+    from app.services.prompt_templates import PDF_SYSTEM_PROMPT
+
+    prompt_texts = [
+        PDF_SYSTEM_PROMPT,
+        (_PROJECT_ROOT / "app/ui/pages/file_import_page.py").read_text(encoding="utf-8"),
+        (_PROJECT_ROOT / "app/ui/pages/knowledge_page.py").read_text(encoding="utf-8"),
+    ]
+
+    for text in prompt_texts:
+        assert "先确定一条正确结论" in text
+        assert "前半句正确、后半句错误" in text
+        assert "四个选项里没有正确答案" in text
 
 
 def test_debug_executor_parses_lldb_snapshots():
@@ -2803,8 +2905,8 @@ def test_debug_executor_selects_lldb_backend_when_tools_exist():
     assert status[DebugExecutor.LLDB_DWARF_BACKEND].implemented is True
 
 
-def test_debug_executor_excludes_msvc_pdb_backend_on_main():
-    """The stable main branch should not expose Windows PDB as a selectable backend."""
+def test_debug_executor_exposes_msvc_pdb_backend_as_opt_in():
+    """Windows PDB should be visible for diagnostics but disabled by default."""
     from app.core.debug_executor import DebugExecutor
 
     def fake_which(name):
@@ -2823,14 +2925,16 @@ def test_debug_executor_excludes_msvc_pdb_backend_on_main():
                 except Exception as exc:
                     message = str(exc)
                 else:
-                    raise AssertionError("MSVC/PDB backend should not be selectable on main")
+                    raise AssertionError("MSVC/PDB backend should require explicit enablement")
 
-    assert DebugExecutor.MSVC_PDB_BACKEND not in status
-    assert "Unknown debugger backend" in message
+    assert DebugExecutor.MSVC_PDB_BACKEND in status
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].implemented is True
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
+    assert "experimental and disabled" in message
 
 
-def test_debug_executor_ignores_pdb_enablement_config_on_main():
-    """The main branch keeps PDB promotion out of config/env driven product paths."""
+def test_debug_executor_honors_pdb_enablement_config():
+    """Explicit config/env enablement should allow selecting the experimental PDB path."""
     from app.core.debug_executor import DebugExecutor
 
     def fake_which(name):
@@ -2847,18 +2951,13 @@ def test_debug_executor_ignores_pdb_enablement_config_on_main():
             with patch("app.core.debug_executor.platform.system", return_value="Windows"):
                 with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
                     status = {s.id: s for s in DebugExecutor.backend_status(config_path)}
-                    try:
-                        DebugExecutor(
-                            preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
-                            config_path=config_path,
-                        )._select_backend()
-                    except Exception as exc:
-                        message = str(exc)
-                    else:
-                        raise AssertionError("config/env should not promote MSVC/PDB on main")
+                    selected = DebugExecutor(
+                        preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
+                        config_path=config_path,
+                    )._select_backend()
 
-    assert DebugExecutor.MSVC_PDB_BACKEND not in status
-    assert "Unknown debugger backend" in message
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is True
+    assert selected == DebugExecutor.MSVC_PDB_BACKEND
 
 
 def test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits():
@@ -9599,14 +9698,18 @@ if __name__ == "__main__":
         test_memory_canvas_does_not_remove_rekeyed_stack_item,
         test_memory_canvas_registers_member_pointer_edge_sources,
         test_memory_canvas_registers_array_element_pointer_edge_sources,
+        test_edge_item_path_stops_at_arrow_base_center,
         test_canvas_view_uses_stable_fit_bounds,
         test_code_editor_defaults_to_roadshow_demo,
         test_code_editor_auto_fit_defaults_to_initial_fit_only,
         test_code_editor_status_shows_execution_diagnostics,
-        test_settings_dialog_does_not_write_debugger_config,
+        test_settings_dialog_writes_theme_and_debugger_config,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
+        test_oj_worker_uses_larger_analysis_token_budget,
+        test_quiz_output_normalizes_ai_answer_formats,
+        test_quiz_prompts_guard_against_all_wrong_options,
         test_debug_executor_parses_lldb_snapshots,
         test_debug_executor_parses_arrays_and_struct_members,
         test_debug_executor_parses_lldb_class_object_members,
@@ -9652,8 +9755,8 @@ if __name__ == "__main__":
         test_debug_executor_parses_lldb_nested_member_pointer_object_values,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
-        test_debug_executor_excludes_msvc_pdb_backend_on_main,
-        test_debug_executor_ignores_pdb_enablement_config_on_main,
+        test_debug_executor_exposes_msvc_pdb_backend_as_opt_in,
+        test_debug_executor_honors_pdb_enablement_config,
         test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits,
         test_debug_executor_msvc_shell_command_loads_vcvarsall,
         test_debug_executor_skips_stdin_programs_before_lldb_run,

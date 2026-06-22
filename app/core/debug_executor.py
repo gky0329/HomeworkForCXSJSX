@@ -8,6 +8,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 from app.core.memory_model import (
     ArrayElement,
     ExecutionTrace,
@@ -162,6 +164,7 @@ class DebugExecutor:
 
     @staticmethod
     def backend_status(config_path: Path | None = None) -> list[DebugBackendStatus]:
+        is_windows = platform.system() == "Windows"
         compiler = DebugExecutor._compiler()
         lldb = shutil.which("lldb")
         lldb_available = bool(lldb and compiler)
@@ -182,7 +185,80 @@ class DebugExecutor:
             implemented=True,
             detail=lldb_detail,
         )
-        return [lldb_status]
+
+        msvc = DebugExecutor._msvc_tools() if is_windows else {
+            "compiler": None,
+            "debugger": None,
+            "vswhere": None,
+            "vcvarsall": None,
+        }
+        msvc_tools_available = is_windows and bool(msvc["compiler"] and msvc["debugger"])
+        msvc_enabled = DebugExecutor._experimental_pdb_enabled(config_path)
+        msvc_available = msvc_tools_available and msvc_enabled
+        if not is_windows:
+            msvc_detail = "MSVC/PDB backend is Windows-only and not active on this platform"
+        elif not msvc_tools_available:
+            missing = []
+            if not msvc["compiler"]:
+                missing.append("cl.exe")
+            if not msvc["debugger"]:
+                missing.append("cdb.exe")
+            msvc_detail = "Missing " + ", ".join(missing)
+        elif msvc_enabled:
+            msvc_detail = (
+                f"Using {Path(msvc['compiler']).name} with {Path(msvc['debugger']).name} "
+                "and PDB debug symbols"
+            )
+        else:
+            msvc_detail = (
+                "MSVC/PDB backend is experimental and disabled until local debugger "
+                "correctness is validated; set CXXMV_ENABLE_EXPERIMENTAL_PDB=1 "
+                "or debugger.enable_experimental_pdb=true to test it"
+            )
+
+        msvc_status = DebugBackendStatus(
+            id=DebugExecutor.MSVC_PDB_BACKEND,
+            label="MSVC / PDB",
+            available=msvc_available,
+            implemented=True,
+            detail=msvc_detail,
+        )
+        if is_windows:
+            return [msvc_status, lldb_status]
+        return [lldb_status, msvc_status]
+
+    @staticmethod
+    def _default_config_path() -> Path:
+        return Path(__file__).parent.parent.parent / "config.yaml"
+
+    @staticmethod
+    def _truthy(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _experimental_pdb_enabled(config_path: Path | None = None) -> bool:
+        env_value = os.environ.get("CXXMV_ENABLE_EXPERIMENTAL_PDB")
+        if env_value is not None:
+            return DebugExecutor._truthy(env_value)
+
+        path = config_path or DebugExecutor._default_config_path()
+        try:
+            if not path.exists():
+                return False
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            logger.exception("Failed to read debugger config")
+            return False
+
+        debugger_cfg = cfg.get("debugger", {})
+        if not isinstance(debugger_cfg, dict):
+            return False
+        return DebugExecutor._truthy(debugger_cfg.get("enable_experimental_pdb"))
 
     @staticmethod
     def _compiler() -> str | None:

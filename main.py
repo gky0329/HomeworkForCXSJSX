@@ -20,15 +20,15 @@ IMPORTS_DONE = time.perf_counter()
 def main():
     profiler = StartupProfiler(PROCESS_START)
     profiler.checkpoint("imports", IMPORTS_DONE)
+    config_path = Path(__file__).parent / "config.yaml"
 
     with profiler.span("QApplication"):
         app = QApplication(sys.argv)
     app.setApplicationName("C++rafting Table")
     with profiler.span("assets"):
         app.setWindowIcon(QIcon(str(Path(__file__).parent / "assets" / "icons" / "app_icon.png")))
-    ThemeManager.apply(app, profiler)
+    ThemeManager.apply(app, profiler, config_path=config_path)
 
-    config_path = Path(__file__).parent / "config.yaml"
     with profiler.span("build main window"):
         window = MainWindow(config_path, startup_profiler=profiler)
     engine_ref = {"engine": None}

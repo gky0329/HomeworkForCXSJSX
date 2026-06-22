@@ -8,6 +8,7 @@ from app.ui.theme.colors import EDGE_SOLID, EDGE_DANGLING
 
 class EdgeItem(QGraphicsPathItem):
     ARROW_SIZE = 8.0
+    ARROW_HALF_ANGLE = pi / 6
 
     def __init__(self, source_addr: str, target_addr: str, is_dangling: bool,
                  address_map: dict):
@@ -60,12 +61,14 @@ class EdgeItem(QGraphicsPathItem):
         style = Qt.PenStyle.DashLine if self._is_dangling else Qt.PenStyle.SolidLine
         self.setPen(QPen(color, 1.5, style))
 
+        angle = atan2(tgt_pos.y() - c2.y(), tgt_pos.x() - c2.x())
+        stem_end = self._arrow_stem_end(tgt_pos, angle)
+
         path = QPainterPath()
         path.moveTo(src_pos)
-        path.cubicTo(c1, c2, tgt_pos)
+        path.cubicTo(c1, c2, stem_end)
         self.setPath(path)
 
-        angle = atan2(tgt_pos.y() - c2.y(), tgt_pos.x() - c2.x())
         self._arrow_polygon = self._make_arrow(tgt_pos, angle)
 
     def visual_bounds(self) -> QRectF:
@@ -73,15 +76,24 @@ class EdgeItem(QGraphicsPathItem):
         bounds = bounds.united(self._arrow_polygon.boundingRect())
         return bounds.adjusted(-3.0, -3.0, 3.0, 3.0)
 
+    @classmethod
+    def _arrow_stem_end(cls, tip: QPointF, angle: float) -> QPointF:
+        """Return the triangle base center so the line does not run under the arrow head."""
+        depth = cls.ARROW_SIZE * cos(cls.ARROW_HALF_ANGLE)
+        return QPointF(
+            tip.x() - depth * cos(angle),
+            tip.y() - depth * sin(angle),
+        )
+
     def _make_arrow(self, tip: QPointF, angle: float) -> QPolygonF:
         p1 = tip
         p2 = QPointF(
-            tip.x() - self.ARROW_SIZE * cos(angle - pi / 6),
-            tip.y() - self.ARROW_SIZE * sin(angle - pi / 6),
+            tip.x() - self.ARROW_SIZE * cos(angle - self.ARROW_HALF_ANGLE),
+            tip.y() - self.ARROW_SIZE * sin(angle - self.ARROW_HALF_ANGLE),
         )
         p3 = QPointF(
-            tip.x() - self.ARROW_SIZE * cos(angle + pi / 6),
-            tip.y() - self.ARROW_SIZE * sin(angle + pi / 6),
+            tip.x() - self.ARROW_SIZE * cos(angle + self.ARROW_HALF_ANGLE),
+            tip.y() - self.ARROW_SIZE * sin(angle + self.ARROW_HALF_ANGLE),
         )
         return QPolygonF([p1, p2, p3])
 

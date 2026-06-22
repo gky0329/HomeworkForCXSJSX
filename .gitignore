@@ -14,3 +14,6 @@ data/user/
 .vscode/
 data/user/
 debug_screenshots/
+*.local.md
+node_modules/
+outputs/

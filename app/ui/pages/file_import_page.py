@@ -18,6 +18,7 @@ from app.services.ai_service import AIService
 from app.services import error_store
 from app.services.i18n import tr
 from app.services.prompt_templates import PDF_SYSTEM_PROMPT, PDF_USER_TEMPLATE
+from app.services.quiz_utils import normalize_quiz_question, normalize_quiz_questions
 from app.ui.widgets.helpers import clear_layout, build_code_block
 from app.ui.widgets.empty_state import PixelEmptyState
 from app.ui.widgets.error_dialog import show_error_dialog
@@ -290,7 +291,7 @@ class FileImportPage(QWidget):
         self._upload_btn.setEnabled(True)
 
         kps = data.get("knowledge_points", [])
-        quizzes = data.get("quiz_questions", [])
+        quizzes = normalize_quiz_questions(data.get("quiz_questions", []))
         self._kps_data = kps
 
         self._status.setText(
@@ -364,6 +365,7 @@ class FileImportPage(QWidget):
         return card
 
     def _build_quiz_card(self, num: int, q: dict) -> QFrame:
+        q = normalize_quiz_question(q)
         card = QFrame()
         card.setObjectName("resultCard")
         card.setStyleSheet(PAGE_STYLE)
@@ -535,7 +537,13 @@ class FileImportPage(QWidget):
         )
 
         quiz_prompt = """你是 C++ 出题助手。根据以下知识点，生成 3-5 道单选题。
-输出 JSON：{ "quiz_questions": [{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"...","knowledge_point":"知识点名"}] }
+输出 JSON：{ "quiz_questions": [{"question":"...","options":["完整选项文本1","完整选项文本2","完整选项文本3","完整选项文本4"],"answer":0,"explanation":"...","knowledge_point":"知识点名"}] }
+要求：
+- options 必须是四个完整选项文本，不要只写 A/B/C/D。
+- answer 必须是正确选项在 options 中的 0-3 整数索引，不要写 A/B/C/D，也不要写 1-4。
+- 先确定一条正确结论，再将这条正确结论改写为 options[answer]；其余三个选项必须是明确错误的常见误解。
+- 正确选项不能是“前半句正确、后半句错误”的复合句；含有“且/并且/必须/只能/不能”的选项要逐个分句核验。
+- options[answer] 必须能独立、完整、正确地回答题目；如果四个选项里没有正确答案，必须重写整道题。
 直接输出 JSON，不要任何解释。"""
         msg = f"知识点列表：\n{kps_text}"
 
@@ -570,7 +578,7 @@ class FileImportPage(QWidget):
         except json.JSONDecodeError:
             self._status.setText(tr("Quiz generation returned invalid JSON"))
             return
-        quizzes = data.get("quiz_questions", [])
+        quizzes = normalize_quiz_questions(data.get("quiz_questions", []))
         self._status.setText(tr("Generated {n} quiz questions", n=len(quizzes)))
         if quizzes:
             section = QLabel(" " + tr("Generated Quizzes"))

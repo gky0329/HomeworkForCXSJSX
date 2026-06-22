@@ -16,6 +16,7 @@ from PySide6.QtGui import (
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.services.i18n import tr
+from app.services.quiz_utils import normalize_quiz_question, normalize_quiz_questions
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.widgets.threading import retire_worker
 import shiboken6
@@ -559,6 +560,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addWidget(btn)
 
     def _build_interactive_quiz(self, num: int, q: dict, kp_name: str) -> QFrame:
+        q = normalize_quiz_question(q)
         card = QFrame()
         card.setStyleSheet(
             f"QFrame {{ background-color: {EDITOR_BG}; border: 2px solid {BORDER}; }}"
@@ -682,11 +684,17 @@ class KnowledgePage(QWidget):
 [
   {
     "question": "题目",
-    "options": ["选项A", "选项B", "选项C", "选项D"],
+    "options": ["完整选项文本A", "完整选项文本B", "完整选项文本C", "完整选项文本D"],
     "answer": 0,
     "explanation": "解析"
   }
 ]
+要求：
+- options 必须是四个完整选项文本，不要只写 A/B/C/D。
+- answer 必须是正确选项在 options 中的 0-3 整数索引，不要写 A/B/C/D，也不要写 1-4。
+- 先确定一条正确结论，再将这条正确结论改写为 options[answer]；其余三个选项必须是明确错误的常见误解。
+- 正确选项不能是“前半句正确、后半句错误”的复合句；含有“且/并且/必须/只能/不能”的选项要逐个分句核验。
+- options[answer] 必须能独立、完整、正确地回答题目；如果四个选项里没有正确答案，必须重写整道题。
 直接输出 JSON，不要输出 markdown 代码块或解释文字。"""
         msg = f"知识点：{name}\n\n解释：{desc[:1500]}"
 
@@ -715,11 +723,7 @@ class KnowledgePage(QWidget):
                     text = parts[1] if len(parts) > 1 else text
                     if text.startswith("json"):
                         text = text[4:].strip()
-                quizzes = json.loads(text)
-                if isinstance(quizzes, dict):
-                    quizzes = quizzes.get("quiz_questions", [quizzes])
-                if not isinstance(quizzes, list):
-                    quizzes = [quizzes]
+                quizzes = normalize_quiz_questions(json.loads(text))
             except json.JSONDecodeError:
                 quizzes = []
 

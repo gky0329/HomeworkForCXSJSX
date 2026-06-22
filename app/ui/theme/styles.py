@@ -459,3 +459,348 @@ QLabel[state="warning"] {{ color: {WARN}; }}
 QLabel[state="error"] {{ color: {ERROR}; }}
 QLabel[state="info"] {{ color: {INFO}; }}
 """
+
+
+def _minimal_stylesheet(
+    *,
+    name: str,
+    bg: str,
+    surface: str,
+    surface_alt: str,
+    border: str,
+    text: str,
+    muted: str,
+    accent: str,
+    accent_hover: str,
+    editor_bg: str,
+    editor_text: str,
+    selection: str,
+) -> str:
+    return f"""
+/* {name} */
+
+QWidget {{
+    color: {text};
+    background-color: {bg};
+    font-family: "Inter", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    font-size: 14px;
+}}
+
+QMainWindow, QWidget#appShell {{
+    background-color: {bg};
+}}
+
+QFrame, QGroupBox {{
+    background-color: transparent;
+    border: none;
+}}
+
+QFrame[panel="stone"], QFrame[panel="card"], QFrame[panel="empty"],
+QFrame#resultCard, QFrame#reviewCard, QFrame#ojCard, QFrame#trackCard,
+QFrame#quickCard, QFrame#statCard, QFrame#kbDetail {{
+    background-color: {surface};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 10px;
+}}
+
+QLabel {{
+    color: {text};
+    background: transparent;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+}}
+
+QLabel[muted="true"] {{
+    color: {muted};
+}}
+
+QPushButton, QToolButton {{
+    background-color: {accent};
+    color: #ffffff;
+    border: 1px solid {accent};
+    border-radius: 6px;
+    padding: 7px 14px;
+    min-height: 30px;
+    font-size: 14px;
+    font-weight: 700;
+}}
+
+QPushButton:hover, QToolButton:hover {{
+    background-color: {accent_hover};
+    border-color: {accent_hover};
+}}
+
+QPushButton:pressed, QToolButton:pressed {{
+    background-color: {accent};
+}}
+
+QPushButton:disabled, QToolButton:disabled {{
+    background-color: {surface_alt};
+    border-color: {border};
+    color: {muted};
+}}
+
+QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+}}
+
+QPushButton[variant="secondary"]:hover, QToolButton[variant="secondary"]:hover {{
+    background-color: {surface_alt};
+    border-color: {accent};
+}}
+
+QPushButton[variant="icon"] {{
+    min-width: 28px;
+    max-width: 40px;
+    min-height: 28px;
+    padding: 2px;
+    font-size: 16px;
+}}
+
+QTabWidget::pane {{
+    border: none;
+    background: transparent;
+}}
+
+QTabBar::tab {{
+    color: {muted};
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 16px;
+    margin: 4px 2px 0 2px;
+    min-height: 32px;
+    min-width: 104px;
+    font-size: 14px;
+    font-weight: 650;
+}}
+
+QTabBar::tab:selected {{
+    color: {text};
+    border-bottom-color: {accent};
+}}
+
+QTabBar::tab:hover:!selected {{
+    color: {text};
+    border-bottom-color: {border};
+}}
+
+QPlainTextEdit, QTextEdit {{
+    color: {editor_text};
+    background-color: {editor_bg};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 10px 12px;
+    selection-background-color: {selection};
+    selection-color: {editor_text};
+    font-size: 15px;
+    font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
+}}
+
+QGraphicsView {{
+    background-color: {editor_bg};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 4px;
+}}
+
+QLineEdit, QSpinBox, QComboBox {{
+    color: {text};
+    background-color: {surface};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 28px;
+    selection-background-color: {selection};
+    font-size: 14px;
+}}
+
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
+    border-color: {accent};
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 26px;
+    border-left: 1px solid {border};
+    background-color: {surface_alt};
+}}
+
+QComboBox::down-arrow {{
+    image: url({CHEVRON_DOWN_ICON});
+    width: 10px;
+    height: 6px;
+}}
+
+QComboBox QAbstractItemView {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+    selection-background-color: {accent};
+    outline: none;
+}}
+
+QCheckBox {{
+    color: {text};
+    spacing: 8px;
+    background: transparent;
+    font-weight: 600;
+}}
+
+QSlider::groove:horizontal {{
+    background: {border};
+    height: 6px;
+    border-radius: 3px;
+}}
+
+QSlider::handle:horizontal {{
+    background: {accent};
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    border-radius: 8px;
+}}
+
+QScrollArea {{
+    background: transparent;
+    border: none;
+}}
+
+QScrollBar:vertical {{
+    background: {bg};
+    width: 12px;
+}}
+
+QScrollBar::handle:vertical {{
+    background: {border};
+    min-height: 32px;
+    border-radius: 6px;
+}}
+
+QScrollBar:horizontal {{
+    background: {bg};
+    height: 12px;
+}}
+
+QScrollBar::handle:horizontal {{
+    background: {border};
+    min-width: 32px;
+    border-radius: 6px;
+}}
+
+QScrollBar::add-line, QScrollBar::sub-line {{
+    width: 0;
+    height: 0;
+}}
+
+QListWidget, QListView, QTreeWidget, QTreeView {{
+    background: transparent;
+    color: {text};
+    border: none;
+    outline: none;
+}}
+
+QListWidget::item, QListView::item, QTreeWidget::item, QTreeView::item {{
+    color: {text};
+    padding: 8px 10px;
+    min-height: 30px;
+    border-radius: 6px;
+}}
+
+QListWidget::item:hover, QListView::item:hover, QTreeWidget::item:hover,
+QTreeView::item:hover {{
+    background: {surface_alt};
+}}
+
+QListWidget::item:selected, QListView::item:selected, QTreeWidget::item:selected,
+QTreeView::item:selected {{
+    background: {selection};
+    color: {editor_text};
+}}
+
+QStatusBar {{
+    background-color: {surface};
+    color: {muted};
+    border-top: 1px solid {border};
+    font-size: 13px;
+}}
+
+QDialog, QMessageBox {{
+    color: {text};
+    background-color: {bg};
+}}
+
+QMenuBar, QMenu {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+}}
+
+QMenu::item {{
+    padding: 8px 22px;
+}}
+
+QMenu::item:selected {{
+    background-color: {selection};
+}}
+
+QToolTip {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {accent};
+    padding: 6px 8px;
+}}
+
+QSplitter::handle {{
+    background-color: {border};
+}}
+
+QLabel[state="success"] {{ color: #238636; }}
+QLabel[state="warning"] {{ color: #b7791f; }}
+QLabel[state="error"] {{ color: #cf222e; }}
+QLabel[state="info"] {{ color: {accent}; }}
+"""
+
+
+MINIMAL_DARK_STYLESHEET = _minimal_stylesheet(
+    name="Minimal black theme",
+    bg="#0b0c0f",
+    surface="#15171c",
+    surface_alt="#20232a",
+    border="#30343d",
+    text="#f3f4f6",
+    muted="#9ca3af",
+    accent="#2f81f7",
+    accent_hover="#4493f8",
+    editor_bg="#0f1117",
+    editor_text="#f0f3f6",
+    selection="#1f6feb",
+)
+
+MINIMAL_LIGHT_STYLESHEET = _minimal_stylesheet(
+    name="Minimal white theme",
+    bg="#f7f8fa",
+    surface="#ffffff",
+    surface_alt="#eef1f5",
+    border="#d0d7de",
+    text="#24292f",
+    muted="#57606a",
+    accent="#0969da",
+    accent_hover="#0550ae",
+    editor_bg="#ffffff",
+    editor_text="#24292f",
+    selection="#b6d7ff",
+)
+
+
+def stylesheet_for_theme(theme: str) -> str:
+    if theme == "minimal_dark":
+        return MINIMAL_DARK_STYLESHEET
+    if theme == "minimal_light":
+        return MINIMAL_LIGHT_STYLESHEET
+    return GLOBAL_STYLESHEET

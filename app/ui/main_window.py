@@ -861,9 +861,14 @@ class MainWindow(QMainWindow):
 
     def _on_api_settings(self):
         from app.ui.widgets.api_key_dialog import show_api_key_dialog
-        show_api_key_dialog(self)
+        from app.ui.theme.manager import ThemeManager
+        if not show_api_key_dialog(self):
+            return
         load_language(self._config_path)
-        self.statusBar().showMessage(tr("Settings saved."))
+        app = QApplication.instance()
+        if app is not None:
+            ThemeManager.apply(app, config_path=self._config_path)
+        self.statusBar().showMessage(tr("Settings saved. Restart the app to update every page."))
         self._retranslate()
 
     def _retranslate(self):
