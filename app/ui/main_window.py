@@ -245,8 +245,8 @@ class MainWindow(QMainWindow):
     code_page_ready = Signal()
     _CODE_PAGE_ATTRS = {
         "_example_combo", "btn_run", "btn_prev", "btn_next", "btn_reset",
-        "btn_zoom_out", "btn_zoom_in", "btn_zoom_fit", "auto_fit_check",
-        "step_label", "code_editor", "stdin_label", "stdin_editor",
+        "btn_zoom_out", "btn_zoom_in", "btn_zoom_fit", "btn_fullscreen",
+        "auto_fit_check", "step_label", "code_editor", "stdin_label", "stdin_editor",
         "canvas_view", "canvas_scene", "btn_prev_big", "btn_next_big",
         "btn_autoplay", "_speed_slider", "_speed_label", "tracker_panel",
     }
@@ -427,15 +427,21 @@ class MainWindow(QMainWindow):
         self.btn_zoom_out = QPushButton("\u2212")
         self.btn_zoom_in = QPushButton("+")
         self.btn_zoom_fit = QPushButton("\u21C5")
-        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_zoom_fit):
+        self.btn_fullscreen = QPushButton()
+        self.btn_fullscreen.setIcon(QIcon(asset_path("icons", "action_fullscreen")))
+        self.btn_fullscreen.setIconSize(QSize(18, 18))
+        for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_zoom_fit, self.btn_fullscreen):
             b.setFixedSize(28, 28)
             b.setProperty("variant", "icon")
         self.btn_zoom_out.setToolTip(tr("Zoom Out (Ctrl+-)"))
         self.btn_zoom_in.setToolTip(tr("Zoom In (Ctrl+=)"))
         self.btn_zoom_fit.setToolTip(tr("Fit to View"))
+        self.btn_fullscreen.setToolTip(tr("Full Screen (F11)"))
+        self._sync_fullscreen_button()
         header.addWidget(self.btn_zoom_out)
         header.addWidget(self.btn_zoom_in)
         header.addWidget(self.btn_zoom_fit)
+        header.addWidget(self.btn_fullscreen)
 
         self.auto_fit_check = QCheckBox(tr("Auto Fit"))
         self.auto_fit_check.setChecked(False)
@@ -492,6 +498,7 @@ class MainWindow(QMainWindow):
         self.btn_zoom_in.clicked.connect(self.canvas_view.zoom_in)
         self.btn_zoom_out.clicked.connect(self.canvas_view.zoom_out)
         self.btn_zoom_fit.clicked.connect(self.canvas_view.zoom_fit)
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
 
         right_pane = QWidget()
         right_layout = QVBoxLayout(right_pane)
@@ -652,6 +659,11 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._overlay.setGeometry(self.centralWidget().rect())
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._sync_fullscreen_button()
+
     def closeEvent(self, event):
         for page_attr in ("review_page", "knowledge_page", "file_page", "oj_page"):
             page = getattr(self, page_attr, None)
@@ -684,6 +696,13 @@ class MainWindow(QMainWindow):
                 name="zoom_reset",
                 description="Reset canvas zoom",
                 callback=self.canvas_view.reset_view,
+                context=Qt.ShortcutContext.WindowShortcut,
+            ),
+            ShortcutBinding(
+                sequence="F11",
+                name="toggle_fullscreen",
+                description="Toggle full screen mode",
+                callback=self._toggle_fullscreen,
                 context=Qt.ShortcutContext.WindowShortcut,
             ),
         ])
@@ -761,6 +780,7 @@ class MainWindow(QMainWindow):
         self.btn_next.setText(tr("Next"))
         self.btn_reset.setText(tr("Reset"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self._sync_fullscreen_button()
         self.stdin_label.setText(tr("Program Input (stdin)"))
         self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
         self.step_label.setText(tr("Ready") if "Ready" in self.step_label.text() or "就绪" in self.step_label.text() else self.step_label.text())
@@ -827,6 +847,7 @@ class MainWindow(QMainWindow):
         self.btn_autoplay.setText(tr("Auto Play"))
         self._speed_label.setText(tr("speed"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self._sync_fullscreen_button()
         self.step_label.setText(tr("Ready"))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
         self.stdin_label.setText(tr("Program Input (stdin)"))
@@ -858,3 +879,19 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("Failed to read code font size from config")
         return 16
+
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self._sync_fullscreen_button()
+
+    def _sync_fullscreen_button(self):
+        if not hasattr(self, "btn_fullscreen"):
+            return
+        self.btn_fullscreen.setText("")
+        if self.isFullScreen():
+            self.btn_fullscreen.setToolTip(tr("Exit Full Screen (F11)"))
+        else:
+            self.btn_fullscreen.setToolTip(tr("Full Screen (F11)"))

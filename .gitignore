@@ -1,4 +1,5 @@
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 .venv/
@@ -12,5 +13,9 @@ build/
 config.yaml
 data/user/
 .vscode/
-data/user/
 debug_screenshots/
+tmp_test/
+.pytest_cache/
+pytest-cache-files-*/
+.codex_tmp/
+.codex_pycache/

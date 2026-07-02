@@ -10,8 +10,8 @@ from app.ui.theme.colors import (
 from app.ui.theme.fonts import BODY_FONT, CODE_FONT, TITLE_FONT
 from app.ui.theme.minecraft_assets import asset_url, bg_image, border_image
 
-CHEVRON_DOWN_ICON = "app/ui/theme/icons/chevron-down.svg"
-CHECK_ICON = "app/ui/theme/icons/check.svg"
+CHEVRON_DOWN_ICON = "app/ui/theme/icons/chevron-down.png"
+CHECK_ICON = "app/ui/theme/icons/check.png"
 
 GLOBAL_STYLESHEET = f"""
 /* Minecraft dark stone theme */

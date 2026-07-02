@@ -45,6 +45,8 @@ TRANSLATIONS = {
         "Zoom Out (Ctrl+-)": "缩小 (Ctrl+-)",
         "Zoom In (Ctrl+=)": "放大 (Ctrl+=)",
         "Fit to View": "适配视图",
+        "Full Screen (F11)": "全屏 (F11)",
+        "Exit Full Screen (F11)": "退出全屏 (F11)",
         "Elapsed: {seconds}s": "已耗时：{seconds} 秒",
         "Ready - Enter C++ code and click Run": "就绪 - 输入 C++ 代码并点击运行",
         "Code loaded - click Run to visualize": "代码已载入 - 点击运行开始可视化",
