@@ -1,8 +1,8 @@
 # Windows Runbook
 
-This project runs on Windows as a PySide6 desktop app. On `main`, the stable
-Windows execution path is the configured AI provider. Native debugger execution
-for Windows PDB remains on the experimental branch.
+This project runs on Windows as a PySide6 desktop app. The stable Windows
+execution path is the configured AI provider. A native MSVC/PDB debugger backend
+is present for validation, but it is experimental and disabled by default.
 
 ## Stable Windows Setup
 
@@ -29,9 +29,46 @@ python main.py
 | --- | --- | --- | --- |
 | AI provider | Windows, macOS, Linux | Stable fallback | Used when native debugging is unavailable or unsafe. |
 | LLDB / DWARF | macOS, Linux | Local development | Used when `lldb` and `clang++`/`g++` are available. |
+| MSVC / PDB | Windows | Experimental, opt-in | Requires Visual Studio C++ Build Tools, Windows Debugging Tools, and explicit enablement. |
 
-On Windows, teammates should use the AI provider path from `main`. Keep PDB
-validation and promotion decisions on `experiment/windows-pdb-debugger`.
+On Windows, teammates should use the AI provider path for stable demos. To
+validate the native PDB path, enable one of:
+
+```powershell
+$env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"
+```
+
+or in `config.yaml`:
+
+```yaml
+debugger:
+  enable_experimental_pdb: true
+```
+
+The same switch is also available in Settings as **Enable experimental MSVC/PDB
+native debugger**. Do not advertise this backend as stable until the smoke tests
+below pass on a real Windows machine.
+
+## Native Debugger Validation
+
+Install:
+
+- Visual Studio Build Tools with the C++ workload (`cl.exe`)
+- Windows Debugging Tools (`cdb.exe`)
+- Python 3.11+
+
+Then run:
+
+```powershell
+$env:CXXMV_ENABLE_EXPERIMENTAL_PDB="1"
+python tests/unit/test_fixes.py --verbose
+python tools/native_debug_smoke.py --backend msvc-pdb --list-backends
+python tools/native_debug_smoke.py --backend msvc-pdb --json
+```
+
+The smoke script exercises `DebugExecutor` and renders each returned trace
+through the offscreen `MemoryCanvas`, so it catches debugger parsing issues and
+canvas crashes together.
 
 ## Manual UI Smoke Cases
 

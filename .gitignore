@@ -19,3 +19,6 @@ tmp_test/
 pytest-cache-files-*/
 .codex_tmp/
 .codex_pycache/
+*.local.md
+node_modules/
+outputs/

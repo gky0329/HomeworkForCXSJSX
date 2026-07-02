@@ -275,6 +275,109 @@ def test_memory_canvas_registers_array_element_pointer_edge_sources():
     assert len(canvas.get_edge_items()) == 1
 
 
+def test_memory_canvas_fans_out_edges_to_same_target():
+    """Multiple pointers to one target should not draw on the exact same path."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 1000, 700)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=3,
+        source_code="int* q = p;",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="p", type="int*", value="0xH001", address="0xS001", is_pointer=True),
+            Variable(name="q", type="int*", value="0xH001", address="0xS002", is_pointer=True),
+        ])],
+        heap=[HeapBlock(address="0xH001", type="int", value="42")],
+        edges=[
+            PointerEdge(source_address="0xS001", target_address="0xH001"),
+            PointerEdge(source_address="0xS002", target_address="0xH001"),
+        ],
+    )
+
+    canvas.render_state(state)
+    edges = canvas.get_edge_items()
+
+    assert len(edges) == 2
+    first_curve_y = edges[0].path().elementAt(1).y
+    second_curve_y = edges[1].path().elementAt(1).y
+    assert first_curve_y != second_curve_y
+
+
+def test_edge_item_path_stops_at_arrow_base_center():
+    """The bezier path should meet the arrow base, not run all the way to the tip."""
+    from PySide6.QtWidgets import QApplication, QGraphicsRectItem
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.canvas.edge_item import EdgeItem
+
+    source = QGraphicsRectItem(0, 0, 20, 20)
+    target = QGraphicsRectItem(100, 0, 20, 20)
+    edge = EdgeItem("0xS001", "0xH001", False, {
+        "0xS001": source,
+        "0xH001": target,
+    })
+
+    path_end = edge.path().elementAt(edge.path().elementCount() - 1)
+    tip = edge._arrow_polygon[0]
+    base_a = edge._arrow_polygon[1]
+    base_b = edge._arrow_polygon[2]
+    base_center_x = (base_a.x() + base_b.x()) / 2
+    base_center_y = (base_a.y() + base_b.y()) / 2
+
+    assert abs(path_end.x - base_center_x) < 0.000001
+    assert abs(path_end.y - base_center_y) < 0.000001
+    assert abs(tip.x() - target.sceneBoundingRect().left()) < 0.000001
+
+
+def test_memory_canvas_first_heap_does_not_overlap_main_frame():
+    """The first heap item should not share main's fixed layout frame id."""
+    from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
+    import sys
+
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.core.memory_model import HeapBlock, MemoryState, PointerEdge, StackFrame, Variable
+    from app.ui.canvas.memory_canvas import MemoryCanvas
+
+    view = QGraphicsView()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, 1200, 800)
+    view.setScene(scene)
+    canvas = MemoryCanvas(view, scene)
+
+    state = MemoryState(
+        line_number=2,
+        source_code="int* p = new int(42);",
+        stack=[StackFrame(frame_name="main", variables=[
+            Variable(name="very_long_name_to_expand_the_stack_frame", type="int", value="1", address="0xS001", is_pointer=False),
+            Variable(name="p", type="int*", value="0xH001", address="0xS002", is_pointer=True),
+        ])],
+        heap=[HeapBlock(address="0xH001", type="int", value="42")],
+        edges=[PointerEdge(source_address="0xS002", target_address="0xH001")],
+    )
+
+    canvas.render_state(state)
+    stack_item = canvas.get_stack_items()[0]
+    heap_item = canvas.get_heap_items()[0]
+
+    assert stack_item.data(0) == 0
+    assert heap_item.data(0) != 0
+    assert not stack_item.sceneBoundingRect().intersects(heap_item.sceneBoundingRect())
+
+
 def test_canvas_view_uses_stable_fit_bounds():
     """Auto-fit should use trace-wide bounds instead of per-step item bounds."""
     from PySide6.QtCore import QRectF
@@ -314,13 +417,14 @@ def test_code_editor_defaults_to_roadshow_demo():
 
     from app.core.demo_examples import ROADSHOW_DEMO_CODE
     from app.ui.main_window import DEFAULT_EXAMPLE_KEY, MainWindow
+    from app.ui.theme.colors import EDITOR_BG
 
     window = MainWindow()
     try:
         assert DEFAULT_EXAMPLE_KEY == "Roadshow Demo"
         assert window._example_combo.currentData() == "Roadshow Demo"
         assert window.get_code() == ROADSHOW_DEMO_CODE.strip()
-        assert "background-color: #1E1E1E" in window.code_editor.styleSheet()
+        assert f"background-color: {EDITOR_BG}" in window.code_editor.styleSheet()
     finally:
         window.close()
 
@@ -379,6 +483,35 @@ def test_code_editor_auto_fit_defaults_to_initial_fit_only():
         window.close()
 
 
+def test_canvas_fullscreen_restores_canvas_view():
+    """The canvas fullscreen mode should move the same view back into the editor."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window._ensure_tab(window._code_tab_index)
+        host_layout = window._canvas_host_layout
+        assert host_layout.indexOf(window.canvas_view) >= 0
+
+        window._toggle_canvas_fullscreen()
+        app.processEvents()
+        assert window._canvas_fullscreen_window is not None
+        assert host_layout.indexOf(window.canvas_view) < 0
+
+        window._canvas_fullscreen_window.close()
+        app.processEvents()
+        assert window._canvas_fullscreen_window is None
+        assert host_layout.indexOf(window.canvas_view) >= 0
+        assert window.btn_canvas_fullscreen.isEnabled()
+    finally:
+        window.close()
+
+
 def test_code_editor_status_shows_execution_diagnostics():
     """Successful runs should show whether the trace came from native or AI fallback."""
     from PySide6.QtWidgets import QApplication
@@ -418,8 +551,8 @@ def test_code_editor_status_shows_execution_diagnostics():
         window.close()
 
 
-def test_settings_dialog_does_not_write_debugger_config():
-    """Main settings should not expose the experimental Windows PDB flag."""
+def test_settings_dialog_writes_theme_and_debugger_config():
+    """Main settings should persist theme choice and the experimental PDB flag."""
     from PySide6.QtWidgets import QApplication
     import sys
     import yaml
@@ -443,14 +576,20 @@ def test_settings_dialog_does_not_write_debugger_config():
         )
         dialog = ApiKeyDialog(config_path=config_path)
         try:
-            assert not hasattr(dialog, "_pdb_check")
+            assert hasattr(dialog, "_pdb_check")
+            assert hasattr(dialog, "_theme_combo")
+            theme_index = dialog._theme_combo.findData("minimal_light")
+            assert theme_index >= 0
+            dialog._theme_combo.setCurrentIndex(theme_index)
+            dialog._pdb_check.setChecked(True)
             dialog._save_and_accept()
         finally:
             dialog.close()
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-    assert "debugger" not in saved
+    assert saved["ui"]["theme"] == "minimal_light"
+    assert saved["debugger"]["enable_experimental_pdb"] is True
 
 
 def test_memory_canvas_prepares_trace_wide_fit_bounds():
@@ -591,6 +730,74 @@ def test_oj_page_autogen_passes_empty_code_to_worker():
     assert captured["code"] == ""
     assert captured["started"] is True
     assert page._autogen is True
+
+
+def test_oj_worker_uses_larger_analysis_token_budget():
+    """OJ analysis should request more output tokens than the shared default."""
+    calls = []
+
+    class FakeAIService:
+        max_tokens = 123
+
+        def __init__(self, config_path=None):
+            self.config_path = config_path
+
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return '{"steps":[],"overview":"ok","solution_approach":"ok","complexity":"ok","common_mistakes":["ok"],"reference_answers":["ok"]}'
+
+    with patch("app.ui.pages.oj_page.AIService", new=FakeAIService):
+        from app.ui.pages.oj_page import OJ_ANALYSIS_TOKEN_MULTIPLIER, OJWorker
+
+        worker = OJWorker("problem", "int main(){return 0;}")
+        worker.run()
+
+    assert calls
+    assert calls[0]["max_tokens"] == 123 * OJ_ANALYSIS_TOKEN_MULTIPLIER
+
+
+def test_quiz_output_normalizes_ai_answer_formats():
+    """AI quiz answers may arrive as labels, 1-based D, or missing option text."""
+    from app.services.quiz_utils import normalize_quiz_question
+
+    label_answer = normalize_quiz_question({
+        "question": "Which option is correct?",
+        "options": ["A) wrong", "B) right", "C) wrong", "D) wrong"],
+        "answer": "B",
+    })
+    assert label_answer["options"] == ["wrong", "right", "wrong", "wrong"]
+    assert label_answer["answer"] == 1
+
+    one_based_d = normalize_quiz_question({
+        "question": "Which option is correct?",
+        "options": ["wrong", "wrong", "wrong", "right"],
+        "answer": 4,
+    })
+    assert one_based_d["answer"] == 3
+
+    missing_correct_option = normalize_quiz_question({
+        "question": "What does delete do?",
+        "options": ["Declares a pointer", "Allocates stack memory", "Copies an object", "Calls main"],
+        "answer": "Releases dynamically allocated memory",
+    })
+    assert missing_correct_option["answer"] == 3
+    assert missing_correct_option["options"][3] == "Releases dynamically allocated memory"
+
+
+def test_quiz_prompts_guard_against_all_wrong_options():
+    """Quiz prompts should force a semantic correct answer, not just valid JSON."""
+    from app.services.prompt_templates import PDF_SYSTEM_PROMPT
+
+    prompt_texts = [
+        PDF_SYSTEM_PROMPT,
+        (_PROJECT_ROOT / "app/ui/pages/file_import_page.py").read_text(encoding="utf-8"),
+        (_PROJECT_ROOT / "app/ui/pages/knowledge_page.py").read_text(encoding="utf-8"),
+    ]
+
+    for text in prompt_texts:
+        assert "先确定一条正确结论" in text
+        assert "前半句正确、后半句错误" in text
+        assert "四个选项里没有正确答案" in text
 
 
 def test_debug_executor_parses_lldb_snapshots():
@@ -2698,8 +2905,8 @@ def test_debug_executor_selects_lldb_backend_when_tools_exist():
     assert status[DebugExecutor.LLDB_DWARF_BACKEND].implemented is True
 
 
-def test_debug_executor_excludes_msvc_pdb_backend_on_main():
-    """The stable main branch should not expose Windows PDB as a selectable backend."""
+def test_debug_executor_exposes_msvc_pdb_backend_as_opt_in():
+    """Windows PDB should be visible for diagnostics but disabled by default."""
     from app.core.debug_executor import DebugExecutor
 
     def fake_which(name):
@@ -2718,14 +2925,16 @@ def test_debug_executor_excludes_msvc_pdb_backend_on_main():
                 except Exception as exc:
                     message = str(exc)
                 else:
-                    raise AssertionError("MSVC/PDB backend should not be selectable on main")
+                    raise AssertionError("MSVC/PDB backend should require explicit enablement")
 
-    assert DebugExecutor.MSVC_PDB_BACKEND not in status
-    assert "Unknown debugger backend" in message
+    assert DebugExecutor.MSVC_PDB_BACKEND in status
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].implemented is True
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is False
+    assert "experimental and disabled" in message
 
 
-def test_debug_executor_ignores_pdb_enablement_config_on_main():
-    """The main branch keeps PDB promotion out of config/env driven product paths."""
+def test_debug_executor_honors_pdb_enablement_config():
+    """Explicit config/env enablement should allow selecting the experimental PDB path."""
     from app.core.debug_executor import DebugExecutor
 
     def fake_which(name):
@@ -2742,18 +2951,13 @@ def test_debug_executor_ignores_pdb_enablement_config_on_main():
             with patch("app.core.debug_executor.platform.system", return_value="Windows"):
                 with patch("app.core.debug_executor.shutil.which", side_effect=fake_which):
                     status = {s.id: s for s in DebugExecutor.backend_status(config_path)}
-                    try:
-                        DebugExecutor(
-                            preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
-                            config_path=config_path,
-                        )._select_backend()
-                    except Exception as exc:
-                        message = str(exc)
-                    else:
-                        raise AssertionError("config/env should not promote MSVC/PDB on main")
+                    selected = DebugExecutor(
+                        preferred_backend=DebugExecutor.MSVC_PDB_BACKEND,
+                        config_path=config_path,
+                    )._select_backend()
 
-    assert DebugExecutor.MSVC_PDB_BACKEND not in status
-    assert "Unknown debugger backend" in message
+    assert status[DebugExecutor.MSVC_PDB_BACKEND].available is True
+    assert selected == DebugExecutor.MSVC_PDB_BACKEND
 
 
 def test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits():
@@ -6078,6 +6282,14 @@ def test_stack_item_object_draws_inheritance_and_vtable_layout():
     assert "0xS001.Animal" in item.member_items
     assert "0xS001.bones" in item.member_items
     assert len(item._object_sections) == 3
+    rects = sorted(
+        (section["rect"].rect() for section in item._object_sections),
+        key=lambda rect: rect.top(),
+    )
+    assert all(
+        upper.bottom() + 4.0 <= lower.top()
+        for upper, lower in zip(rects, rects[1:])
+    )
 
 
 def test_heap_item_object_draws_inheritance_and_vtable_layout():
@@ -6118,6 +6330,14 @@ def test_heap_item_object_draws_inheritance_and_vtable_layout():
     assert "0xH001.Animal" in item.member_items
     assert "0xH001.bones" in item.member_items
     assert len(item._object_sections) == 3
+    rects = sorted(
+        (section["rect"].rect() for section in item._object_sections),
+        key=lambda rect: rect.top(),
+    )
+    assert all(
+        upper.bottom() + 4.0 <= lower.top()
+        for upper, lower in zip(rects, rects[1:])
+    )
 
 
 # ── Phase 3: No double JSON serialize ──────────────────────────────────
@@ -6209,6 +6429,50 @@ def test_graph_page_named_canvas_class():
 
     from app.ui.pages.knowledge_page import _GraphCanvas
     assert _GraphCanvas.__name__ == "_GraphCanvas"
+
+
+def test_knowledge_graph_clusters_and_links_concepts(monkeypatch):
+    """Graph view should cluster concepts and create inferred links when deps are sparse."""
+    from PySide6.QtWidgets import QApplication
+    import sys
+    QApplication.instance() or QApplication(sys.argv)
+
+    from app.services import error_store
+    from app.ui.pages.knowledge_page import KnowledgePage
+
+    kps = [
+        {"name": "变量与类型", "count": 4, "description": "基础", "source": "test"},
+        {"name": "指针", "count": 8, "description": "基础", "source": "test"},
+        {"name": "动态内存 new delete", "count": 3, "description": "基础", "source": "test"},
+        {"name": "类和对象", "count": 6, "description": "基础", "source": "test"},
+        {"name": "继承", "count": 5, "description": "基础", "source": "test"},
+        {"name": "多态 virtual", "count": 2, "description": "基础", "source": "test"},
+    ]
+    monkeypatch.setattr(error_store, "get_knowledge_points", lambda: list(kps))
+    monkeypatch.setattr(error_store, "get_error_frequency", lambda: {"指针": 2})
+    monkeypatch.setattr(error_store, "get_all_stats", lambda: {
+        "knowledge_points": len(kps),
+        "total_errors": 2,
+        "unreviewed": 0,
+        "error_frequency": {"指针": 2},
+    })
+    monkeypatch.setattr(error_store, "get_dependencies", lambda name: [])
+    monkeypatch.setattr(error_store, "get_ucb_queue", lambda: [])
+
+    page = KnowledgePage()
+    try:
+        page._set_view(True)
+        page._graph_timer.stop()
+        clusters = {node.cluster for node in page._graph_nodes}
+        edge_kinds = {kind for _, _, _, kind in page._graph_edges}
+
+        assert {"basics", "memory", "oop"} <= clusters
+        assert "semantic" in edge_kinds
+        assert "cluster" in edge_kinds
+        assert page._graph_cluster_centers
+    finally:
+        page._graph_timer.stop()
+        page.close()
 
 
 def test_native_debug_smoke_summarizes_and_dumps_trace():
@@ -9434,14 +9698,18 @@ if __name__ == "__main__":
         test_memory_canvas_does_not_remove_rekeyed_stack_item,
         test_memory_canvas_registers_member_pointer_edge_sources,
         test_memory_canvas_registers_array_element_pointer_edge_sources,
+        test_edge_item_path_stops_at_arrow_base_center,
         test_canvas_view_uses_stable_fit_bounds,
         test_code_editor_defaults_to_roadshow_demo,
         test_code_editor_auto_fit_defaults_to_initial_fit_only,
         test_code_editor_status_shows_execution_diagnostics,
-        test_settings_dialog_does_not_write_debugger_config,
+        test_settings_dialog_writes_theme_and_debugger_config,
         test_memory_canvas_prepares_trace_wide_fit_bounds,
         test_state_diff_detects_member_changes,
         test_oj_page_autogen_passes_empty_code_to_worker,
+        test_oj_worker_uses_larger_analysis_token_budget,
+        test_quiz_output_normalizes_ai_answer_formats,
+        test_quiz_prompts_guard_against_all_wrong_options,
         test_debug_executor_parses_lldb_snapshots,
         test_debug_executor_parses_arrays_and_struct_members,
         test_debug_executor_parses_lldb_class_object_members,
@@ -9487,8 +9755,8 @@ if __name__ == "__main__":
         test_debug_executor_parses_lldb_nested_member_pointer_object_values,
         test_debug_executor_parses_heap_array_expression_snapshots,
         test_debug_executor_selects_lldb_backend_when_tools_exist,
-        test_debug_executor_excludes_msvc_pdb_backend_on_main,
-        test_debug_executor_ignores_pdb_enablement_config_on_main,
+        test_debug_executor_exposes_msvc_pdb_backend_as_opt_in,
+        test_debug_executor_honors_pdb_enablement_config,
         test_debug_executor_discovers_msvc_tools_from_vswhere_and_windows_kits,
         test_debug_executor_msvc_shell_command_loads_vcvarsall,
         test_debug_executor_skips_stdin_programs_before_lldb_run,

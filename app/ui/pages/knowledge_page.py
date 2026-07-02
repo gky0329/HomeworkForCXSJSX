@@ -1,5 +1,4 @@
 import math
-import random
 import re
 
 from PySide6.QtWidgets import (
@@ -7,9 +6,9 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame, QLineEdit, QSplitter,
     QListWidget, QListWidgetItem, QGraphicsView,
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
-    QGraphicsLineItem, QStackedWidget,
+    QGraphicsLineItem, QGraphicsRectItem, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QMargins, QTimer, QSize
+from PySide6.QtCore import Qt, QMargins, QTimer, QSize, QPointF
 from PySide6.QtGui import (
     QFont, QColor, QPen, QBrush, QPainter, QLinearGradient, QMouseEvent, QIcon,
 )
@@ -17,6 +16,7 @@ from PySide6.QtGui import (
 from app.services import error_store
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.services.i18n import tr
+from app.services.quiz_utils import normalize_quiz_question, normalize_quiz_questions
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.widgets.threading import retire_worker
 import shiboken6
@@ -78,6 +78,46 @@ TOGGLE_INACTIVE = (
     f"QPushButton:hover {{ color: {TEXT_PRIMARY}; border-color: {ACCENT}; }}"
 )
 
+GRAPH_CLUSTER_DEFS = [
+    (
+        "memory",
+        "Memory & Pointers",
+        QColor(STACK_BORDER),
+        ("pointer", "指针", "reference", "引用", "address", "地址", "heap", "堆", "stack", "栈", "new", "delete", "内存", "生命周期", "shared_ptr", "unique_ptr", "weak_ptr"),
+    ),
+    (
+        "oop",
+        "Classes & Polymorphism",
+        QColor(HEAP_BORDER),
+        ("class", "类", "object", "对象", "继承", "inherit", "多态", "polymorphism", "virtual", "vtable", "构造", "析构", "this", "public", "private"),
+    ),
+    (
+        "containers",
+        "Containers & STL",
+        QColor(SUCCESS),
+        ("array", "数组", "vector", "string", "map", "set", "queue", "list", "deque", "容器", "stl", "iterator", "迭代器"),
+    ),
+    (
+        "algorithms",
+        "Algorithms & OJ",
+        QColor(ACCENT_HOVER),
+        ("algorithm", "算法", "递归", "recursion", "sort", "search", "dp", "动态规划", "复杂度", "complexity", "oj", "循环", "loop"),
+    ),
+    (
+        "io",
+        "Input & Output",
+        QColor(HEAP_TEXT),
+        ("cin", "cout", "scanf", "printf", "stream", "输入", "输出", "文件", "file", "io", "iostream"),
+    ),
+    (
+        "basics",
+        "C++ Basics",
+        QColor(TEXT_SECONDARY),
+        ("变量", "variable", "type", "类型", "int", "double", "bool", "char", "const", "表达式", "作用域", "scope", "函数", "function"),
+    ),
+]
+GRAPH_CLUSTER_ORDER = [key for key, *_ in GRAPH_CLUSTER_DEFS] + ["other"]
+
 
 class _GraphCanvas(QGraphicsView):
     def wheelEvent(self, event):
@@ -86,26 +126,33 @@ class _GraphCanvas(QGraphicsView):
 
 class GraphNode(QGraphicsEllipseItem):
     def __init__(self, x: float, y: float, r: float, label: str, color: QColor,
-                 on_clicked=None):
+                 on_clicked=None, cluster: str = "other", weight: float = 1.0):
         super().__init__(-r, -r, 2 * r, 2 * r)
         self.label = label
+        self.cluster = cluster
+        self.weight = weight
         self.radius = r
+        self.anchor = QPointF(x, y)
         self.vx = 0.0
         self.vy = 0.0
         self._on_clicked = on_clicked
         self._press_pos = None
         self.setPos(x, y)
-        self.setPen(QPen(color, 2))
+        base_color = QColor(color).darker(155)
+        self.setPen(QPen(base_color.lighter(155), 2))
         gradient = QLinearGradient(-r, -r, r, r)
-        gradient.setColorAt(0, color.lighter(140))
-        gradient.setColorAt(1, color.darker(120))
+        gradient.setColorAt(0, base_color.lighter(118))
+        gradient.setColorAt(1, base_color.darker(130))
         self.setBrush(QBrush(gradient))
+        self.setZValue(2)
         self.setFlag(self.GraphicsItemFlag.ItemIsMovable, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._text = QGraphicsTextItem(label, self)
         self._text.setDefaultTextColor(QColor(TEXT_PRIMARY))
-        self._text.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 10))
+        font_size = 8 if len(label) > 12 else 9 if len(label) > 7 else 10
+        self._text.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size, QFont.Weight.Bold))
+        self._text.setTextWidth(max(42.0, r * 1.82))
         trect = self._text.boundingRect()
         self._text.setPos(-trect.width() / 2, -trect.height() / 2)
 
@@ -128,7 +175,9 @@ class KnowledgePage(QWidget):
         self._all_kps: list[dict] = []
         self._graph_view = False
         self._graph_nodes: list[GraphNode] = []
-        self._graph_edges: list[tuple[QGraphicsLineItem, GraphNode, GraphNode]] = []
+        self._graph_edges: list[tuple[QGraphicsLineItem, GraphNode, GraphNode, str]] = []
+        self._graph_cluster_items: list[object] = []
+        self._graph_cluster_centers: dict[str, QPointF] = {}
         self._graph_timer = QTimer()
         self._graph_timer.timeout.connect(self._simulate)
         self._selected_node: str | None = None
@@ -145,6 +194,11 @@ class KnowledgePage(QWidget):
         except RuntimeError:
             pass
         super().hideEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._graph_view:
+            QTimer.singleShot(0, self._fit_graph_view)
 
     # ── UI setup ────────────────────────────────────────────────────────
 
@@ -506,6 +560,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addWidget(btn)
 
     def _build_interactive_quiz(self, num: int, q: dict, kp_name: str) -> QFrame:
+        q = normalize_quiz_question(q)
         card = QFrame()
         card.setStyleSheet(
             f"QFrame {{ background-color: {EDITOR_BG}; border: 2px solid {BORDER}; }}"
@@ -629,11 +684,17 @@ class KnowledgePage(QWidget):
 [
   {
     "question": "题目",
-    "options": ["选项A", "选项B", "选项C", "选项D"],
+    "options": ["完整选项文本A", "完整选项文本B", "完整选项文本C", "完整选项文本D"],
     "answer": 0,
     "explanation": "解析"
   }
 ]
+要求：
+- options 必须是四个完整选项文本，不要只写 A/B/C/D。
+- answer 必须是正确选项在 options 中的 0-3 整数索引，不要写 A/B/C/D，也不要写 1-4。
+- 先确定一条正确结论，再将这条正确结论改写为 options[answer]；其余三个选项必须是明确错误的常见误解。
+- 正确选项不能是“前半句正确、后半句错误”的复合句；含有“且/并且/必须/只能/不能”的选项要逐个分句核验。
+- options[answer] 必须能独立、完整、正确地回答题目；如果四个选项里没有正确答案，必须重写整道题。
 直接输出 JSON，不要输出 markdown 代码块或解释文字。"""
         msg = f"知识点：{name}\n\n解释：{desc[:1500]}"
 
@@ -662,11 +723,7 @@ class KnowledgePage(QWidget):
                     text = parts[1] if len(parts) > 1 else text
                     if text.startswith("json"):
                         text = text[4:].strip()
-                quizzes = json.loads(text)
-                if isinstance(quizzes, dict):
-                    quizzes = quizzes.get("quiz_questions", [quizzes])
-                if not isinstance(quizzes, list):
-                    quizzes = [quizzes]
+                quizzes = normalize_quiz_questions(json.loads(text))
             except json.JSONDecodeError:
                 quizzes = []
 
@@ -694,10 +751,154 @@ class KnowledgePage(QWidget):
         self._stack.setCurrentWidget(self._list_stack)
         self._graph_timer.stop()
 
+    def _concept_cluster(self, name: str) -> str:
+        lowered = name.lower()
+        basics_priority = ("变量", "类型", "表达式", "作用域", "variable", "type", "scope")
+        if any(keyword.lower() in lowered or keyword in name for keyword in basics_priority):
+            return "basics"
+        for key, _label, _color, keywords in GRAPH_CLUSTER_DEFS:
+            if any(
+                (keyword != "类" or "类型" not in name)
+                and (keyword.lower() in lowered or keyword in name)
+                for keyword in keywords
+            ):
+                return key
+        return "other"
+
+    def _cluster_meta(self, key: str) -> tuple[str, QColor]:
+        for cluster_key, label, color, _keywords in GRAPH_CLUSTER_DEFS:
+            if cluster_key == key:
+                return label, QColor(color)
+        return "Other Concepts", QColor(TEXT_MUTED)
+
+    def _semantic_prerequisite_edges(self, names: set[str]) -> list[tuple[str, str, str]]:
+        rules = [
+            (("变量", "variable", "type", "类型"), ("指针", "pointer", "reference", "引用")),
+            (("指针", "pointer", "reference", "引用"), ("堆", "heap", "new", "delete", "动态内存", "smart_ptr", "shared_ptr", "unique_ptr")),
+            (("类", "class", "object", "对象"), ("继承", "inherit")),
+            (("继承", "inherit"), ("多态", "polymorphism", "virtual", "vtable", "虚函数")),
+            (("数组", "array"), ("vector", "容器", "container", "stl")),
+            (("输入", "输出", "io", "iostream"), ("oj", "题目", "problem")),
+        ]
+
+        def find_match(keywords: tuple[str, ...]) -> str | None:
+            for candidate in sorted(names, key=lambda n: (len(n), n)):
+                lowered = candidate.lower()
+                if any(keyword.lower() in lowered or keyword in candidate for keyword in keywords):
+                    return candidate
+            return None
+
+        edges: list[tuple[str, str, str]] = []
+        for parent_keywords, child_keywords in rules:
+            parent = find_match(parent_keywords)
+            child = find_match(child_keywords)
+            if parent and child and parent != child:
+                edges.append((parent, child, "semantic"))
+        return edges
+
+    def _graph_edge_specs(self, name_to_node: dict[str, GraphNode], weights: dict[str, int]) -> list[tuple[str, str, str]]:
+        specs: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(parent: str, child: str, kind: str):
+            if parent == child or parent not in name_to_node or child not in name_to_node:
+                return
+            key = (parent, child)
+            reverse = (child, parent)
+            if key in seen or reverse in seen:
+                return
+            seen.add(key)
+            specs.append((parent, child, kind))
+
+        for parent_name in name_to_node:
+            for child_name in error_store.get_dependencies(parent_name):
+                add(parent_name, child_name, "explicit")
+
+        for parent, child, kind in self._semantic_prerequisite_edges(set(name_to_node)):
+            add(parent, child, kind)
+
+        clusters: dict[str, list[str]] = {}
+        for name, node in name_to_node.items():
+            clusters.setdefault(node.cluster, []).append(name)
+
+        for cluster_names in clusters.values():
+            if len(cluster_names) <= 1:
+                continue
+            ordered = sorted(cluster_names, key=lambda name: (-weights.get(name, 1), name))
+            hub = ordered[0]
+            for child in ordered[1:13]:
+                add(hub, child, "cluster")
+
+        return specs
+
+    def _add_graph_cluster_backgrounds(self, clusters: dict[str, list[tuple[str, int]]]):
+        present = [key for key in GRAPH_CLUSTER_ORDER if key in clusters]
+        if not present:
+            self._graph_cluster_centers = {}
+            return
+
+        cols = min(3, max(1, math.ceil(math.sqrt(len(present)))))
+        rows = math.ceil(len(present) / cols)
+        spacing_x = 430.0
+        spacing_y = 320.0
+        self._graph_cluster_centers = {}
+
+        for index, cluster_key in enumerate(present):
+            col = index % cols
+            row = index // cols
+            center = QPointF(
+                (col - (cols - 1) / 2.0) * spacing_x,
+                (row - (rows - 1) / 2.0) * spacing_y,
+            )
+            self._graph_cluster_centers[cluster_key] = center
+
+            label, color = self._cluster_meta(cluster_key)
+            fill = QColor(color)
+            fill.setAlpha(22)
+            stroke = QColor(color)
+            stroke.setAlpha(105)
+
+            bg = QGraphicsRectItem(-185, -122, 370, 244)
+            bg.setPos(center)
+            bg.setZValue(-4)
+            bg.setPen(QPen(stroke, 1.4, Qt.PenStyle.DashLine))
+            bg.setBrush(QBrush(fill))
+            self._graph_scene.addItem(bg)
+            self._graph_cluster_items.append(bg)
+
+            title = QGraphicsTextItem(tr(label))
+            title.setDefaultTextColor(stroke.lighter(150))
+            title.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 12, QFont.Weight.Bold))
+            title.setPos(center.x() - 170, center.y() - 116)
+            title.setZValue(-3)
+            self._graph_scene.addItem(title)
+            self._graph_cluster_items.append(title)
+
+    def _graph_edge_pen(self, kind: str) -> QPen:
+        if kind == "explicit":
+            color = QColor(EDGE_SOLID)
+            color.setAlpha(210)
+            pen = QPen(color, 1.8, Qt.PenStyle.SolidLine)
+        elif kind == "semantic":
+            color = QColor(ACCENT_HOVER)
+            color.setAlpha(175)
+            pen = QPen(color, 1.35, Qt.PenStyle.DashLine)
+        else:
+            color = QColor(TEXT_MUTED)
+            color.setAlpha(95)
+            pen = QPen(color, 1.0, Qt.PenStyle.DotLine)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        return pen
+
+    def _fit_graph_view(self):
+        rect = self._graph_scene.itemsBoundingRect().adjusted(-80, -80, 80, 80)
+        if rect.isValid() and not rect.isEmpty():
+            self._graph_view_widget.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
     def _build_graph(self):
         self._graph_timer.stop()
         self._sim_tick = 0
-        for e, _, _ in self._graph_edges:
+        for e, _, _, _ in self._graph_edges:
             if e.scene() is not None:
                 e.scene().removeItem(e)
         self._graph_edges.clear()
@@ -705,6 +906,8 @@ class KnowledgePage(QWidget):
             if n.scene() is not None:
                 n.scene().removeItem(n)
         self._graph_nodes.clear()
+        self._graph_cluster_items.clear()
+        self._graph_cluster_centers.clear()
         self._graph_scene.clear()
 
         freq = error_store.get_error_frequency()
@@ -726,6 +929,10 @@ class KnowledgePage(QWidget):
             name = kp_item["name"]
             all_names[name] = all_names.get(name, 0) + kp_item.get("count", 1)
 
+        for name in list(all_names):
+            for child_name in error_store.get_dependencies(name):
+                all_names.setdefault(child_name, 1)
+
         if not all_names:
             placeholder = QGraphicsTextItem(tr("No data yet - use OJ Analysis or File Import to build knowledge"))
             placeholder.setDefaultTextColor(QColor(TEXT_PRIMARY))
@@ -737,43 +944,61 @@ class KnowledgePage(QWidget):
         items = sorted(all_names.items(), key=lambda x: -x[1])
         max_w = max(w for _, w in items) if items else 1
 
-        for i, (name, weight) in enumerate(items):
-            angle = (i / max(len(items), 1)) * 2 * math.pi
-            r_base = 180 + random.uniform(-30, 30)
-            x = r_base * math.cos(angle)
-            y = r_base * math.sin(angle)
-            radius = 22 + (weight / max(max_w, 1)) * 35
-            ratio = weight / max(max_w, 1)
-            r = int(200 * ratio)
-            g = int(100 * (1 - ratio))
-            b = int(255 * (1 - ratio))
-            color = QColor(min(r, 255), min(g, 255), min(b, 255))
-            node = GraphNode(x, y, radius, name, color,
-                             on_clicked=self._on_graph_node_clicked)
-            self._graph_scene.addItem(node)
-            self._graph_nodes.append(node)
+        clusters: dict[str, list[tuple[str, int]]] = {}
+        for name, weight in items:
+            clusters.setdefault(self._concept_cluster(name), []).append((name, weight))
+        self._add_graph_cluster_backgrounds(clusters)
+
+        for cluster_key in GRAPH_CLUSTER_ORDER:
+            cluster_items = clusters.get(cluster_key, [])
+            if not cluster_items:
+                continue
+            center = self._graph_cluster_centers.get(cluster_key, QPointF(0, 0))
+            ordered = sorted(cluster_items, key=lambda pair: (-pair[1], pair[0]))
+            local_radius = max(58.0, min(138.0, 34.0 * math.sqrt(len(ordered))))
+            for i, (name, weight) in enumerate(ordered):
+                if i == 0:
+                    x = center.x()
+                    y = center.y() + 8
+                else:
+                    angle = ((i - 1) / max(len(ordered) - 1, 1)) * 2 * math.pi - math.pi / 2
+                    ring = local_radius + (i % 2) * 20.0
+                    x = center.x() + ring * math.cos(angle)
+                    y = center.y() + ring * math.sin(angle) + 8
+                radius = 22 + (weight / max(max_w, 1)) * 35
+                ratio = weight / max(max_w, 1)
+                _label, cluster_color = self._cluster_meta(cluster_key)
+                color = QColor(cluster_color)
+                if ratio > 0.6:
+                    color = color.lighter(125)
+                elif ratio < 0.25:
+                    color = color.darker(115)
+                node = GraphNode(
+                    x, y, radius, name, color,
+                    on_clicked=self._on_graph_node_clicked,
+                    cluster=cluster_key,
+                    weight=weight,
+                )
+                node.anchor = QPointF(center)
+                self._graph_scene.addItem(node)
+                self._graph_nodes.append(node)
 
         name_to_node = {n.label: n for n in self._graph_nodes}
-        seen = set()
-        for parent_name, parent_node in name_to_node.items():
-            for child_name in error_store.get_dependencies(parent_name):
-                child_node = name_to_node.get(child_name)
-                if child_node is None:
-                    continue
-                key = tuple(sorted((parent_name, child_name)))
-                if key in seen:
-                    continue
-                seen.add(key)
-                edge = QGraphicsLineItem(
-                    parent_node.pos().x(), parent_node.pos().y(),
-                    child_node.pos().x(), child_node.pos().y(),
-                )
-                edge.setPen(QPen(QColor(EDGE_SOLID), 1))
-                edge.setZValue(-1)
-                self._graph_scene.addItem(edge)
-                self._graph_edges.append((edge, parent_node, child_node))
+        for parent_name, child_name, kind in self._graph_edge_specs(name_to_node, all_names):
+            parent_node = name_to_node[parent_name]
+            child_node = name_to_node[child_name]
+            edge = QGraphicsLineItem(
+                parent_node.pos().x(), parent_node.pos().y(),
+                child_node.pos().x(), child_node.pos().y(),
+            )
+            edge.setPen(self._graph_edge_pen(kind))
+            edge.setZValue(-1 if kind != "cluster" else -2)
+            self._graph_scene.addItem(edge)
+            self._graph_edges.append((edge, parent_node, child_node, kind))
 
-        self._graph_timer.start(30)
+        QTimer.singleShot(0, self._fit_graph_view)
+        if len(self._graph_nodes) > 1:
+            self._graph_timer.start(30)
 
     def _simulate(self):
         if not self._graph_nodes:
@@ -786,13 +1011,10 @@ class KnowledgePage(QWidget):
             self._sim_tick = 0
             return
 
-        cx = sum(n.pos().x() for n in self._graph_nodes) / len(self._graph_nodes)
-        cy = sum(n.pos().y() for n in self._graph_nodes) / len(self._graph_nodes)
-
-        ideal_dist = 240.0
         for n in self._graph_nodes:
-            n.vx += (cx - n.pos().x()) * 0.003
-            n.vy += (cy - n.pos().y()) * 0.003
+            anchor = n.anchor
+            n.vx += (anchor.x() - n.pos().x()) * 0.010
+            n.vy += (anchor.y() - n.pos().y()) * 0.010
 
         for i, a in enumerate(self._graph_nodes):
             for j, b in enumerate(self._graph_nodes):
@@ -804,10 +1026,12 @@ class KnowledgePage(QWidget):
                 ux = dx / dist
                 uy = dy / dist
 
-                if dist < ideal_dist * 0.7:
-                    f = 300 / (dist * dist)
-                elif dist > ideal_dist * 1.5:
-                    f = -0.0003 * (dist - ideal_dist * 1.5)
+                same_cluster = a.cluster == b.cluster
+                ideal_dist = a.radius + b.radius + (58.0 if same_cluster else 118.0)
+                if dist < ideal_dist:
+                    f = 0.018 * (ideal_dist - dist)
+                elif same_cluster and dist > ideal_dist * 1.7:
+                    f = -0.0025 * (dist - ideal_dist * 1.7)
                 else:
                     f = 0.0
 
@@ -816,11 +1040,13 @@ class KnowledgePage(QWidget):
                 b.vx += f * ux
                 b.vy += f * uy
 
-        for _, parent, child in self._graph_edges:
+        for _, parent, child, kind in self._graph_edges:
             dx = child.pos().x() - parent.pos().x()
             dy = child.pos().y() - parent.pos().y()
             dist = math.hypot(dx, dy) or 1
-            f = 0.002 * dist
+            ideal = 170.0 if kind == "explicit" else 145.0 if kind == "semantic" else 125.0
+            strength = 0.0045 if kind == "explicit" else 0.003 if kind == "semantic" else 0.0018
+            f = strength * (dist - ideal)
             parent.vx += f * dx / dist
             parent.vy += f * dy / dist
             child.vx -= f * dx / dist
@@ -834,13 +1060,14 @@ class KnowledgePage(QWidget):
             n.vy *= 0.92
             n.setPos(n.pos().x() + n.vx, n.pos().y() + n.vy)
 
-        for edge, p, c in self._graph_edges:
+        for edge, p, c, _kind in self._graph_edges:
             edge.setLine(p.pos().x(), p.pos().y(), c.pos().x(), c.pos().y())
 
         total_v = sum(abs(n.vx) + abs(n.vy) for n in self._graph_nodes)
         if total_v < 0.5:
             self._graph_timer.stop()
             self._sim_tick = 0
+            self._fit_graph_view()
 
     def retranslate_ui(self):
         self._header_label.setText(tr("Knowledge Base"))

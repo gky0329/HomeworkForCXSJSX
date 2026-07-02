@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 SCENE_W = 1000
 SCENE_H = 1200
+OJ_ANALYSIS_TOKEN_MULTIPLIER = 16
 
 CARD = (
     f"QFrame#ojCard {{ background-color: {SURFACE}; border: 2px solid {BORDER}; "
@@ -79,6 +80,7 @@ class OJWorker(QThread):
             raw = asyncio.run(service.chat_json(
                 system_prompt=OJ_SYSTEM_PROMPT,
                 user_message=user_msg,
+                max_tokens=service.max_tokens * OJ_ANALYSIS_TOKEN_MULTIPLIER,
             ))
             data = json.loads(raw)
             trace = ExecutionTrace.model_validate(data)

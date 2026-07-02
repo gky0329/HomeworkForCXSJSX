@@ -4,13 +4,14 @@ from pathlib import Path
 
 import yaml
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
 )
 
 from app.services.ai_service import DEFAULT_PROVIDERS
 from app.services.i18n import LANGUAGE_LABELS, get_language, load_language, tr
 from app.ui.theme.colors import TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
+from app.ui.theme.manager import THEME_LABELS, normalize_theme
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +137,32 @@ class ApiKeyDialog(QDialog):
         self._language_combo.setStyleSheet(combo_style)
         self._add_labeled_widget(layout, tr("Language"), self._language_combo, label_style)
 
+        self._theme_combo = QComboBox()
+        for value, label_key in THEME_LABELS.items():
+            self._theme_combo.addItem(tr(label_key), value)
+        active_theme = normalize_theme(self._config.get("ui", {}).get("theme", "mc"))
+        theme_index = self._theme_combo.findData(active_theme)
+        if theme_index >= 0:
+            self._theme_combo.setCurrentIndex(theme_index)
+        self._theme_combo.setStyleSheet(combo_style)
+        self._add_labeled_widget(layout, tr("UI Theme"), self._theme_combo, label_style)
+
         self._font_spin = QSpinBox()
         self._font_spin.setRange(8, 32)
         self._font_spin.setValue(int(self._config.get("ui", {}).get("code_font_size", 14)))
         self._font_spin.setStyleSheet(input_style.replace("QLineEdit", "QSpinBox"))
         self._add_labeled_widget(layout, tr("Code Font Size"), self._font_spin, label_style)
+
+        debugger_cfg = self._config.get("debugger", {})
+        self._pdb_check = QCheckBox(tr("Enable experimental MSVC/PDB native debugger"))
+        self._pdb_check.setChecked(bool(debugger_cfg.get("enable_experimental_pdb", False)))
+        layout.addWidget(self._pdb_check)
+        pdb_hint = QLabel(
+            tr("Requires Windows, Visual Studio Build Tools, and Windows Debugging Tools.")
+        )
+        pdb_hint.setWordWrap(True)
+        pdb_hint.setStyleSheet(hint_style)
+        layout.addWidget(pdb_hint)
 
         btn_layout = QHBoxLayout()
         cancel_btn = QPushButton(tr("Cancel"))
@@ -195,6 +217,7 @@ class ApiKeyDialog(QDialog):
         api_base = self._base_input.text().strip()
         proxy = self._proxy_input.text().strip()
         language = str(self._language_combo.currentData() or "en")
+        theme = normalize_theme(self._theme_combo.currentData() or "mc")
         font_size = self._font_spin.value()
 
         try:
@@ -223,6 +246,10 @@ class ApiKeyDialog(QDialog):
             ui_cfg = cfg.setdefault("ui", {})
             ui_cfg["code_font_size"] = font_size
             ui_cfg["language"] = language
+            ui_cfg["theme"] = theme
+
+            debugger_cfg = cfg.setdefault("debugger", {})
+            debugger_cfg["enable_experimental_pdb"] = self._pdb_check.isChecked()
 
             with open(self._config_path, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
@@ -251,7 +278,8 @@ class ApiKeyDialog(QDialog):
 
 
 def show_api_key_dialog(parent=None) -> bool:
-    dialog = ApiKeyDialog(parent)
+    config_path = getattr(parent, "_config_path", None)
+    dialog = ApiKeyDialog(parent, config_path=config_path)
     return dialog.exec() == QDialog.DialogCode.Accepted
 
 

@@ -94,6 +94,7 @@ class StackItem(QGraphicsRectItem):
     VAR_HEIGHT = 22
     PADDING = 8
     MIN_WIDTH = 160
+    OBJECT_SECTION_GAP = 8.0
 
     def __init__(self, frame: StackFrame, on_item_moved=None):
         super().__init__()
@@ -228,6 +229,13 @@ class StackItem(QGraphicsRectItem):
             except Exception:
                 pass
 
+        section_end_ids = {
+            id(items[-1])
+            for section in self._object_sections
+            for items in [section.get("items")]
+            if isinstance(items, list) and items
+        }
+
         # Recompute vertical layout based on actual document heights
         y = self.TITLE_HEIGHT
         for item in self._layout_items:
@@ -241,6 +249,8 @@ class StackItem(QGraphicsRectItem):
                 h = self.VAR_HEIGHT
             item.setPos(item.pos().x(), y)
             y += max(h, self.VAR_HEIGHT) + 4
+            if id(item) in section_end_ids:
+                y += self.OBJECT_SECTION_GAP
 
         self._layout_array_cells()
 
@@ -318,6 +328,12 @@ class StackItem(QGraphicsRectItem):
         if var.base_classes and derived_members:
             y += 16
         y += 18 * len(derived_members)
+        section_count = (
+            len(base_subobjects(var.base_classes, var.members))
+            + (1 if rows else 0)
+            + (1 if var.base_classes and derived_members else 0)
+        )
+        y += section_count * self.OBJECT_SECTION_GAP
         return y
 
     def _function_object_height(self, var: Variable, y_offset: float) -> float:

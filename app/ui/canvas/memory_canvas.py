@@ -25,7 +25,7 @@ class MemoryCanvas:
         self._address_to_item: dict[str, object] = {}
         self._edge_by_source: dict[str, list[EdgeItem]] = {}
         self._edge_by_target: dict[str, list[EdgeItem]] = {}
-        self._next_layout_frame: int = 0
+        self._next_layout_frame: int = 1
         self._position_cache: dict[tuple[str, str, int], QPointF] = {}
         self._heap_index_cache: list[QPointF] = []
         self._heap_column_x = HEAP_ITEM_X
@@ -46,7 +46,7 @@ class MemoryCanvas:
         self._heap_index_cache.clear()
         self._heap_column_x = HEAP_ITEM_X
         self._stable_fit_bounds = QRectF()
-        self._next_layout_frame = 0
+        self._next_layout_frame = 1
 
     def prepare_trace_layout(self, states: list[MemoryState]):
         """Precompute a stable viewport and heap column for one execution trace."""
