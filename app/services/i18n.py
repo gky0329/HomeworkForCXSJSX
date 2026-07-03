@@ -258,6 +258,15 @@ TRANSLATIONS = {
         "C++ Header": "C++ 头文件",
         "File Import Error": "文件导入错误",
         "{ext} File": "{ext} 文件",
+        "Export Markdown": "导出 Markdown",
+        "Export Anki Deck": "导出 Anki 牌组",
+        "Markdown Files": "Markdown 文件",
+        "Anki Deck": "Anki 牌组",
+        "No review cards to export.": "没有可导出的复习卡片。",
+        "No knowledge notes to export.": "没有可导出的知识笔记。",
+        "Markdown exported: {path}": "Markdown 已导出：{path}",
+        "Anki deck exported: {path}": "Anki 牌组已导出：{path}",
+        "Export failed": "导出失败",
     }
 }
 
