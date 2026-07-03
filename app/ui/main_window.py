@@ -882,6 +882,8 @@ class MainWindow(QMainWindow):
         self._tabs.setTabText(self._review_tab_index, tr("Review"))
         self._tabs.setTabText(self._kb_tab_index, tr("Knowledge Base"))
         self._settings_btn.setText(tr("Settings"))
+        if hasattr(self, "home_page"):
+            self.home_page.retranslate_ui()
         if self._code_tab is None:
             return
         self.btn_run.setText(tr("Run"))
@@ -889,10 +891,29 @@ class MainWindow(QMainWindow):
         self.btn_next.setText(tr("Next"))
         self.btn_reset.setText(tr("Reset"))
         self.btn_canvas_fullscreen.setToolTip(tr("Fullscreen Canvas (F11)"))
+        self.btn_prev_big.setText(f"< {tr('Prev Step')}")
+        self.btn_next_big.setText(f"{tr('Next Step')} >")
+        self.btn_autoplay.setText(tr("Auto Play"))
+        self._speed_label.setText(tr("speed"))
         self.auto_fit_check.setText(tr("Auto Fit"))
+        self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
         self.stdin_label.setText(tr("Program Input (stdin)"))
         self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
-        self.step_label.setText(tr("Ready") if "Ready" in self.step_label.text() or "就绪" in self.step_label.text() else self.step_label.text())
+        self._overlay_label.setText(tr("Analyzing code..."))
+        self._overlay_cancel_btn.setText(tr("Cancel"))
+        self.step_label.setText(tr("Ready"))
+        self.statusBar().showMessage(tr("Ready - Enter C++ code and click Run"))
+        if hasattr(self, "oj_page"):
+            self.oj_page.retranslate_ui()
+        if hasattr(self, "file_page"):
+            self.file_page.retranslate_ui()
+        if hasattr(self, "review_page"):
+            self.review_page.retranslate_ui()
+        if hasattr(self, "knowledge_page"):
+            self.knowledge_page.retranslate_ui()
+        if hasattr(self, "tracker_panel"):
+            self.tracker_panel.retranslate_ui()
+        self.set_step_info(0, 0)
 
     def _setup_statusbar(self):
         self.setStatusBar(QStatusBar())
