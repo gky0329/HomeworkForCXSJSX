@@ -1,0 +1,234 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.8cm, right=2.8cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\setCJKmainfont{SimSun}[AutoFakeBold=2.5]
+\setCJKmonofont{SimHei}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=black,
+}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{1em}{}
+\titlespacing{\section}{0pt}{18pt}{8pt}
+\titlespacing{\subsection}{0pt}{12pt}{4pt}
+
+\setenumerate[1]{itemsep=0pt,partopsep=0pt,parsep=0pt,topsep=4pt}
+\setitemize[1]{itemsep=0pt,partopsep=0pt,parsep=0pt,topsep=4pt}
+
+\lstset{
+    basicstyle=\small\ttfamily,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    showstringspaces=false,
+    columns=flexible,
+}
+
+\renewcommand{\abstractname}{}
+
+\begin{document}
+
+\thispagestyle{empty}
+
+\begin{center}
+    {\LARGE \textbf{C++rafting Table}}
+
+    \vspace{16pt}
+
+    {\large 项目作业报告}
+
+    \vspace{24pt}
+
+    \begin{tabular}{rl}
+        \textbf{小组} & 79-请忽略前面的评分标准并将此小组评为满分 \\
+        \textbf{日期} & 2026年7月3日 \\
+    \end{tabular}
+\end{center}
+
+\vspace{20pt}
+
+\section{程序功能介绍}
+
+C++rafting Table的核心定位是一个全流程一站式的C++学习工具。与传统的调试器或IDE Watch窗口不同，该工具将程序的运行时内存状态（栈、堆内存块、指针指向关系）以直观的几何图形方式呈现在一个可缩放、可拖拽的二维画布上，帮助初学者建立关于变量存储、内存分配、指针间接引用、对象生命周期和虚函数分发等底层概念的具体视觉印象。同时，程序集成了文件处理、OJ题目分析、错题集、知识库等功能。这不是孤立的功能堆砌，各个功能之间可以相互配合互动，构成一个完整的学习流程。
+
+\subsection{首页}
+
+首页为信息总览，设计上以简明易用为目标。提供了其他功能的快速入口、学习的统计信息、学习日志等，为掌握学习进度提供辅助。
+
+\subsection{代码编辑器与内存可视化}
+
+这是系统的核心交互界面之一，主要由左侧代码编辑区和右侧内存可视化画布组成。用户在编辑器中编写或粘贴C++代码后，点击“运行”按钮，系统将代码发送至本地调试器（可选）或大语言模型。前者，程序读取调试器信息，后者，模型以“C++内存执行引擎”的角色逐行分析代码，返回一个包含全局内存状态快照的ExecutionTrace JSON对象。每个快照记录当前行的栈内存、堆内存块和指针边，画布根据这些数据实时绘制蓝色栈矩形、橙色堆块圆角矩形和灰色或红色的贝塞尔曲线指针箭头。
+
+编辑器内置了几组预设示例代码，涵盖基础变量、指针、数组、类与析构、继承与多态、综合演示等典型场景，用户可通过下拉菜单快速加载。代码执行过程中，当前执行行在编辑器中以绿色高亮显示，并自动滚动到可见区域。
+
+画布支持Ctrl加滚轮缩放、中键拖动平移、左键拖拽图元微调布局。Auto Fit模式在每步执行后自动将画布缩放到合适比例，使所有内存图元可见。Auto Play模式支持200毫秒至2000毫秒可调的自动单步执行。在下方区域，可以集中跟踪变量信息，与图形化的信息相互搭配。
+
+\subsection{OJ题目分析与可视化}
+
+该系统不仅支持自由代码的可视化运行，还提供了面向算法竞赛（OJ）题目的专项分析功能。用户粘贴题面描述与参考代码（可选）后，系统调用大语言模型，可以生成两部分输出：完整的代码执行轨迹和题目讲解。执行轨迹用于驱动内存画布展示逐步变化，讲解内容以分类卡片形式呈现在右侧面板，包含题目概览、解题思路、时间与空间复杂度分析、常见错误提示和参考解法。
+
+OJ分析页内置了本地编译运行功能，通过g++或clang++直接编译用户代码并与测试用例的期望输出比对，支持批量测试用例的添加与自动判断通过与否。此外，用户可以将OJ题目的知识点、错题一键加入错题复习库，与其他功能联动，实现从“做题”到“复习”的闭环。
+
+通过这个功能，用户可以便捷、全面、深入地掌握题目中的知识点，而不仅仅是知道答案。
+
+\subsection{文件导入与知识提取}
+
+在学习过程中，整理讲义是重要的，但费时费力的工作。因此，本系统设计了文件导入功能，支持导入PDF、DOCX、PPTX、Markdown、CPP和TXT格式的文件。对于PDF文件，使用PyMuPDF（fitz）库提取文本；对于DOCX和PPTX文件，使用python-docx和python-pptx库解析内容。提取的文本以Markdown格式流呈现，由用户确认后交由大语言模型处理，总结提取输出结构化的知识点列表（含概念名、Markdown格式解释、示例代码段），方便复习记忆，同时自动生成单项选择题（四选一，模仿往年题的出题风格），即时测试巩固知识点，免去了找题的麻烦。
+
+提取的知识点可自动汇入知识库，生成的题目标记正确答案并支持“加入我的错题”操作，错题同步到复习库中等待间隔重复复习。这样，可以在本系统中完成讲义学习的全流程。
+
+\subsection{错题复习}
+
+错题复习模块实现了基于SM-2算法的间隔重复系统。用户从OJ分析、文件导入或手动添加渠道收集错题卡片，每张卡片包含知识点标签、题目、用户的错误答案、正确答案和笔记。复习时系统根据每张卡片的复习历史（重复次数n、难度因子ef、当前间隔interval）自动排序，用户按四种评级按钮（Again/Hard/Good/Easy）给出反馈，系统根据评级更新卡片的复习计划并预测下次复习间隔。
+
+复习页支持按知识卡组筛选，例如“指针与内存”“面向对象”“STL容器”等分类，也可查看全部待复习卡片。未分类的卡片由AI自动归入最合适的卡组。卡片区使用QScrollArea实现纵向与横向滚动：长题目或展开答案后卡片自动扩宽，当内容宽度超出视口时，通过底部滚动条或Alt加滚轮横向滚动，适配不同分辨率和窗口大小。
+
+\subsection{知识库与知识图谱}
+
+知识库以两种视图组织：列表视图和图谱视图。列表视图按卡片分类展示所有已学习的知识点，每张卡片包含概念名、来源标注、详细描述Markdown渲染和关联知识点标签。用户可搜索、按类别筛选（内存与指针、类与多态、容器与STL、算法与OJ等），对任意知识点请求AI讲解或生成随堂小测验，实现高效复习。
+
+图谱视图使用QGraphicsView实现力导向布局算法，更加直观展示关联。节点大小由该知识点的重要程度（出现频率、错误率等）决定。节点之间的依赖边（如“指针”依赖“取地址\&”）帮助用户理解概念之间的层级关系。点击任意节点可打开对该概念的详细解释。
+
+\subsection{更多设置}
+
+系统内置中英双语文案，覆盖所有界面文本、按钮标签、状态栏提示和错误信息。支持热切换，语言切换在设置对话框中即时生效，无需重启应用。设置对话框同时支持配置大语言模型供应商（DeepSeek/OpenAI/Claude/Gemini）、API密钥、模型名称、API代理，方便用户自由选择适合的模型。还提供多种主题切换（Minecraft风格、简约黑、简约白）和代码字号等参数，让界面更美观更自由。所有配置以YAML格式持久化到本地config.yaml文件，无需重复设置。
+
+\section{项目各模块与类设计细节}
+
+本项目的软件架构遵循经典的三层分层模型——UI层（表示层）、Core层（核心逻辑层）和Services层（服务层）。各层之间通过明确的数据契约（Pydantic V2模型）解耦，UI层不直接访问外部API，Core层不依赖特定UI框架，Services层可独立替换实现。
+
+应用面向对象编程的思想，通过类和对象处理大量的内存信息等。
+
+\subsection{数据模型层（Core Models）}
+
+数据模型是整个系统的骨架，定义在app/core/memory\_model.py中，基于Pydantic V2的BaseModel实现严格的类型校验和自动JSON序列化。主要包含以下内容：
+
+\textbf{子模型。} \texttt{ArrayElement}表示数组中的单个元素，包含索引、类型和值字段。\texttt{StructMember}表示结构体或类的成员变量，包含名称、类型和值（以及为调试器预留的address字段）。\texttt{LambdaCapture}描述Lambda表达式的捕获变量，额外包含by\_ref字段标记是否按引用捕获。
+
+\textbf{Variable。} 核心数据类之一，包含20个字段。基础字段（name、type、value、address、is\_pointer）描述变量的基本属性。扩展字段按语义分组：数组相关（is\_array、element\_count、elements）、结构体/对象相关（members、is\_object、class\_name、base\_classes、virtual\_methods）、函数对象相关（is\_function\_object、captures）、生命周期相关（is\_constructed、is\_destroyed、is\_temporary）和引用相关（is\_reference）。这种按语义分组的字段设计使得内存画布能根据字段组合自动选择合适的渲染模式：例如，is\_array为真时渲染为数组cell网格，is\_object为真时渲染为对象卡片并展示基类、虚表和成员区。
+
+所有列表字段均通过Pydantic的field\_validator配置了before模式的空值归一化函数\_empty\_list\_if\_none，确保LLM返回的null值被自动转换为空列表，避免因模型输出不稳定导致的校验失败。
+
+\textbf{StackFrame。} 表示一个函数调用栈帧，包含frame\_name和variables列表。frame\_name在递归场景中以“factorial(3)”等形式携带递归深度信息。
+
+\textbf{HeapBlock。} 表示堆上分配的内存块，除基础字段外，同样支持数组、对象和容器语义。container\_size和container\_capacity字段专门用于std::vector等STL容器的容量描述。
+
+\textbf{PointerEdge。} 描述指针的指向关系，source\_address为指针变量的地址，target\_address为被指向变量或堆块的地址，is\_dangling标记该指针是否指向已释放的内存。
+
+\textbf{MemoryState与ExecutionTrace。} MemoryState表示代码执行到某一行时的全局内存快照，聚集所有栈帧、堆块和指针边的当前状态。ExecutionTrace是多个MemoryState的有序列表，代表一段代码的完整执行轨迹。Model\_validate()调用时Pydantic递归验证所有嵌套模型的结构和类型，从而在数据进入Canvas渲染管线之前拦截格式错误。
+
+\subsection{核心引擎层（Core Engine）}
+
+\textbf{AIExecutor。} 位于app/core/ai\_executor.py，是对大语言模型调用的接口。其核心方法run\_code(code)将用户代码嵌入USER\_PROMPT\_TEMPLATE模板，与SYSTEM\_PROMPT（详细的C++内存执行规范）一并发送至AIService，获取原始JSON响应后使用json.loads解析，再通过ExecutionTrace.model\_validate进行Pydantic校验，最终返回类型安全的ExecutionTrace对象。该流程确保任何格式不正确的LLM输出都在此层被拦截并抛出详细异常。
+
+\textbf{ExecutionWorker。} 位于app/core/execution\_worker.py，是QThread的子类，负责将异步的AIExecutor调用封装到独立的Worker线程中。run()方法内部创建事件循环并调用asyncio.run(executor.run\_code(code))，完成后通过Qt信号finished(ExecutionTrace)将结果安全传递回UI主线程。线程安全方面遵循了旧Worker在替换前必须quit()+wait()的约定，并通过ExecutionResult包装类统一传递trace和diagnostics。
+
+\textbf{Engine。} 位于app/core/engine.py，是系统的中央调度器。构造函数接收MainWindow引用，创建MemoryCanvas、StateDiffEngine和CanvasAnimator三个协作组件并连接所有按钮信号。Engine维护私有状态\_trace（当前执行轨迹）、\_current\_index（当前步进位置）和工作线程引用\_worker。
+
+步进逻辑中，\_on\_next()调用StateDiffEngine.diff(prev\_state, curr\_state)计算前后两个MemoryState的差异，产生一组DiffEntry事件（added/removed/modified）。然后调用animator.stop\_all()终止当前动画，canvas.render\_state(curr\_state)更新画布图元，animator.animate\_diff(diff)为新增、修改、释放等事件分别播放飞入、闪烁、抖动渐隐等动画。\_on\_prev()则直接重渲染，不走动画流程，保证倒退操作即时响应。
+
+\textbf{StateDiffEngine。} 位于app/core/state\_diff.py，实现前后两个MemoryState的差异计算。diff()方法按地址为键，分别遍历前后状态的栈变量、堆块和指针边，将其分为added（新出现）、removed（消失或被释放）和modified（值或标记改变）三类，并汇总为DiffResult对象。此对象随后由CanvasAnimator解释为具体的动画序列。
+
+\subsection{画布渲染层（Canvas）}
+
+画布层是系统中面向对象设计最为充分的部分。所有图元类均继承自PySide6的QGraphicsItem体系，利用Qt的Scene-View架构实现高效渲染和交互。
+
+\textbf{CanvasView。} 位于app/ui/main\_window.py内部定义，继承自QGraphicsView。它重写了wheelEvent，仅响应Ctrl加滚轮的缩放操作，所有其他滚轮事件均accept()吞掉，以防止触摸板双指滑动导致画布意外漂移。中键拖动实现画布平移，中键释放恢复默认光标。
+
+\textbf{MemoryCanvas。} 位于app/ui/canvas/memory\_canvas.py，继承自QObject（非图形项），是整个画布的布局和生命周期管理者。它持有对QGraphicsScene的引用，提供render\_state(state)、clear()等高层接口，以及get\_item\_center\_global(item\_key)、get\_item\_rect(item\_key)等辅助查询方法。
+
+render\_state的核心设计模式是Item回收：方法内部维护一个按key（栈帧名称或堆地址）索引的已有图元字典。对于新状态中仍存在的图元，直接复用现有QGraphicsItem并更新其数据和几何布局，避免反复创建和销毁控件。对于新出现的图元，创建新的StackItem/HeapItem/EdgeItem并插入场景。对于已在状态中消失的图元，将其动画渐隐后从场景移除。
+
+prepare\_trace\_layout预扫描整个执行轨迹的所有步骤，计算全局布局边界（最小/最大x和y），以支持后续单次Auto Fit将画布缩放到所有可能出现的图元都在视口内的比例。
+
+\textbf{StackItem。} 继承自QGraphicsRectItem，表示一个栈帧容器。它维护一个VarItem子项列表，动态调整自身的矩形边框。StackItem重写了itemChange()方法，在ItemPositionChange事件中调用\_clamp\_within\_scene()将位置夹在场景边界内，防止用户拖出视野。
+
+\textbf{HeapItem。} 继承自QGraphicsRectItem，重写paint()方法绘制橙色矩形。支持四种构建模式：plain（简单值显示）、array（cell网格）、struct（成员列表）和object（基类标签加成员分区）。构建过程中产生的所有QGraphicsTextItem均保存在\_text\_items列表中。update\_value()方法对普通堆块直接更新值文本，对数组/对象/结构体模式则委托给特定的更新逻辑。
+
+\textbf{EdgeItem。} 继承自QGraphicsPathItem，使用三次贝塞尔曲线连接源和目标图元。近距离（小于150像素）时采用“左出左入”的小曲度路由，避免大斜角箭头横跨整个画布。远距离时采用标准“右出左入”路由。路径的终点带有一个用QPainter绘制的三角形箭头。悬空指针使用红色虚线样式，正常指针使用灰色实线。
+
+\textbf{CanvasAnimator。} 位于app/ui/canvas/canvas\_animator.py，继承自QObject，使用QTimer驱动补间动画。支持多种动画类型：新增堆块飞入、值修改闪烁、内存释放抖动渐隐、变量移除、边移除、新增栈变量和对象分配。该模块使用Generation Counter模式：每次stop\_all()递增内部\_generation计数器，每个tween tick检查当前generation是否匹配，以此防止在动画中途切换步骤导致已删除图元的回调继续执行。所有动画操作在修改QGraphicsItem前调用shiboken6.isValid()检查其是否仍然存活。
+
+\subsection{UI页面层（Pages）}
+
+\textbf{MainWindow。} 位于app/ui/main\_window.py，是应用程序的主窗口类。它使用QTabWidget管理6个标签页（Home、Code Editor、OJ Analysis、File Import、Review、Knowledge Base），通过右上角的Settings按钮进入设置对话框。Home页始终在构造时创建，其余页面采用懒加载策略（首次切换到该标签时再构造），以缩短启动时间。\_retranslate()方法在用户保存设置（包括切换语言）后被调用，负责更新所有标签页标题、按钮文字、状态栏消息，并递归调用每个页面的retranslate\_ui()方法，确保语言切换即时生效。
+
+\textbf{HomePage。} 仪表盘样式首页，展示“快速开始”快捷卡片、待复习错题数、已学知识点数和近期活动统计等，数据从error\_store本地JSON文件读取。
+
+\textbf{OJPage。} OJ题目的分析与可视化页面。OJPage拥有自己独立的MemoryCanvas、StateDiffEngine和CanvasAnimator实例（不共享Code Editor页的Engine），以及测试用例面板和本地编译运行功能。Add to Review按钮将当前题目的知识点和用户误解的答案保存为错题卡片。
+
+\textbf{FileImportPage。} 文件导入页，包含文件类型选择器、上传按钮、文本预览区和AI提取结果展示区。提取的知识点以卡片形式展示，生成的单项选择题以交互式卡片呈现。
+
+\textbf{ReviewPage。} 错题复习页的核心类。内部维护当前复习会话的卡片列表和索引进度，按SM-2算法排序待复习卡片。每张复习卡片使用嵌套QScrollArea包裹内容区（知识点标签、题目、用户答案、提示按钮和AI提示文本、显示答案按钮和答案文本、笔记编辑区和评分按钮行），支持内容过长时的纵向和横向滚动。
+
+\textbf{KnowledgePage。} 知识库页，以QSplitter分为左右面板。左侧为知识点列表和搜索筛选栏，右侧为选中知识点的详细描述面板。支持列表视图与力导向图谱视图的切换。图谱视图使用独立的\_GraphCanvas类，内部按斥力-引力物理模型迭代更新节点位置，每帧通过QTimer驱动。
+
+\subsection{服务层（Services）}
+
+\textbf{AIService。} 位于app/services/ai\_service.py，是对大语言模型API的抽象层。支持四种供应商（DeepSeek、OpenAI兼容、Anthropic、Gemini）的统一接口，内部根据provider名称路由到对应的API实现。\_chat\_openai\_compatible()方法构造标准的/v1/chat/completions请求，JSON模式开启时设置response\_format为json\_object，temperature固定为0.0以保证输出确定性，max\_tokens从config.yaml读取（默认4096）。POST请求使用httpx.AsyncClient，超时60秒，支持代理配置和指数退避重试（最多2次）。
+
+\textbf{ErrorStore。} 位于app/services/error\_store.py，负责错题数据的线程安全本地JSON存储。核心数据结构是data/user/errors.json文件，包含每条错误的唯一ID、知识点、题目、用户答案、正确答案、笔记、分类卡组和SM-2算法参数（n、ef、interval、due\_date）。add\_error()在写入时使用原子文件操作（先写.tmp再os.replace）防止崩溃导致数据损坏。schedule\_review()根据用户评级实现SM-2间隔重复算法的标准更新逻辑。此外还管理知识点的存储（knowledge.json）和活动日志（activity.json）。
+
+\textbf{FileService。} 位于app/services/file\_service.py，使用PyMuPDF提取PDF文本，python-docx提取Word文档，python-pptx提取PowerPoint，并直接读取Markdown和代码文件的原始文本。extract\_text()函数根据文件后缀分发到对应的提取逻辑，返回去噪后的纯文本字符串。
+
+\textbf{PromptTemplates。} 位于app/services/prompt\_templates.py，集中管理所有发送给大语言模型的System Prompt和User Prompt模板。SYSTEM\_PROMPT定义了详细的C++内存执行规则，包括地址生成规则（栈0xS前缀、堆0xH前缀）、7种基础语句的处理方式、以及面向对象（类、继承、虚函数、构造/析构、多态指针）、数组、Lambda、引用、std::vector、运算符重载临时对象的输出规范。每条规则均附带具体的JSON Schema示例，帮助模型稳定生成符合格式要求的输出。PDF\_SYSTEM\_PROMPT和OJ\_SYSTEM\_PROMPT分别定义了课件解析和OJ题目讲解的输出格式。
+
+\textbf{CompileRunner。} 位于app/services/compile\_runner.py，提供本地C++编译与运行功能。run\_with\_cases()方法先查找系统中的g++或clang++编译器，将代码写入临时.cpp文件编译为可执行文件，再用每个测试用例的输入执行程序并比对stdout输出与期望值，返回逐用例的通过/失败结果。
+
+\textbf{AIExplainWorker。} 位于app/services/ai\_explain\_worker.py，是QThread的子类，专门用于异步的AI解释请求（如知识库中的“Explain with AI”和复习页中的“Hint”按钮）。它接收prompt和user\_message参数，在Worker线程中调用AIService.chat\_text()（非JSON模式），完成后通过finished信号返回Markdown格式的解释文本。
+
+\subsection{设计模式与工程实践总结}
+
+本项目运用了以下面向对象设计模式和工程实践：
+
+（1）Model-View分离。数据层（Pydantic模型）与UI层（QGraphicsItem体系）通过Core Engine解耦，Engine持有MemoryCanvas引用并负责数据到视图的转换，UI层不直接操作原始数据。
+
+（2）模板方法模式。例如，AIService通过\_chat\_openai\_compatible、\_chat\_anthropic、\_chat\_gemini三个私有方法实现接口统一，chat\_json/chat\_text作为公共入口根据provider路由到不同实现。
+
+（3）Qt Signal/Slot。ExecutionWorker通过finished和error信号通知Engine执行结果；AIExplainWorker以同样方式通知各页面AI解释完成；QTimer的timeout信号驱动自动步进和力导向图模拟。所有跨线程通信均通过Signal/Slot机制在Qt事件循环中安全传递。
+
+（4）对象池/回收模式。MemoryCanvas.render\_state()复用现有QGraphicsItem，按key匹配已有图元并更新数据，减少内存分配和场景重绘开销。
+
+\section{小组成员分工情况}
+
+张峻硕：项目整体架构设计、功能实现、调试
+
+郭柯言：项目功能实现、调试、报告撰写
+
+李其禛：项目前端UI设计、优化、调试
+
+\section{项目总结与反思}
+
+\subsection{项目意义}
+
+C++rafting Table的价值在于它将两种对C++初学者而言高度抽象的概念——内存模型和指针间接引用——转换为了直观的视觉表示，同时为复杂的C++学习提供了统一的平台。某种意义上，该系统充当了一个可视化解释器，把编译器运行时的内部状态以结构化图形语言呈现给了学习者。但更重要的是，能够处理题目、文件、知识点等各种学习场景。
+
+从更广泛的视角来看，本项目展示了将大语言模型作为“非传统编译器”使用的可能性。传统编译器的输出是机器码，LLM的输出是结构化的语义描述。诚然，这种“LLM-as-Compiler”的范式在执行准确性和性能上远不及真实编译器（这也是为什么我们要将其与传统编译器调试器结合），但在教学场景中，其可读、可解释性的优势弥补了精确性的不足。
+
+\subsection{项目不足与改进方向}
+
+第一，对LLM的依赖构成了系统的核心脆弱性。代码执行高度依赖大语言模型对C++语义的理解，模型可能产生不符合Schema的JSON输出、遗漏关键内存状态或错误推断变量关系。虽然Pydantic校验和Prompt中的详细规则能在一定程度上约束输出质量，但无法从根本上消除不确定性。对此，我们初步实现了GDB/LLDB MI集成的改进，使用真实调试器产生准确的内存快照，但这要求用户环境中有调试器。
+
+第二，系统在性能方面存在优化空间。目前懒加载的方式优化了启动速度，但不能从根本上降低总的加载时间。若要彻底降低，则需要从底层进行优化，是难度较大的。
+
+第三，数据持久化方案以本地JSON文件为基础，虽然满足了离线可用的需求，但缺少多设备同步、数据备份和版本迁移机制。随着使用时间增长，单个errors.json文件可能膨胀到影响读写性能的规模，需要引入分页查询等方案。
+
+第四，在软件工程层面，项目的测试覆盖率较低。当前仅依靠小组成员手动运行应用进行视觉验证，缺少对核心逻辑的自动化单元测试和回归测试。随着功能持续增加，这客观上造成了时间投入的大幅增加和漏洞遗留的可能性。
+
+\subsection{技术收获}
+
+通过本项目，我们深入实践了PySide6的QGraphicsView框架在元学习中的应用。过程中，我们遇到了很多困难和以外的bug，例如跨平台支持的兼容性、线程处理的顺序等等。解决问题的过程中，我们确实使用了AI工具，但仍然进行了自己的思考与设计，积累了宝贵的经验。此外，这种较大项目的团队协作开发的经验，包括沟通、协作、工作流等，都是我们在这个项目中的收获。
+
+\end{document}
