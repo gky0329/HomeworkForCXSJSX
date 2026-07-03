@@ -2,11 +2,13 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QTextEdit, QDialog, QLineEdit,
     QDialogButtonBox, QComboBox, QSizePolicy, QScrollArea,
+    QFileDialog, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QTextDocument, QIcon
 
 from app.services import error_store
+from app.services import export_service
 from app.services.ai_explain_worker import AIExplainWorker, HINT_PROMPT
 from app.services.i18n import tr
 from app.ui.widgets.helpers import mlabel, clear_layout
@@ -156,6 +158,16 @@ class ReviewPage(QWidget):
         self._add_btn.setIconSize(QSize(18, 18))
         self._add_btn.clicked.connect(self._on_add_error)
         header.addWidget(self._add_btn)
+
+        self._export_md_btn = QPushButton(tr("Export Markdown"))
+        self._export_md_btn.setProperty("variant", "secondary")
+        self._export_md_btn.clicked.connect(self._export_markdown)
+        header.addWidget(self._export_md_btn)
+
+        self._export_anki_btn = QPushButton(tr("Export Anki Deck"))
+        self._export_anki_btn.setProperty("variant", "secondary")
+        self._export_anki_btn.clicked.connect(self._export_anki)
+        header.addWidget(self._export_anki_btn)
 
         layout.addLayout(header)
 
@@ -638,6 +650,57 @@ class ReviewPage(QWidget):
             self._populate_deck_combo()
         self._load_cards()
 
+    def _export_cards(self) -> list[dict]:
+        cards = error_store.get_errors()
+        if self._current_deck:
+            cards = [card for card in cards if card.get("deck", "") == self._current_deck]
+        return cards
+
+    def _export_markdown(self):
+        cards = self._export_cards()
+        if not cards:
+            QMessageBox.information(self, tr("Export Markdown"), tr("No review cards to export."))
+            return
+        default_base = export_service.safe_filename(self._current_deck, "review_cards")
+        default_name = "review_cards.md" if not self._current_deck else f"{default_base}_review_cards.md"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("Export Markdown"),
+            default_name,
+            f"{tr('Markdown Files')} (*.md);;{tr('All Files')} (*)",
+        )
+        if not path:
+            return
+        try:
+            export_service.write_review_markdown(path, cards, self._current_deck)
+            QMessageBox.information(self, tr("Export Markdown"), tr("Markdown exported: {path}", path=path))
+        except Exception as exc:
+            QMessageBox.warning(self, tr("Export failed"), str(exc))
+
+    def _export_anki(self):
+        cards = self._export_cards()
+        if not cards:
+            QMessageBox.information(self, tr("Export Anki Deck"), tr("No review cards to export."))
+            return
+        default_base = export_service.safe_filename(self._current_deck, "review_cards")
+        default_name = "review_cards.apkg" if not self._current_deck else f"{default_base}_review_cards.apkg"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("Export Anki Deck"),
+            default_name,
+            f"{tr('Anki Deck')} (*.apkg);;{tr('All Files')} (*)",
+        )
+        if not path:
+            return
+        try:
+            deck_name = "C++rafting Table::Review"
+            if self._current_deck:
+                deck_name += f"::{self._current_deck}"
+            export_service.write_review_anki(path, cards, deck_name)
+            QMessageBox.information(self, tr("Export Anki Deck"), tr("Anki deck exported: {path}", path=path))
+        except Exception as exc:
+            QMessageBox.warning(self, tr("Export failed"), str(exc))
+
     def _refresh(self):
         self._populate_deck_combo()
         self._load_cards()
@@ -645,6 +708,8 @@ class ReviewPage(QWidget):
     def retranslate_ui(self):
         self._header_label.setText(tr("Review"))
         self._add_btn.setText(tr("+ Add"))
+        self._export_md_btn.setText(tr("Export Markdown"))
+        self._export_anki_btn.setText(tr("Export Anki Deck"))
         self._render_empty_or_card()
 
     def resizeEvent(self, event):

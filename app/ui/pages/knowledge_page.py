@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QGraphicsView,
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
     QGraphicsLineItem, QGraphicsRectItem, QStackedWidget,
+    QFileDialog, QMessageBox,
 )
 from PySide6.QtCore import Qt, QMargins, QTimer, QSize, QPointF
 from PySide6.QtGui import (
@@ -14,6 +15,7 @@ from PySide6.QtGui import (
 )
 
 from app.services import error_store
+from app.services import export_service
 from app.services.ai_explain_worker import AIExplainWorker, EXPLAIN_PROMPT
 from app.services.i18n import tr
 from app.services.quiz_utils import normalize_quiz_question, normalize_quiz_questions
@@ -290,6 +292,11 @@ class KnowledgePage(QWidget):
 
         bottom = QHBoxLayout()
         bottom.addStretch()
+        self._export_md_btn = QPushButton(tr("Export Markdown"))
+        self._export_md_btn.setProperty("variant", "secondary")
+        self._export_md_btn.clicked.connect(self._export_markdown)
+        bottom.addWidget(self._export_md_btn)
+
         self._refresh_btn = QPushButton(tr("Refresh"))
         self._refresh_btn.setIcon(QIcon(asset_path("icons", "action_refresh")))
         self._refresh_btn.setIconSize(QSize(18, 18))
@@ -335,6 +342,25 @@ class KnowledgePage(QWidget):
         else:
             self._populate_list()
         self._auto_explain_new()
+
+    def _export_markdown(self):
+        items = error_store.get_knowledge_points()
+        if not items:
+            QMessageBox.information(self, tr("Export Markdown"), tr("No knowledge notes to export."))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("Export Markdown"),
+            "knowledge_notes.md",
+            f"{tr('Markdown Files')} (*.md);;{tr('All Files')} (*)",
+        )
+        if not path:
+            return
+        try:
+            export_service.write_knowledge_markdown(path, items)
+            QMessageBox.information(self, tr("Export Markdown"), tr("Markdown exported: {path}", path=path))
+        except Exception as exc:
+            QMessageBox.warning(self, tr("Export failed"), str(exc))
 
     def _populate_list(self, filter_text: str = ""):
         self._concept_list.clear()
@@ -1074,6 +1100,7 @@ class KnowledgePage(QWidget):
         self._btn_list.setText(tr("List"))
         self._btn_graph.setText(tr("Graph"))
         self._search.setPlaceholderText(tr("Search concepts..."))
+        self._export_md_btn.setText(tr("Export Markdown"))
         self._refresh_btn.setText(tr("Refresh"))
         if self._selected_node:
             self._show_concept_detail(self._selected_node)
