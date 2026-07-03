@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Native debugger smoke tests for the local LLDB/DWARF path.
+"""Native debugger smoke tests for local LLDB/DWARF and MSVC/PDB paths.
 
 This script intentionally exercises the same DebugExecutor -> MemoryCanvas path
-as the app, including offscreen canvas rendering.
+as the app, including offscreen canvas rendering. On Windows, the experimental
+MSVC/PDB backend requires Visual Studio C++ Build Tools and Windows Debugging
+Tools.
 """
 
 from __future__ import annotations
@@ -2771,9 +2773,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--backend",
-        choices=("auto", DebugExecutor.LLDB_DWARF_BACKEND),
+        choices=("auto", DebugExecutor.LLDB_DWARF_BACKEND, DebugExecutor.MSVC_PDB_BACKEND),
         default="auto",
-        help="Debugger backend to force.",
+        help="Debugger backend to force. Use msvc-pdb for Windows PDB validation.",
     )
     parser.add_argument(
         "--case",
