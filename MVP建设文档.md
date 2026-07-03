@@ -5,6 +5,9 @@
 
 > **Recent fixes (2026-06-03)**
 > Review page cards now use an internal `QScrollArea`, so long questions, hints, answers, and rating buttons stay accessible via mouse wheel and the right-side scrollbar when the window height is limited; after revealing the answer, the card widens automatically, and if content is still wider than the viewport it supports horizontal scrolling via the bottom scrollbar and `Alt+滚轮`. The final fix also switched multiline labels to real widget margins plus `heightForWidth(...)` recalculation, and delays the post-reveal relayout to the next event loop / `50ms` follow-up pass so question and answer blocks do not clip or overlap. `file_import_page.py` also restores the missing `ACCENT_HOVER` import used by the generated quiz button.
+>
+> **Encoding + language-switch fix (2026-06-03)**
+> `i18n.py` had double-encoded Chinese (UTF-8 bytes re-encoded as cp1252 then as UTF-8), which caused garbled text in Chinese mode across Windows and macOS. Fixed by reversing the double-encoding through a hybrid cp1252+Latin-1 byte recovery pass on all translation string values. Also fixed in-app language switching: `main_window.py._retranslate()` now triggers `retranslate_ui()` on every page (Home, Code Editor, OJ, File Import, Review, Knowledge Base, Tracker) and updates the status bar, overlay labels, auto-play button, and step info so all UI text switches immediately without restart.
 
 > 本文档是工程级路线图，精确到文件、验收标准和验证命令。
 > 架构和数据契约详见 `need.md` 和 `架构设计文档v2.md`。
