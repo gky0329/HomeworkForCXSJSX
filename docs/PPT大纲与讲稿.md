@@ -260,9 +260,9 @@ Settings 里可以切换 AI 供应商。默认 DeepSeek（免费用量大），�
 
 | 成员 | 贡献 |
 |------|------|
-| **zhangjs0303** | 核心引擎、Canvas 渲染、动画系统、KB/Review 全线功能、架构设计 |
-| **gky0329** | 数组/类 Canvas 修复、中文翻译系统(i18n)、快捷键、Review 滚动优化 |
-| **QizhenLi-pku** | 多 AI 供应商支持(4 providers)、Settings 重构 |
+| **gky0329**（组长） | 项目规划协调、Canvas修复、i18n翻译、快捷键、Prompt调优、LaTeX报告、路演PPT、视频录制 |
+| **zhangjs0303**（主要实现者） | 架构设计、全部核心引擎、12种C++可视化、GDB/LLDB调试器、Anki复习/Deck系统、AI集成、存储与文档、路演PPT、视频录制与剪辑 |
+| **QizhenLi-pku** | 多AI供应商、Minecraft UI主题、UI美化 |
 
 ---
 

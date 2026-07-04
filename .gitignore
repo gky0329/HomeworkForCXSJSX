@@ -22,3 +22,5 @@ pytest-cache-files-*/
 *.local.md
 node_modules/
 outputs/
+*.pptx
+package.json
