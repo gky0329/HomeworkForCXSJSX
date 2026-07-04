@@ -578,7 +578,8 @@ def test_settings_dialog_writes_theme_and_debugger_config():
         try:
             assert hasattr(dialog, "_pdb_check")
             assert hasattr(dialog, "_theme_combo")
-            theme_index = dialog._theme_combo.findData("minimal_light")
+            assert dialog._theme_combo.findData("minimal_light") == -1
+            theme_index = dialog._theme_combo.findData("minimal_dark")
             assert theme_index >= 0
             dialog._theme_combo.setCurrentIndex(theme_index)
             dialog._pdb_check.setChecked(True)
@@ -588,7 +589,7 @@ def test_settings_dialog_writes_theme_and_debugger_config():
 
         saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-    assert saved["ui"]["theme"] == "minimal_light"
+    assert saved["ui"]["theme"] == "minimal_dark"
     assert saved["debugger"]["enable_experimental_pdb"] is True
 
 

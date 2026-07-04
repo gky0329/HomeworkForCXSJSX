@@ -121,67 +121,10 @@ _DARK = {
     "EDITOR_SELECTION": "#2A2A2A",
 }
 
-_LIGHT = {
-    "CANVAS_BG": "#FFFFFF",
-    "CANVAS_BG_LIGHTER": "#F7F7F7",
-    "SURFACE": "#FFFFFF",
-    "SURFACE_HOVER": "#F3F3F3",
-    "BORDER": "#D4D4D4",
-    "BORDER_FOCUS": "#000000",
-    "TEXT_PRIMARY": "#111111",
-    "TEXT_SECONDARY": "#555555",
-    "TEXT_MUTED": "#777777",
-    "TEXT_INVERSE": "#FFFFFF",
-    "TEXT_TITLE": "#000000",
-    "TEXT_TITLE_WARM": "#000000",
-    "TEXT_DISABLED": "#9A9A9A",
-    "TEXT_PLACEHOLDER": "#888888",
-    "TEXT_BUTTON_PRIMARY": "#FFFFFF",
-    "TEXT_BUTTON_WOOD": "#111111",
-    "PARCHMENT_TEXT": "#111111",
-    "PARCHMENT_MUTED": "#666666",
-    "STACK_BORDER": "#111111",
-    "STACK_BG": "#F7F7F7",
-    "STACK_TITLE": "#111111",
-    "STACK_VAR_TEXT": "#111111",
-    "STACK_AREA_BG": "#FFFFFF",
-    "HEAP_BORDER": "#555555",
-    "HEAP_BG": "#FAFAFA",
-    "HEAP_TEXT": "#333333",
-    "HEAP_AREA_BG": "#FFFFFF",
-    "ACCENT": "#000000",
-    "ACCENT_TEXT": "#000000",
-    "ACCENT_HOVER": "#262626",
-    "ACCENT_PRESSED": "#444444",
-    "SECONDARY": "#F5F5F5",
-    "SECONDARY_HOVER": "#ECECEC",
-    "ERROR": "#111111",
-    "ERROR_BG": "#F5F5F5",
-    "SUCCESS": "#111111",
-    "SUCCESS_BG": "#F3F3F3",
-    "WARN": "#444444",
-    "WARN_BG": "#F3F3F3",
-    "INFO": "#333333",
-    "INFO_BG": "#F3F3F3",
-    "EDGE_SOLID": "#555555",
-    "EDGE_DANGLING": "#111111",
-    "EDGE_REF": "#333333",
-    "HIGHLIGHT": "#000000",
-    "HIGHLIGHT_BG": "#EFEFEF",
-    "EDITOR_BG": "#FFFFFF",
-    "EDITOR_TEXT": "#111111",
-    "EDITOR_LINE_NUM": "#777777",
-    "EDITOR_CURSOR": "#000000",
-    "EDITOR_SELECTION": "#DADADA",
-}
-
-
 def _normalize_theme(theme: object) -> str:
     key = str(theme or "").strip().lower().replace("-", "_")
     if key in {"", "dark", "mc", "minecraft", "minecraft_dark"}:
         return "mc"
-    if key in {"minimal_light", "minimal_white", "white", "light"}:
-        return "minimal_light"
     if key in {"minimal_dark", "minimal_black", "black"}:
         return "minimal_dark"
     return "mc"
@@ -191,8 +134,6 @@ def palette_for_theme(theme: object) -> dict[str, str]:
     key = _normalize_theme(theme)
     if key == "mc":
         return dict(_MINECRAFT)
-    if key == "minimal_light":
-        return dict(_LIGHT)
     return dict(_DARK)
 
 

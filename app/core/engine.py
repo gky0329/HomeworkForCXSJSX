@@ -210,9 +210,13 @@ class Engine:
 
         diff = self._diff_engine.diff(prev_state, curr_state)
         self._animator.stop_all()
-        self._canvas.render_state(curr_state)
-        self._window.tracker_panel.set_state(curr_state)
-        self._animator.animate_diff(diff)
+        try:
+            self._canvas.render_state(curr_state)
+            self._window.tracker_panel.set_state(curr_state)
+            self._animator.animate_diff(diff)
+        except Exception:
+            logger.exception("Canvas render failed at step %d", self._current_index)
+            self._window.statusBar().showMessage("Error: Failed to render memory state")
         if getattr(self._window, "auto_fit_check", None) is not None and self._window.auto_fit_check.isChecked():
             self._queue_canvas_fit()
         self._update_controls()

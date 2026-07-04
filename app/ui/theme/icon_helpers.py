@@ -2,17 +2,28 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import QLabel, QLineEdit, QListWidgetItem, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidgetItem, QPushButton
 
 from app.ui.theme.colors import use_minecraft_assets
 from app.ui.theme.minecraft_assets import asset_path
 
 
 def theme_uses_icons() -> bool:
+    app = QApplication.instance()
+    if app is not None:
+        theme = app.property("cppraftingTheme")
+        if theme is not None:
+            return str(theme).strip().lower().replace("-", "_") in {
+                "mc",
+                "minecraft",
+                "minecraft_dark",
+            }
     return use_minecraft_assets()
 
 
 def theme_icon(name: str) -> QIcon:
+    if not theme_uses_icons():
+        return QIcon()
     return QIcon(asset_path("icons", name))
 
 

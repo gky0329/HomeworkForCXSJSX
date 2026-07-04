@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 from app.ui.theme.colors import ACCENT, TEXT_SECONDARY
-from app.ui.theme.minecraft_assets import asset_path
+from app.ui.theme.icon_helpers import icon_label
 
 
 class PixelEmptyState(QFrame):
@@ -18,19 +17,9 @@ class PixelEmptyState(QFrame):
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel()
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = QPixmap(asset_path("icons", icon_name))
-        if not pixmap.isNull():
-            icon.setPixmap(
-                pixmap.scaled(
-                    112,
-                    112,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                )
-            )
-        layout.addWidget(icon)
+        icon = icon_label(icon_name, 112)
+        if icon is not None:
+            layout.addWidget(icon)
 
         self.title_label = QLabel(title)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFileDialog, QScrollArea, QFrame, QComboBox,
     QSplitter, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QFont
 
 from app.services.file_service import (
     extract_text, SUPPORTED_EXTENSIONS, file_type_label,
@@ -28,7 +28,7 @@ from app.ui.theme.colors import (
     ACCENT, ACCENT_HOVER, STACK_BORDER, HEAP_BORDER, EDGE_DANGLING,
     TEXT_INVERSE, TEXT_BUTTON_PRIMARY, SUCCESS, SUCCESS_BG, ERROR_BG,
 )
-from app.ui.theme.minecraft_assets import asset_path
+from app.ui.theme.icon_helpers import set_button_icon
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +137,7 @@ class FileImportPage(QWidget):
         toolbar.addSpacing(8)
 
         self._upload_btn = QPushButton(tr("Upload File"))
-        self._upload_btn.setIcon(QIcon(asset_path("icons", "action_upload")))
-        self._upload_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._upload_btn, "action_upload")
         self._upload_btn.clicked.connect(self._on_upload)
         toolbar.addWidget(self._upload_btn)
 
@@ -149,8 +148,7 @@ class FileImportPage(QWidget):
         toolbar.addStretch()
 
         self._process_btn = QPushButton(tr("Extract Knowledge Points"))
-        self._process_btn.setIcon(QIcon(asset_path("icons", "empty_book")))
-        self._process_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._process_btn, "empty_book")
         self._process_btn.setEnabled(False)
         self._process_btn.clicked.connect(self._on_process)
         toolbar.addWidget(self._process_btn)

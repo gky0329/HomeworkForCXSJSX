@@ -818,29 +818,7 @@ MINIMAL_DARK_STYLESHEET = _minimal_stylesheet(
     selection="#2a2a2a",
 )
 
-MINIMAL_LIGHT_STYLESHEET = _minimal_stylesheet(
-    name="Minimal white theme",
-    bg="#ffffff",
-    surface="#ffffff",
-    surface_alt="#f5f5f5",
-    border="#d4d4d4",
-    text="#000000",
-    muted="#555555",
-    accent="#000000",
-    accent_hover="#262626",
-    button_bg="#ffffff",
-    button_hover="#f5f5f5",
-    button_border="#000000",
-    button_text="#000000",
-    editor_bg="#ffffff",
-    editor_text="#000000",
-    selection="#d4d4d4",
-)
-
-
 def stylesheet_for_theme(theme: str) -> str:
     if theme == "minimal_dark":
         return MINIMAL_DARK_STYLESHEET
-    if theme == "minimal_light":
-        return MINIMAL_LIGHT_STYLESHEET
     return GLOBAL_STYLESHEET

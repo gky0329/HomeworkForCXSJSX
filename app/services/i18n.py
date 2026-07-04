@@ -69,7 +69,6 @@ TRANSLATIONS = {
         "UI Theme": "界面主题",
         "Minecraft": "MC 风格",
         "Minimal Black": "极简黑",
-        "Minimal White": "极简白",
         "Code Font Size": "代码字号",
         "Enable experimental MSVC/PDB native debugger": "启用实验性 MSVC/PDB 原生调试器",
         "Requires Windows, Visual Studio Build Tools, and Windows Debugging Tools.": "需要 Windows、Visual Studio Build Tools 和 Windows Debugging Tools。",

@@ -12,12 +12,10 @@ from app.utils.startup_profiler import StartupProfiler
 
 THEME_MINECRAFT = "mc"
 THEME_MINIMAL_DARK = "minimal_dark"
-THEME_MINIMAL_LIGHT = "minimal_light"
 
 THEME_LABELS = {
     THEME_MINECRAFT: "Minecraft",
     THEME_MINIMAL_DARK: "Minimal Black",
-    THEME_MINIMAL_LIGHT: "Minimal White",
 }
 
 _THEME_ALIASES = {
@@ -30,12 +28,6 @@ _THEME_ALIASES = {
     "minimal-black": THEME_MINIMAL_DARK,
     "minimal_black": THEME_MINIMAL_DARK,
     "black": THEME_MINIMAL_DARK,
-    "minimal-light": THEME_MINIMAL_LIGHT,
-    "minimal_light": THEME_MINIMAL_LIGHT,
-    "minimal-white": THEME_MINIMAL_LIGHT,
-    "minimal_white": THEME_MINIMAL_LIGHT,
-    "white": THEME_MINIMAL_LIGHT,
-    "light": THEME_MINIMAL_LIGHT,
 }
 
 
