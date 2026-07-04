@@ -5,13 +5,41 @@ from app.ui.theme.colors import (
     TEXT_BUTTON_WOOD,
     ACCENT, ACCENT_HOVER, ACCENT_PRESSED, SECONDARY, SECONDARY_HOVER,
     ERROR, SUCCESS, WARN, INFO, EDITOR_BG, EDITOR_TEXT, EDITOR_SELECTION,
-    HIGHLIGHT, HIGHLIGHT_BG,
+    HIGHLIGHT, HIGHLIGHT_BG, palette_for_theme,
 )
 from app.ui.theme.fonts import BODY_FONT, CODE_FONT, TITLE_FONT
 from app.ui.theme.minecraft_assets import asset_url, bg_image, border_image
 
 CHEVRON_DOWN_ICON = "app/ui/theme/icons/chevron-down.png"
 CHECK_ICON = "app/ui/theme/icons/check.png"
+
+# The Minecraft stylesheet must be independent from the active startup theme.
+# Page-level inline styles still import colors.py directly for the active theme.
+_MC_PALETTE = palette_for_theme("mc")
+(
+    CANVAS_BG, CANVAS_BG_LIGHTER, SURFACE, SURFACE_HOVER, BORDER, BORDER_FOCUS,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_INVERSE, TEXT_TITLE,
+    TEXT_TITLE_WARM, TEXT_DISABLED, TEXT_PLACEHOLDER, TEXT_BUTTON_PRIMARY,
+    TEXT_BUTTON_WOOD, ACCENT, ACCENT_HOVER, ACCENT_PRESSED, SECONDARY,
+    SECONDARY_HOVER, ERROR, SUCCESS, WARN, INFO, EDITOR_BG, EDITOR_TEXT,
+    EDITOR_SELECTION, HIGHLIGHT, HIGHLIGHT_BG,
+) = (
+    _MC_PALETTE["CANVAS_BG"], _MC_PALETTE["CANVAS_BG_LIGHTER"],
+    _MC_PALETTE["SURFACE"], _MC_PALETTE["SURFACE_HOVER"],
+    _MC_PALETTE["BORDER"], _MC_PALETTE["BORDER_FOCUS"],
+    _MC_PALETTE["TEXT_PRIMARY"], _MC_PALETTE["TEXT_SECONDARY"],
+    _MC_PALETTE["TEXT_MUTED"], _MC_PALETTE["TEXT_INVERSE"],
+    _MC_PALETTE["TEXT_TITLE"], _MC_PALETTE["TEXT_TITLE_WARM"],
+    _MC_PALETTE["TEXT_DISABLED"], _MC_PALETTE["TEXT_PLACEHOLDER"],
+    _MC_PALETTE["TEXT_BUTTON_PRIMARY"], _MC_PALETTE["TEXT_BUTTON_WOOD"],
+    _MC_PALETTE["ACCENT"], _MC_PALETTE["ACCENT_HOVER"],
+    _MC_PALETTE["ACCENT_PRESSED"], _MC_PALETTE["SECONDARY"],
+    _MC_PALETTE["SECONDARY_HOVER"], _MC_PALETTE["ERROR"],
+    _MC_PALETTE["SUCCESS"], _MC_PALETTE["WARN"], _MC_PALETTE["INFO"],
+    _MC_PALETTE["EDITOR_BG"], _MC_PALETTE["EDITOR_TEXT"],
+    _MC_PALETTE["EDITOR_SELECTION"], _MC_PALETTE["HIGHLIGHT"],
+    _MC_PALETTE["HIGHLIGHT_BG"],
+)
 
 GLOBAL_STYLESHEET = f"""
 /* Minecraft dark stone theme */
@@ -472,6 +500,10 @@ def _minimal_stylesheet(
     muted: str,
     accent: str,
     accent_hover: str,
+    button_bg: str,
+    button_hover: str,
+    button_border: str,
+    button_text: str,
     editor_bg: str,
     editor_text: str,
     selection: str,
@@ -482,7 +514,7 @@ def _minimal_stylesheet(
 QWidget {{
     color: {text};
     background-color: {bg};
-    font-family: "Inter", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    font-family: "PingFang SC", "Microsoft YaHei UI", "Segoe UI";
     font-size: 14px;
 }}
 
@@ -517,9 +549,9 @@ QLabel[muted="true"] {{
 }}
 
 QPushButton, QToolButton {{
-    background-color: {accent};
-    color: #ffffff;
-    border: 1px solid {accent};
+    background-color: {button_bg};
+    color: {button_text};
+    border: 1px solid {button_border};
     border-radius: 6px;
     padding: 7px 14px;
     min-height: 30px;
@@ -528,12 +560,13 @@ QPushButton, QToolButton {{
 }}
 
 QPushButton:hover, QToolButton:hover {{
-    background-color: {accent_hover};
-    border-color: {accent_hover};
+    background-color: {button_hover};
+    border-color: {button_border};
+    color: {button_text};
 }}
 
 QPushButton:pressed, QToolButton:pressed {{
-    background-color: {accent};
+    background-color: {button_hover};
 }}
 
 QPushButton:disabled, QToolButton:disabled {{
@@ -632,9 +665,8 @@ QComboBox::drop-down {{
 }}
 
 QComboBox::down-arrow {{
-    image: url({CHEVRON_DOWN_ICON});
-    width: 10px;
-    height: 6px;
+    width: 0;
+    height: 0;
 }}
 
 QComboBox QAbstractItemView {{
@@ -760,41 +792,49 @@ QSplitter::handle {{
     background-color: {border};
 }}
 
-QLabel[state="success"] {{ color: #238636; }}
-QLabel[state="warning"] {{ color: #b7791f; }}
-QLabel[state="error"] {{ color: #cf222e; }}
+QLabel[state="success"] {{ color: {text}; }}
+QLabel[state="warning"] {{ color: {muted}; }}
+QLabel[state="error"] {{ color: {text}; }}
 QLabel[state="info"] {{ color: {accent}; }}
 """
 
 
 MINIMAL_DARK_STYLESHEET = _minimal_stylesheet(
     name="Minimal black theme",
-    bg="#0b0c0f",
-    surface="#15171c",
-    surface_alt="#20232a",
-    border="#30343d",
-    text="#f3f4f6",
-    muted="#9ca3af",
-    accent="#2f81f7",
-    accent_hover="#4493f8",
-    editor_bg="#0f1117",
-    editor_text="#f0f3f6",
-    selection="#1f6feb",
+    bg="#000000",
+    surface="#0d0d0d",
+    surface_alt="#171717",
+    border="#3a3a3a",
+    text="#f7f7f7",
+    muted="#a3a3a3",
+    accent="#ffffff",
+    accent_hover="#e5e5e5",
+    button_bg="#ffffff",
+    button_hover="#e5e5e5",
+    button_border="#ffffff",
+    button_text="#000000",
+    editor_bg="#030303",
+    editor_text="#f5f5f5",
+    selection="#2a2a2a",
 )
 
 MINIMAL_LIGHT_STYLESHEET = _minimal_stylesheet(
     name="Minimal white theme",
-    bg="#f7f8fa",
+    bg="#ffffff",
     surface="#ffffff",
-    surface_alt="#eef1f5",
-    border="#d0d7de",
-    text="#24292f",
-    muted="#57606a",
-    accent="#0969da",
-    accent_hover="#0550ae",
+    surface_alt="#f5f5f5",
+    border="#d4d4d4",
+    text="#000000",
+    muted="#555555",
+    accent="#000000",
+    accent_hover="#262626",
+    button_bg="#ffffff",
+    button_hover="#f5f5f5",
+    button_border="#000000",
+    button_text="#000000",
     editor_bg="#ffffff",
-    editor_text="#24292f",
-    selection="#b6d7ff",
+    editor_text="#000000",
+    selection="#d4d4d4",
 )
 
 

@@ -27,7 +27,7 @@ from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     STACK_BORDER, HEAP_BORDER, ACCENT, ACCENT_HOVER, EDGE_DANGLING, SUCCESS,
     SUCCESS_BG, ERROR_BG, EDITOR_BG, TEXT_INVERSE, TEXT_BUTTON_PRIMARY, HEAP_TEXT, EDITOR_LINE_NUM,
-    EDGE_SOLID, PARCHMENT_TEXT, PARCHMENT_MUTED,
+    EDGE_SOLID, PARCHMENT_TEXT, PARCHMENT_MUTED, use_minecraft_assets,
 )
 
 
@@ -187,8 +187,15 @@ class KnowledgePage(QWidget):
         self._quiz_worker: AIExplainWorker | None = None
         self._auto_explain_worker: AIExplainWorker | None = None
         self._retired_workers: list[AIExplainWorker] = []
+        self._use_theme_assets = use_minecraft_assets()
         self._setup_ui()
         self._refresh()
+
+    def _set_button_icon(self, button: QPushButton, icon_name: str, size: int = 18):
+        if not self._use_theme_assets:
+            return
+        button.setIcon(QIcon(asset_path("icons", icon_name)))
+        button.setIconSize(QSize(size, size))
 
     def hideEvent(self, event):
         try:
@@ -228,7 +235,8 @@ class KnowledgePage(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText(tr("Search concepts..."))
         self._search.setFixedWidth(220)
-        self._search.addAction(QIcon(asset_path("icons", "action_search")), QLineEdit.ActionPosition.LeadingPosition)
+        if self._use_theme_assets:
+            self._search.addAction(QIcon(asset_path("icons", "action_search")), QLineEdit.ActionPosition.LeadingPosition)
         self._search.textChanged.connect(self._on_search)
         header.addWidget(self._search)
 
@@ -298,8 +306,7 @@ class KnowledgePage(QWidget):
         bottom.addWidget(self._export_md_btn)
 
         self._refresh_btn = QPushButton(tr("Refresh"))
-        self._refresh_btn.setIcon(QIcon(asset_path("icons", "action_refresh")))
-        self._refresh_btn.setIconSize(QSize(18, 18))
+        self._set_button_icon(self._refresh_btn, "action_refresh")
         self._refresh_btn.clicked.connect(self._refresh)
         bottom.addWidget(self._refresh_btn)
         layout.addLayout(bottom)
@@ -374,7 +381,8 @@ class KnowledgePage(QWidget):
             if errs:
                 label += f"  ({errs})"
             item = QListWidgetItem(label)
-            item.setIcon(QIcon(asset_path("icons", self._concept_icon(name))))
+            if self._use_theme_assets:
+                item.setIcon(QIcon(asset_path("icons", self._concept_icon(name))))
             item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 6, 0, 6)))
             if errs > 0:
                 item.setForeground(QColor(EDGE_DANGLING))
@@ -464,8 +472,7 @@ class KnowledgePage(QWidget):
         self._add_review_button(name)
 
         quiz_btn = QPushButton(tr("Quiz Me"))
-        quiz_btn.setIcon(QIcon(asset_path("icons", "action_quiz")))
-        quiz_btn.setIconSize(QSize(18, 18))
+        self._set_button_icon(quiz_btn, "action_quiz")
         quiz_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 2px solid {ACCENT}; "
@@ -476,8 +483,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addWidget(quiz_btn)
 
         del_btn = QPushButton(tr("Delete"))
-        del_btn.setIcon(QIcon(asset_path("icons", "action_delete")))
-        del_btn.setIconSize(QSize(16, 16))
+        self._set_button_icon(del_btn, "action_delete", 16)
         del_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {TEXT_MUTED}; border: 2px solid {BORDER}; "
@@ -491,8 +497,7 @@ class KnowledgePage(QWidget):
 
     def _add_explain_button(self, concept_name: str):
         btn = QPushButton(tr("Explain with AI"))
-        btn.setIcon(QIcon(asset_path("icons", "action_ai")))
-        btn.setIconSize(QSize(18, 18))
+        self._set_button_icon(btn, "action_ai")
 
         def on_explain():
             kps = error_store.get_knowledge_points()
@@ -549,8 +554,7 @@ class KnowledgePage(QWidget):
 
     def _add_review_button(self, name: str):
         btn = QPushButton(tr("Add to Review"))
-        btn.setIcon(QIcon(asset_path("icons", "action_add")))
-        btn.setIconSize(QSize(18, 18))
+        self._set_button_icon(btn, "action_add")
         btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
@@ -632,8 +636,7 @@ class KnowledgePage(QWidget):
                     f"color: {EDGE_DANGLING}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
                 add_btn = QPushButton(tr("Add to Review"))
-                add_btn.setIcon(QIcon(asset_path("icons", "action_add")))
-                add_btn.setIconSize(QSize(16, 16))
+                self._set_button_icon(add_btn, "action_add", 16)
                 add_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
                     f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
