@@ -36,7 +36,7 @@ ui:
   font_family: JetBrains Mono, Menlo, SF Mono, Courier New, monospace
   font_size: 13
   language: en  # en | zh
-  theme: mc  # mc | minimal_dark | minimal_light
+  theme: mc  # mc | mc_end_city | minimal_dark | minimal_light
 
 debugger:
   # Experimental Windows native debugger path. Keep false unless validating on Windows.

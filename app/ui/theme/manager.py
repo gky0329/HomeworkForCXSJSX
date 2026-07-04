@@ -11,11 +11,13 @@ from app.ui.theme.styles import stylesheet_for_theme
 from app.utils.startup_profiler import StartupProfiler
 
 THEME_MINECRAFT = "mc"
+THEME_END_CITY = "mc_end_city"
 THEME_MINIMAL_DARK = "minimal_dark"
 THEME_MINIMAL_LIGHT = "minimal_light"
 
 THEME_LABELS = {
     THEME_MINECRAFT: "Minecraft",
+    THEME_END_CITY: "Minecraft End City",
     THEME_MINIMAL_DARK: "Minimal Black",
     THEME_MINIMAL_LIGHT: "Minimal White",
 }
@@ -25,6 +27,13 @@ _THEME_ALIASES = {
     "dark": THEME_MINECRAFT,
     "minecraft": THEME_MINECRAFT,
     "mc": THEME_MINECRAFT,
+    "end": THEME_END_CITY,
+    "end-city": THEME_END_CITY,
+    "end_city": THEME_END_CITY,
+    "mc-end-city": THEME_END_CITY,
+    "mc_end_city": THEME_END_CITY,
+    "minecraft-end-city": THEME_END_CITY,
+    "minecraft_end_city": THEME_END_CITY,
     "minimal-dark": THEME_MINIMAL_DARK,
     "minimal_dark": THEME_MINIMAL_DARK,
     "minimal-black": THEME_MINIMAL_DARK,

@@ -797,8 +797,297 @@ MINIMAL_LIGHT_STYLESHEET = _minimal_stylesheet(
     selection="#b6d7ff",
 )
 
+END_CITY_OVERRIDES = f"""
+/* Minecraft End City light theme */
+
+QWidget {{
+    color: #2f2836;
+    background-color: #ebe5ba;
+    {bg_image("themes/mc_end_city/backgrounds", "end_stone_tile")}
+}}
+
+QMainWindow, QWidget#appShell {{
+    background-color: #ebe5ba;
+    {bg_image("themes/mc_end_city/backgrounds", "end_stone_tile")}
+}}
+
+QLabel {{
+    color: #302737;
+    font-size: 15px;
+    font-weight: 600;
+}}
+
+QLabel[muted="true"] {{
+    color: #6f6372;
+}}
+
+QFrame[panel="stone"], QFrame[panel="card"], QFrame[panel="empty"],
+QFrame#resultCard, QFrame#reviewCard, QFrame#ojCard, QFrame#trackCard,
+QFrame#quickCard, QFrame#statCard {{
+    background-color: #32293a;
+    color: #fff4df;
+    {border_image("themes/mc_end_city/panels", "purpur_panel", 28)}
+    border-width: 28px;
+    padding: 10px;
+}}
+
+QFrame[panel="stone"] QLabel, QFrame[panel="card"] QLabel, QFrame[panel="empty"] QLabel,
+QFrame#resultCard QLabel, QFrame#reviewCard QLabel, QFrame#ojCard QLabel,
+QFrame#trackCard QLabel, QFrame#quickCard QLabel, QFrame#statCard QLabel {{
+    color: #fff4df;
+}}
+
+QFrame#kbDetail {{
+    background-color: #efe0b8;
+    {border_image("panels", "parchment_panel", 16)}
+    border-width: 16px;
+    padding: 16px;
+}}
+
+QFrame#kbDetail QLabel {{
+    color: #302416;
+}}
+
+QPushButton {{
+    background-color: #17765f;
+    color: #ffffff;
+    {border_image("themes/mc_end_city/buttons", "ender_action_button", 28)}
+    border-width: 28px;
+    padding: 5px 18px;
+    min-height: 36px;
+    font-size: 16px;
+    font-weight: 800;
+}}
+
+QPushButton:hover {{
+    background-color: #1f9878;
+    color: #ffffff;
+    {border_image("themes/mc_end_city/buttons", "ender_action_button", 28)}
+}}
+
+QPushButton:pressed {{
+    background-color: #105642;
+    color: #e9fff6;
+    {border_image("themes/mc_end_city/buttons", "ender_action_button", 28)}
+}}
+
+QPushButton:disabled {{
+    background-color: #7d7582;
+    color: #dbd4df;
+    {border_image("buttons", "dark_button_disabled", 8)}
+}}
+
+QPushButton[variant="secondary"], QToolButton {{
+    background-color: #473b4f;
+    color: #fff1d6;
+    {border_image("themes/mc_end_city/panels", "purpur_panel", 24)}
+    border-width: 24px;
+    padding: 4px 14px;
+    min-height: 32px;
+    font-size: 15px;
+    font-weight: 700;
+}}
+
+QPushButton[variant="secondary"]:hover, QToolButton:hover {{
+    background-color: #5b4866;
+    color: #ffffff;
+}}
+
+QPushButton[variant="secondary"]:pressed, QToolButton:pressed {{
+    background-color: #33283c;
+    color: #efe5ff;
+}}
+
+QPushButton[variant="secondary"]:disabled, QToolButton:disabled {{
+    color: #a89cab;
+    background-color: #6f6772;
+}}
+
+QPushButton[variant="icon"] {{
+    min-width: 30px;
+    max-width: 44px;
+    min-height: 30px;
+    padding: 2px;
+    color: #ffffff;
+}}
+
+QTabBar::tab {{
+    color: #fff1d6;
+    background-color: #4a3a50;
+    {border_image("themes/mc_end_city/panels", "purpur_panel", 24)}
+    border-width: 24px;
+    padding: 6px 18px;
+    min-height: 38px;
+    min-width: 128px;
+    font-size: 17px;
+    font-weight: 800;
+}}
+
+QTabBar::tab:hover:!selected {{
+    color: #ffffff;
+    background-color: #5a4861;
+}}
+
+QTabBar::tab:selected {{
+    color: #ffffff;
+    background-color: #0f7f65;
+    {border_image("themes/mc_end_city/buttons", "ender_action_button", 28)}
+    border-width: 28px;
+}}
+
+QLineEdit, QSpinBox, QComboBox {{
+    color: #2e2633;
+    background-color: #fbf4cf;
+    border: 2px solid #7f6f85;
+    padding: 7px 10px;
+    min-height: 28px;
+    selection-background-color: #38b990;
+    selection-color: #10231c;
+    placeholder-text-color: #7f7380;
+    font-size: 15px;
+    font-weight: 600;
+}}
+
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
+    border: 2px solid #159b75;
+    background-color: #fff9dc;
+}}
+
+QComboBox::drop-down {{
+    width: 28px;
+    border-left: 1px solid #9e8da4;
+    background-color: #d9cfaa;
+}}
+
+QComboBox QAbstractItemView {{
+    background-color: #fbf4cf;
+    color: #2e2633;
+    border: 2px solid #7f6f85;
+    selection-background-color: #2a9f7b;
+    selection-color: #ffffff;
+}}
+
+QPlainTextEdit, QTextEdit, QGraphicsView {{
+    color: #f7f1dc;
+    background-color: #1d1525;
+    {bg_image("backgrounds", "obsidian_tile")}
+    {border_image("themes/mc_end_city/panels", "purpur_panel", 28)}
+    border-width: 28px;
+    padding: 10px 12px;
+    selection-background-color: #2f9f86;
+    selection-color: #ffffff;
+    font-size: 16px;
+}}
+
+QPlainTextEdit {{
+    placeholder-text-color: #a79bb0;
+}}
+
+QListWidget, QListView, QTreeWidget, QTreeView {{
+    background-color: transparent;
+    color: #2f2836;
+    border: none;
+}}
+
+QListWidget::item, QListView::item, QTreeWidget::item, QTreeView::item {{
+    color: #2f2836;
+    background-color: rgba(255, 249, 220, 170);
+    border: 1px solid rgba(103, 87, 111, 120);
+    padding: 8px 12px;
+    min-height: 34px;
+    font-size: 16px;
+    font-weight: 600;
+}}
+
+QListWidget::item:hover, QListView::item:hover, QTreeWidget::item:hover,
+QTreeView::item:hover {{
+    background-color: rgba(226, 215, 173, 220);
+    color: #211a26;
+}}
+
+QListWidget::item:selected, QListView::item:selected, QTreeWidget::item:selected,
+QTreeView::item:selected {{
+    background-color: #159b75;
+    color: #ffffff;
+}}
+
+QCheckBox {{
+    color: #302737;
+    font-size: 15px;
+    font-weight: 600;
+}}
+
+QSlider::groove:horizontal {{
+    background: #b8aa85;
+    height: 8px;
+    border: 1px solid #7f6f85;
+}}
+
+QSlider::handle:horizontal {{
+    background: #18a984;
+    width: 18px;
+    height: 18px;
+    margin: -6px 0;
+    border: 2px solid #0f4f43;
+}}
+
+QScrollBar:vertical, QScrollBar:horizontal {{
+    background: #d9cfaa;
+}}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
+    background: #7f6f85;
+    border: 1px solid #3b3142;
+}}
+
+QStatusBar {{
+    background-color: #d7cda7;
+    color: #5a5060;
+    border-top: 2px solid #8b7c87;
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+QDialog, QMessageBox {{
+    color: #2f2836;
+    background-color: #ebe5ba;
+    {bg_image("themes/mc_end_city/backgrounds", "end_stone_tile")}
+}}
+
+QMenuBar, QMenu {{
+    background-color: #fbf4cf;
+    color: #2f2836;
+    border: 2px solid #7f6f85;
+}}
+
+QMenu::item:selected {{
+    background-color: #159b75;
+    color: #ffffff;
+}}
+
+QToolTip {{
+    background-color: #fbf4cf;
+    color: #2f2836;
+    border: 2px solid #159b75;
+    padding: 6px 8px;
+}}
+
+QSplitter::handle {{
+    background-color: #9a8da0;
+}}
+
+QLabel[state="success"] {{ color: #147b5f; }}
+QLabel[state="warning"] {{ color: #8b5b0e; }}
+QLabel[state="error"] {{ color: #a63d4c; }}
+QLabel[state="info"] {{ color: #0d7b78; }}
+"""
+
+END_CITY_STYLESHEET = GLOBAL_STYLESHEET + END_CITY_OVERRIDES
+
 
 def stylesheet_for_theme(theme: str) -> str:
+    if theme == "mc_end_city":
+        return END_CITY_STYLESHEET
     if theme == "minimal_dark":
         return MINIMAL_DARK_STYLESHEET
     if theme == "minimal_light":

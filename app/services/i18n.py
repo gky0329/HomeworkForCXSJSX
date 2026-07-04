@@ -68,6 +68,7 @@ TRANSLATIONS = {
         "Language": "语言",
         "UI Theme": "界面主题",
         "Minecraft": "MC 风格",
+        "Minecraft End City": "MC 末地城",
         "Minimal Black": "极简黑",
         "Minimal White": "极简白",
         "Code Font Size": "代码字号",
