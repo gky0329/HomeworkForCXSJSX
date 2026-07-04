@@ -18,7 +18,7 @@ import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, SUCCESS_BG,
-    TEXT_INVERSE, TEXT_BUTTON_PRIMARY, ERROR_BG, WARN, WARN_BG, INFO, INFO_BG,
+    ERROR_BG, WARN, WARN_BG, INFO, INFO_BG,
 )
 from app.ui.theme.icon_helpers import set_button_icon
 

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QDialogButtonBox,
+    QTextEdit,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont

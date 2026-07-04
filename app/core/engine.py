@@ -325,7 +325,10 @@ class Engine:
                 if block.is_array:
                     concepts.add("堆数组")
         for c in concepts:
-            error_store.add_knowledge_point(c, "code_editor")
+            try:
+                error_store.add_knowledge_point(c, "code_editor")
+            except Exception:
+                logger.debug("Failed to ingest knowledge point: %s", c)
 
     def _update_controls(self):
         total = len(self._trace.steps) if self._trace else 0

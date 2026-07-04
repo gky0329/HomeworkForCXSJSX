@@ -29,7 +29,6 @@ from app.utils.startup_profiler import StartupProfiler
 ZOOM_FACTOR = 1.15
 ZOOM_MIN = 0.1
 ZOOM_MAX = 10.0
-ZOOM_BTN_STYLE = ""
 
 SCENE_W = 1600
 SCENE_H = 2000

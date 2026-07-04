@@ -11,7 +11,6 @@ from app.ui.theme.fonts import BODY_FONT, CODE_FONT, TITLE_FONT
 from app.ui.theme.minecraft_assets import asset_url, bg_image, border_image
 
 CHEVRON_DOWN_ICON = "app/ui/theme/icons/chevron-down.png"
-CHECK_ICON = "app/ui/theme/icons/check.png"
 
 # The Minecraft stylesheet must be independent from the active startup theme.
 # Page-level inline styles still import colors.py directly for the active theme.
