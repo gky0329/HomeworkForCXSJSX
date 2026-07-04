@@ -15,9 +15,9 @@ from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent, QIc
 
 from app.ui.theme.colors import (
     BORDER, CANVAS_BG, EDITOR_BG, EDITOR_SELECTION, HIGHLIGHT, SURFACE,
-    TEXT_PRIMARY, TEXT_SECONDARY, use_minecraft_assets,
+    TEXT_PRIMARY, TEXT_SECONDARY,
 )
-from app.ui.theme.minecraft_assets import asset_path
+from app.ui.theme.icon_helpers import set_button_icon, theme_icon, theme_uses_icons
 from app.ui.pages.home_page import HomePage
 from app.ui.canvas.tracker_panel import TrackerPanel
 from app.ui.shortcut_registry import ShortcutBinding, ShortcutRegistry
@@ -358,7 +358,7 @@ class MainWindow(QMainWindow):
         raise AttributeError(f"{type(self).__name__!s} object has no attribute {name!r}")
 
     def _setup_ui(self):
-        self._use_theme_assets = use_minecraft_assets()
+        self._use_theme_assets = theme_uses_icons()
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(TAB_STYLE)
         if self._use_theme_assets:
@@ -372,7 +372,7 @@ class MainWindow(QMainWindow):
         self._kb_tab = None
 
         if self._use_theme_assets:
-            self._home_tab_index = self._tabs.addTab(self._home_tab, QIcon(asset_path("icons", "nav_home")), tr("Home"))
+            self._home_tab_index = self._tabs.addTab(self._home_tab, theme_icon("nav_home"), tr("Home"))
         else:
             self._home_tab_index = self._tabs.addTab(self._home_tab, tr("Home"))
         self._code_tab_index = self._add_lazy_tab("code", "nav_code", "Code Editor")
@@ -384,7 +384,7 @@ class MainWindow(QMainWindow):
 
         self._settings_btn = QPushButton(tr("Settings"))
         if self._use_theme_assets:
-            self._settings_btn.setIcon(QIcon(asset_path("icons", "nav_settings")))
+            self._settings_btn.setIcon(theme_icon("nav_settings"))
             self._settings_btn.setIconSize(QSize(24, 24))
         self._settings_btn.setProperty("variant", "secondary")
         self._settings_btn.clicked.connect(self._on_api_settings)
@@ -399,8 +399,8 @@ class MainWindow(QMainWindow):
 
     def _add_lazy_tab(self, key: str, icon_name: str, label_key: str) -> int:
         tab = self._build_loading_tab(label_key)
-        if getattr(self, "_use_theme_assets", use_minecraft_assets()):
-            index = self._tabs.addTab(tab, QIcon(asset_path("icons", icon_name)), tr(label_key))
+        if getattr(self, "_use_theme_assets", theme_uses_icons()):
+            index = self._tabs.addTab(tab, theme_icon(icon_name), tr(label_key))
         else:
             index = self._tabs.addTab(tab, tr(label_key))
         self._lazy_tabs[index] = key
@@ -451,8 +451,8 @@ class MainWindow(QMainWindow):
         }
         self._replacing_lazy_tab = True
         self._tabs.removeTab(index)
-        if getattr(self, "_use_theme_assets", use_minecraft_assets()):
-            self._tabs.insertTab(index, widget, QIcon(asset_path("icons", icon_names[key])), tr(label_keys[key]))
+        if getattr(self, "_use_theme_assets", theme_uses_icons()):
+            self._tabs.insertTab(index, widget, theme_icon(icon_names[key]), tr(label_keys[key]))
         else:
             self._tabs.insertTab(index, widget, tr(label_keys[key]))
         self._tabs.setCurrentIndex(index)
@@ -491,9 +491,7 @@ class MainWindow(QMainWindow):
 
         self.btn_run = QPushButton(tr("Run"))
         self.btn_run.setObjectName("run")
-        if self._use_theme_assets:
-            self.btn_run.setIcon(QIcon(asset_path("icons", "action_run")))
-            self.btn_run.setIconSize(QSize(18, 18))
+        set_button_icon(self.btn_run, "action_run")
         header.addWidget(self.btn_run)
 
         self.btn_prev = QPushButton(tr("Prev"))
@@ -512,10 +510,8 @@ class MainWindow(QMainWindow):
         self.btn_zoom_in = QPushButton("+")
         self.btn_zoom_fit = QPushButton("\u21C5")
         self.btn_canvas_fullscreen = QPushButton()
-        if self._use_theme_assets:
-            self.btn_canvas_fullscreen.setIcon(QIcon(asset_path("icons", "action_fullscreen")))
-            self.btn_canvas_fullscreen.setIconSize(QSize(18, 18))
-        else:
+        set_button_icon(self.btn_canvas_fullscreen, "action_fullscreen")
+        if not self._use_theme_assets:
             self.btn_canvas_fullscreen.setText("FS")
         for b in (self.btn_zoom_out, self.btn_zoom_in, self.btn_zoom_fit, self.btn_canvas_fullscreen):
             b.setFixedSize(28, 28)

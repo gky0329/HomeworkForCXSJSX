@@ -5,16 +5,15 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QGridLayout,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
 
 from app.services import error_store
 from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
-from app.ui.theme.minecraft_assets import asset_path
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    STACK_BORDER, ACCENT, SUCCESS, SURFACE_HOVER, use_minecraft_assets,
+    STACK_BORDER, ACCENT, SUCCESS, SURFACE_HOVER,
 )
+from app.ui.theme.icon_helpers import icon_label, set_button_icon
 
 
 HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 32px; font-weight: 800; padding: 6px 0;"
@@ -54,7 +53,6 @@ class HomePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._stat_labels: dict[str, QLabel] = {}
-        self._use_theme_assets = use_minecraft_assets()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -111,14 +109,10 @@ class HomePage(QWidget):
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(10)
 
-            if self._use_theme_assets:
-                icon = QLabel()
-                icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-                    38, 38, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                ))
+            icon = icon_label(icon_name, 38)
+            if icon is not None:
                 card_layout.addWidget(icon)
-            else:
+            if icon is None:
                 index_label = QLabel(f"{number:02d}")
                 index_label.setFixedWidth(44)
                 index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -141,13 +135,9 @@ class HomePage(QWidget):
             card_layout.addLayout(text_box)
             card_layout.addStretch()
 
-            arrow = QLabel()
-            if self._use_theme_assets:
-                arrow.setPixmap(QPixmap(asset_path("icons", "item_arrow")).scaled(
-                    24, 24, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                ))
-            else:
+            arrow = icon_label("item_arrow", 24)
+            if arrow is None:
+                arrow = QLabel()
                 arrow.setText("->")
                 arrow.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 16px; font-weight: 800;")
             card_layout.addWidget(arrow)
@@ -211,8 +201,7 @@ class HomePage(QWidget):
         ]:
             btn = QPushButton(tr(label))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            if self._use_theme_assets:
-                btn.setIcon(QIcon(asset_path("icons", icon_name)))
+            set_button_icon(btn, icon_name)
             idx = TAB_NAMES.get(tab, 0)
             btn.clicked.connect(lambda checked=None, i=idx: self.tab_switch_requested.emit(i))
             actions.addWidget(btn)
@@ -272,13 +261,8 @@ class HomePage(QWidget):
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        if self._use_theme_assets:
-            icon = QLabel()
-            icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-                42, 42, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation,
-            ))
-            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon = icon_label(icon_name, 42)
+        if icon is not None:
             layout.addWidget(icon)
 
         n = QLabel(num)
@@ -305,16 +289,10 @@ class HomePage(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(12)
 
-        if self._use_theme_assets:
-            icon = QLabel()
-            icon.setFixedSize(46, 46)
-            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-                40, 40, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation,
-            ))
+        icon = icon_label(icon_name, 40, fixed_size=46)
+        if icon is not None:
             layout.addWidget(icon, 0)
-        else:
+        if icon is None:
             index_label = QLabel(f"{number:02d}")
             index_label.setFixedSize(48, 48)
             index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -369,14 +347,10 @@ class HomePage(QWidget):
             row_layout = QHBoxLayout(row_frame)
             row_layout.setContentsMargins(8, 4, 8, 4)
             row_layout.setSpacing(8)
-            if self._use_theme_assets:
-                icon = QLabel()
-                icon.setPixmap(QPixmap(asset_path("icons", "block_grass")).scaled(
-                    18, 18, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                ))
+            icon = icon_label("block_grass", 18)
+            if icon is not None:
                 row_layout.addWidget(icon)
-            else:
+            if icon is None:
                 marker = QLabel("|")
                 marker.setStyleSheet(f"color: {ACCENT}; font-size: 14px; font-weight: 900;")
                 row_layout.addWidget(marker)
