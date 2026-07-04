@@ -474,7 +474,7 @@ class ReviewPage(QWidget):
     def _preferred_content_width(self) -> int:
         preferred = 620
         if self._answer_revealed and self._answer_text:
-            preferred = max(preferred, self._estimate_answer_width())
+            preferred = max(preferred, min(self._estimate_answer_width(), 800))
         return min(preferred, 1800)
 
     def _estimate_answer_width(self) -> int:
