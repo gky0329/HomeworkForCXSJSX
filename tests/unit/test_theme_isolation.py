@@ -46,6 +46,22 @@ def test_minimal_light_alias_falls_back_to_minecraft():
     assert stylesheet_for_theme("minimal_light") == stylesheet_for_theme("mc")
 
 
+def test_public_docs_match_supported_themes_and_existing_files():
+    checked = [
+        _PROJECT_ROOT / "AGENTS.md",
+        _PROJECT_ROOT / "README.md",
+        _PROJECT_ROOT / "docs" / "PROJECT_GUIDE.md",
+        _PROJECT_ROOT / "config.yaml.example",
+    ]
+
+    for path in checked:
+        text = path.read_text(encoding="utf-8")
+        assert "minimal_light" not in text
+        assert "Minimal White" not in text
+        assert "need.md" not in text
+        assert "架构设计文档v2.md" not in text
+
+
 def test_minimal_dark_runtime_does_not_load_theme_icons():
     from PySide6.QtWidgets import QApplication, QPushButton
 

@@ -12,7 +12,7 @@ C++rafting Table combines a PySide6 desktop UI, AI-assisted execution traces, an
 - **Course workflow support**: import PDF/DOCX/PPTX/Markdown/C++ files, extract knowledge points and quizzes, and send code snippets to the visualizer.
 - **OJ analysis**: paste a problem statement and reference code to generate guided explanations and runnable visualizations.
 - **Knowledge loop**: local JSON storage for knowledge points, spaced-repetition review, activity, scores, and graph-based concept browsing.
-- **Configurable UI**: Settings supports AI provider, proxy, language, code font size, and theme selection: MC, Minimal Black, or Minimal White.
+- **Configurable UI**: Settings supports AI provider, proxy, language, code font size, and theme selection: MC or Minimal Black.
 
 ## Requirements
 
@@ -65,7 +65,7 @@ llm:
 ui:
   language: en
   code_font_size: 16
-  theme: mc  # mc | minimal_dark | minimal_light
+  theme: mc  # mc | minimal_dark
 debugger:
   enable_experimental_pdb: false
 ```
@@ -109,7 +109,7 @@ tools/        Native debugger smoke runner and support scripts
 Run the main unit suite:
 
 ```bash
-python tests/unit/test_fixes.py
+QT_QPA_PLATFORM=offscreen python -m pytest tests/unit -q
 ```
 
 Run native debugger smoke tests where a local compiler/debugger is available:
@@ -134,12 +134,11 @@ PY
 
 ## Documentation
 
-- [`need.md`](need.md): authoritative data contracts and execution flow.
-- [`架构设计文档v2.md`](架构设计文档v2.md): architecture, product pivot, module plan, and technical decisions.
+- [`README.md`](README.md): public project overview, setup, usage, and development checks.
 - [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md): standardized Chinese project guide.
+- [`docs/supported-visualizations.md`](docs/supported-visualizations.md): supported C++ visualization cases and data-shape expectations.
 - [`docs/windows.md`](docs/windows.md): Windows setup and native debugger validation.
 - [`docs/canvas_interaction.md`](docs/canvas_interaction.md): canvas interaction notes.
-- [`docs/supported-visualizations.md`](docs/supported-visualizations.md): supported C++ visualization cases.
 - [`FUTURE_WORK.md`](FUTURE_WORK.md): public roadmap items.
 
 ## Safety Notes

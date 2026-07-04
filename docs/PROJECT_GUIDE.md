@@ -71,7 +71,7 @@ llm:
 ui:
   language: zh
   code_font_size: 16
-  theme: mc  # mc | minimal_dark | minimal_light
+  theme: mc  # mc | minimal_dark
 debugger:
   enable_experimental_pdb: false
 ```
@@ -124,7 +124,6 @@ $env:DEEPSEEK_API_KEY="sk-..."
 
 - MC：当前默认的像素/方块风格深色主题。
 - Minimal Black：低干扰黑色极简主题。
-- Minimal White：适合投影和文档截图的白色极简主题。
 
 保存后全局控件会立即套用新样式；已加载页面中少量内联颜色可能需要重启应用后完全一致。
 
@@ -142,7 +141,7 @@ Windows PDB 后端需要 Visual Studio C++ Build Tools 和 Windows Debugging Too
 
 ```bash
 python -m py_compile main.py app/core/debug_executor.py app/ui/theme/manager.py
-python tests/unit/test_fixes.py
+QT_QPA_PLATFORM=offscreen python -m pytest tests/unit -q
 python tools/native_debug_smoke.py --list-backends
 ```
 
