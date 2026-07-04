@@ -6,14 +6,16 @@ A PySide6 desktop app that uses DeepSeek LLM to execute C++ code line-by-line an
 ```bash
 pip install -r requirements.txt
 python main.py
-# No lint/test commands configured yet — run app directly for visual verification
+QT_QPA_PLATFORM=offscreen python -m pytest tests/unit -q
 ```
 
 ## Authoritative docs
-- `need.md` — Agent-Ready PRD: data contracts (Pydantic V2 models), LLM prompt template, Canvas rendering specs, MVP path
-- `架构设计文档v2.md` — Architecture v2: product pivot rationale, full directory tree, sprint plan, technical decisions
+- `README.md` — public project overview, setup, usage, and development checks
+- `docs/PROJECT_GUIDE.md` — Chinese project guide, workflow, platform status, and verification commands
+- `docs/supported-visualizations.md` — supported C++ visualization cases and data-shape expectations
+- `docs/windows.md` — Windows setup and experimental MSVC/PDB validation notes
 
-Always read both before writing any code. If they conflict, `need.md` takes priority for data contracts and execution flow.
+Use `app/core/memory_model.py` as the source of truth for runtime data contracts. If docs conflict with code, update the docs or tests in the same change.
 
 ## Tech stack
 - **UI**: PySide6 (QGraphicsView, QGraphicsScene, QTimer-based tweens for animation — NOT QPropertyAnimation)
@@ -26,11 +28,11 @@ Always read both before writing any code. If they conflict, `need.md` takes prio
 
 ## Critical constraints (do NOT violate)
 - **No AST libraries** in MVP — parse C++ with regex only (a controlled subset of 7 statement types)
-- **No QPixmap/images** — all Canvas items drawn with pure QPainter geometry (rectangles, text, bezier curves)
+- **Canvas stays pure QGraphics/QPainter** — memory items are drawn with geometry, text, and paths; theme image assets must stay behind `app/ui/theme/`
 - **No external diagram libs** — knowledge graph rendered via QGraphicsView force-directed layout, no D3.js
-- **Dark theme** — VS Code Dark+ style; stack=blue rectangles, heap=orange rounded rects, pointer=gray solid arrows (red dashed when dangling)
+- **Themes** — supported UI themes are MC and Minimal Black; do not add another theme without updating code, docs, and tests together
 - **API key is user-provided** — never hardcode or commit API keys. Read from `DEEPSEEK_API_KEY` env var or `config.yaml` (gitignored).
-- **Thread safety** — AI calls run in Worker thread (`ExecutionWorker` QThread), UI updates in main thread; use signals/slots. Old workers must be `quit()`+`wait()` before replacement.
+- **Thread safety** — AI calls run in Worker thread (`ExecutionWorker` QThread), UI updates in main thread; use signals/slots and `retire_worker()` to disconnect stale worker signals before replacement.
 
 ## Canvas layout rules (QGraphicsView — no DOM, no Flexbox)
 - **Absolute coordinates only**: all item positions must be (x, y) based on `setSceneRect`, never use viewport percentages or relative layout

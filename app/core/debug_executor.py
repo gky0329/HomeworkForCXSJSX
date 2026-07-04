@@ -1644,10 +1644,6 @@ class DebugExecutor:
         return added
 
     @staticmethod
-    def _frame_line(text: str) -> int | None:
-        location = DebugExecutor._frame_location(text)
-        return location.line if location else None
-
     @staticmethod
     def _frame_location(text: str) -> _FrameLocation | None:
         matches = re.findall(
@@ -3729,11 +3725,6 @@ class DebugExecutor:
         return any(token in compact for token in ("pair<", "std::pair<", "std::__1::pair<"))
 
     @staticmethod
-    def _pair_type_has_pointer_member(type_text: str) -> bool:
-        if not DebugExecutor._is_pair_type(type_text):
-            return False
-        return any(DebugExecutor._is_pointer_like_type(arg) for arg in DebugExecutor._template_args(type_text)[:2])
-
     @staticmethod
     def _pair_member_type(type_text: str, member_name: str) -> str:
         args = DebugExecutor._template_args(type_text)

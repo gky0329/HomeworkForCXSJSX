@@ -93,10 +93,6 @@ class TrackerPanel(QWidget):
     def _setup_ui(self):
         self.setStyleSheet(PANEL_BG)
         self.setMinimumHeight(220)
-        self.setSizePolicy(
-            self.sizePolicy().horizontalPolicy(),
-            self.sizePolicy().verticalPolicy(),
-        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 6)

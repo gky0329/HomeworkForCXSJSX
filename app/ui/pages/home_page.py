@@ -5,16 +5,15 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QGridLayout,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
 
 from app.services import error_store
 from app.services.i18n import tr
 from app.ui.widgets.helpers import clear_layout
-from app.ui.theme.minecraft_assets import asset_path
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, ACCENT, SUCCESS, SURFACE_HOVER,
 )
+from app.ui.theme.icon_helpers import icon_label, set_button_icon
 
 
 HEADLINE = f"color: {TEXT_PRIMARY}; font-size: 32px; font-weight: 800; padding: 6px 0;"
@@ -89,11 +88,11 @@ class HomePage(QWidget):
         quick_row.setSpacing(10)
 
         self._quick_cards: list[tuple[QLabel, QLabel, str, str]] = []
-        for label, tab, desc, icon_name in [
+        for number, (label, tab, desc, icon_name) in enumerate([
             ("Write Code", "Code Editor", "Run C++ code and watch\nmemory state step by step", "nav_code"),
             ("Import & Learn", "File Import", "Upload PDF/DOCX/CPP files\nand extract knowledge points", "nav_file"),
             ("Review Mistakes", "Review", "Practice with spaced repetition\nto master C++ concepts", "empty_chest"),
-        ]:
+        ], start=1):
             card = QFrame()
             card.setObjectName("quickCard")
             card.setStyleSheet(
@@ -110,12 +109,18 @@ class HomePage(QWidget):
             card_layout.setContentsMargins(0, 0, 0, 0)
             card_layout.setSpacing(10)
 
-            icon = QLabel()
-            icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-                38, 38, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation,
-            ))
-            card_layout.addWidget(icon)
+            icon = icon_label(icon_name, 38)
+            if icon is not None:
+                card_layout.addWidget(icon)
+            if icon is None:
+                index_label = QLabel(f"{number:02d}")
+                index_label.setFixedWidth(44)
+                index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                index_label.setStyleSheet(
+                    f"color: {ACCENT}; font-size: 20px; font-weight: 900; "
+                    f"border-right: 1px solid {BORDER}; padding-right: 10px;"
+                )
+                card_layout.addWidget(index_label)
 
             text_box = QVBoxLayout()
             text_box.setSpacing(2)
@@ -130,11 +135,11 @@ class HomePage(QWidget):
             card_layout.addLayout(text_box)
             card_layout.addStretch()
 
-            arrow = QLabel()
-            arrow.setPixmap(QPixmap(asset_path("icons", "item_arrow")).scaled(
-                24, 24, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation,
-            ))
+            arrow = icon_label("item_arrow", 24)
+            if arrow is None:
+                arrow = QLabel()
+                arrow.setText("->")
+                arrow.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 16px; font-weight: 800;")
             card_layout.addWidget(arrow)
             self._quick_cards.append((title_lbl, desc_lbl, label, desc))
 
@@ -177,7 +182,7 @@ class HomePage(QWidget):
             ),
         ]):
             elements_grid.addWidget(
-                self._element_card(label, desc, icon_name),
+                self._element_card(label, desc, icon_name, index + 1),
                 index // 2,
                 index % 2,
             )
@@ -196,7 +201,7 @@ class HomePage(QWidget):
         ]:
             btn = QPushButton(tr(label))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setIcon(QIcon(asset_path("icons", icon_name)))
+            set_button_icon(btn, icon_name)
             idx = TAB_NAMES.get(tab, 0)
             btn.clicked.connect(lambda checked=None, i=idx: self.tab_switch_requested.emit(i))
             actions.addWidget(btn)
@@ -256,13 +261,9 @@ class HomePage(QWidget):
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel()
-        icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-            42, 42, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
-        ))
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon)
+        icon = icon_label(icon_name, 42)
+        if icon is not None:
+            layout.addWidget(icon)
 
         n = QLabel(num)
         n.setStyleSheet(STAT_NUM)
@@ -279,7 +280,7 @@ class HomePage(QWidget):
         self._stat_title_labels[label] = l
         return card
 
-    def _element_card(self, title_key: str, desc_key: str, icon_name: str) -> QFrame:
+    def _element_card(self, title_key: str, desc_key: str, icon_name: str, number: int) -> QFrame:
         card = QFrame()
         card.setObjectName("elementCard")
         card.setStyleSheet(ELEMENT_CARD_BG)
@@ -288,14 +289,18 @@ class HomePage(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(12)
 
-        icon = QLabel()
-        icon.setFixedSize(46, 46)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setPixmap(QPixmap(asset_path("icons", icon_name)).scaled(
-            40, 40, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
-        ))
-        layout.addWidget(icon, 0)
+        icon = icon_label(icon_name, 40, fixed_size=46)
+        if icon is not None:
+            layout.addWidget(icon, 0)
+        if icon is None:
+            index_label = QLabel(f"{number:02d}")
+            index_label.setFixedSize(48, 48)
+            index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            index_label.setStyleSheet(
+                f"color: {ACCENT}; font-size: 18px; font-weight: 900; "
+                f"border: 1px solid {BORDER};"
+            )
+            layout.addWidget(index_label, 0)
 
         text_box = QVBoxLayout()
         text_box.setSpacing(3)
@@ -342,12 +347,13 @@ class HomePage(QWidget):
             row_layout = QHBoxLayout(row_frame)
             row_layout.setContentsMargins(8, 4, 8, 4)
             row_layout.setSpacing(8)
-            icon = QLabel()
-            icon.setPixmap(QPixmap(asset_path("icons", "block_grass")).scaled(
-                18, 18, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation,
-            ))
-            row_layout.addWidget(icon)
+            icon = icon_label("block_grass", 18)
+            if icon is not None:
+                row_layout.addWidget(icon)
+            if icon is None:
+                marker = QLabel("|")
+                marker.setStyleSheet(f"color: {ACCENT}; font-size: 14px; font-weight: 900;")
+                row_layout.addWidget(marker)
             row = QLabel(f"{ts}   {act}  -  {detail}")
             row.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 600;")
             row_layout.addWidget(row)

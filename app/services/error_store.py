@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import threading
 import uuid
@@ -14,6 +15,7 @@ SCORES_PATH = _DATA_DIR / "scores.json"
 DEPS_PATH = _DATA_DIR / "dependencies.json"
 
 _lock = threading.RLock()
+logger = logging.getLogger(__name__)
 
 
 def _ensure_data_dir():
@@ -34,8 +36,12 @@ def _ensure_data_dir():
 def _load(path: Path) -> list:
     if not path.exists():
         return []
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to load %s: %s", path, e)
+        return []
 
 
 def _save(path: Path, data: list):
@@ -43,7 +49,11 @@ def _save(path: Path, data: list):
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, path)
+    try:
+        os.replace(tmp_path, path)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 _DECK_KEYWORDS = {

@@ -59,8 +59,14 @@ class AIService:
 
         self.api_base = str(provider_cfg.get("api_base", ""))
         self.model = str(provider_cfg.get("model", ""))
-        self.max_tokens = int(llm_cfg.get("max_tokens", 4096))
-        self.temperature = float(llm_cfg.get("temperature", 0.0))
+        try:
+            self.max_tokens = int(llm_cfg.get("max_tokens", 4096))
+        except (ValueError, TypeError):
+            self.max_tokens = 4096
+        try:
+            self.temperature = float(llm_cfg.get("temperature", 0.0))
+        except (ValueError, TypeError):
+            self.temperature = 0.0
 
         self.api_key_env = str(provider_cfg.get("api_key_env", ""))
         self.api_key = (
@@ -370,10 +376,6 @@ class AIService:
         return candidate or cleaned
 
     @staticmethod
-    def load_json_text(text: str):
-        normalized = AIService._normalize_json(text)
-        return json.loads(normalized)
-
     @staticmethod
     def _first_balanced_json(text: str) -> str:
         start = -1

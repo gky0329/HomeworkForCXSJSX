@@ -7,11 +7,11 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QGraphicsView,
     QGraphicsScene, QGraphicsEllipseItem, QGraphicsTextItem,
     QGraphicsLineItem, QGraphicsRectItem, QStackedWidget,
-    QFileDialog, QMessageBox,
+    QFileDialog, QMessageBox, QApplication,
 )
-from PySide6.QtCore import Qt, QMargins, QTimer, QSize, QPointF
+from PySide6.QtCore import Qt, QMargins, QTimer, QPointF
 from PySide6.QtGui import (
-    QFont, QColor, QPen, QBrush, QPainter, QLinearGradient, QMouseEvent, QIcon,
+    QFont, QColor, QPen, QBrush, QPainter, QLinearGradient, QMouseEvent,
 )
 
 from app.services import error_store
@@ -22,17 +22,48 @@ from app.services.quiz_utils import normalize_quiz_question, normalize_quiz_ques
 from app.ui.widgets.helpers import mlabel, clear_layout
 from app.ui.widgets.threading import retire_worker
 import shiboken6
-from app.ui.theme.minecraft_assets import asset_path
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
     STACK_BORDER, HEAP_BORDER, ACCENT, ACCENT_HOVER, EDGE_DANGLING, SUCCESS,
     SUCCESS_BG, ERROR_BG, EDITOR_BG, TEXT_INVERSE, TEXT_BUTTON_PRIMARY, HEAP_TEXT, EDITOR_LINE_NUM,
-    EDGE_SOLID, PARCHMENT_TEXT, PARCHMENT_MUTED,
+    EDGE_SOLID, PARCHMENT_TEXT, PARCHMENT_MUTED, active_theme,
 )
+from app.ui.theme.icon_helpers import (
+    add_line_edit_icon, set_button_icon, set_item_icon,
+)
+
+
+def _current_theme() -> str:
+    app = QApplication.instance()
+    theme = app.property("cppraftingTheme") if app is not None else None
+    if theme is not None:
+        return str(theme).strip().lower().replace("-", "_")
+    return active_theme()
+
+
+def _knowledge_code_palette() -> dict[str, str]:
+    if _current_theme() == "minimal_dark":
+        return {
+            "inline_bg": EDITOR_BG,
+            "inline_text": HEAP_TEXT,
+            "block_bg": EDITOR_BG,
+            "block_border": BORDER,
+            "block_text": TEXT_PRIMARY,
+            "line_number": EDITOR_LINE_NUM,
+        }
+    return {
+        "inline_bg": "#F0D997",
+        "inline_text": PARCHMENT_TEXT,
+        "block_bg": "#E6C77E",
+        "block_border": "#8D6A35",
+        "block_text": PARCHMENT_TEXT,
+        "line_number": PARCHMENT_MUTED,
+    }
 
 
 def _md_to_html(text: str) -> str:
     """Convert markdown to HTML for QLabel RichText rendering."""
+    code_colors = _knowledge_code_palette()
     text = re.sub(r'^好的[，,]\s*', '', text)
     text = re.sub(r'^当然[，,]\s*', '', text)
     text = re.sub(r'^我来解释.+?[：:]\s*', '', text)
@@ -40,7 +71,13 @@ def _md_to_html(text: str) -> str:
     html = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     html = re.sub(r"```(\w*)\n(.*?)```", _code_block, html, flags=re.DOTALL)
-    html = re.sub(r"`([^`\n]+)`", fr"<code style='background:{EDITOR_BG};color:{HEAP_TEXT};padding:1px 5px;font-family:monospace;'>\1</code>", html)
+    html = re.sub(
+        r"`([^`\n]+)`",
+        fr"<code style='background:{code_colors['inline_bg']};color:{code_colors['inline_text']};"
+        fr"border:1px solid {code_colors['block_border']};padding:1px 5px;"
+        fr"font-family:monospace;'>\1</code>",
+        html,
+    )
     html = re.sub(r"^\*\*\*(.+?)\*\*\*$", fr"<h2 style='color:{STACK_BORDER};font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid {BORDER};padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
     html = re.sub(r"^## (.+)$", fr"<h2 style='color:{STACK_BORDER};font-size:22px;font-weight:700;margin:16px 0 6px 0;border-bottom:1px solid {BORDER};padding-bottom:6px;'>\1</h2>", html, flags=re.MULTILINE)
     html = re.sub(r"^### (.+)$", fr"<h3 style='color:{ACCENT};font-size:18px;font-weight:700;margin:12px 0 4px 0;'>\1</h3>", html, flags=re.MULTILINE)
@@ -54,18 +91,19 @@ def _md_to_html(text: str) -> str:
 
 
 def _code_block(match: re.Match) -> str:
+    code_colors = _knowledge_code_palette()
     _lang = match.group(1)
     code = match.group(2).strip()
     code_escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     lines = code_escaped.split("\n")
     numbered = "".join(
-        f"<span style='color:{EDITOR_LINE_NUM};'>{i+1:>2} </span>{line}<br>"
+        f"<span style='color:{code_colors['line_number']};'>{i+1:>2} </span>{line}<br>"
         for i, line in enumerate(lines)
     )
     return (
-        f"<div style='background:{EDITOR_BG};border:1px solid {BORDER};"
+        f"<div style='background:{code_colors['block_bg']};border:1px solid {code_colors['block_border']};"
         f"padding:10px 14px;margin:8px 0;font-family:monospace;font-size:14px;"
-        f"color:{TEXT_PRIMARY};line-height:1.5;'>{numbered}</div>"
+        f"color:{code_colors['block_text']};line-height:1.5;'>{numbered}</div>"
     )
 
 
@@ -228,7 +266,7 @@ class KnowledgePage(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText(tr("Search concepts..."))
         self._search.setFixedWidth(220)
-        self._search.addAction(QIcon(asset_path("icons", "action_search")), QLineEdit.ActionPosition.LeadingPosition)
+        add_line_edit_icon(self._search, "action_search")
         self._search.textChanged.connect(self._on_search)
         header.addWidget(self._search)
 
@@ -298,8 +336,7 @@ class KnowledgePage(QWidget):
         bottom.addWidget(self._export_md_btn)
 
         self._refresh_btn = QPushButton(tr("Refresh"))
-        self._refresh_btn.setIcon(QIcon(asset_path("icons", "action_refresh")))
-        self._refresh_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._refresh_btn, "action_refresh")
         self._refresh_btn.clicked.connect(self._refresh)
         bottom.addWidget(self._refresh_btn)
         layout.addLayout(bottom)
@@ -374,7 +411,7 @@ class KnowledgePage(QWidget):
             if errs:
                 label += f"  ({errs})"
             item = QListWidgetItem(label)
-            item.setIcon(QIcon(asset_path("icons", self._concept_icon(name))))
+            set_item_icon(item, self._concept_icon(name))
             item.setSizeHint(item.sizeHint().grownBy(QMargins(0, 6, 0, 6)))
             if errs > 0:
                 item.setForeground(QColor(EDGE_DANGLING))
@@ -464,8 +501,7 @@ class KnowledgePage(QWidget):
         self._add_review_button(name)
 
         quiz_btn = QPushButton(tr("Quiz Me"))
-        quiz_btn.setIcon(QIcon(asset_path("icons", "action_quiz")))
-        quiz_btn.setIconSize(QSize(18, 18))
+        set_button_icon(quiz_btn, "action_quiz")
         quiz_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 2px solid {ACCENT}; "
@@ -476,8 +512,7 @@ class KnowledgePage(QWidget):
         self._detail_layout.addWidget(quiz_btn)
 
         del_btn = QPushButton(tr("Delete"))
-        del_btn.setIcon(QIcon(asset_path("icons", "action_delete")))
-        del_btn.setIconSize(QSize(16, 16))
+        set_button_icon(del_btn, "action_delete", 16)
         del_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {TEXT_MUTED}; border: 2px solid {BORDER}; "
@@ -491,8 +526,7 @@ class KnowledgePage(QWidget):
 
     def _add_explain_button(self, concept_name: str):
         btn = QPushButton(tr("Explain with AI"))
-        btn.setIcon(QIcon(asset_path("icons", "action_ai")))
-        btn.setIconSize(QSize(18, 18))
+        set_button_icon(btn, "action_ai")
 
         def on_explain():
             kps = error_store.get_knowledge_points()
@@ -549,8 +583,7 @@ class KnowledgePage(QWidget):
 
     def _add_review_button(self, name: str):
         btn = QPushButton(tr("Add to Review"))
-        btn.setIcon(QIcon(asset_path("icons", "action_add")))
-        btn.setIconSize(QSize(18, 18))
+        set_button_icon(btn, "action_add")
         btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "
@@ -632,8 +665,7 @@ class KnowledgePage(QWidget):
                     f"color: {EDGE_DANGLING}; font-size: 14px; font-weight: bold; padding: 4px 0;"
                 )
                 add_btn = QPushButton(tr("Add to Review"))
-                add_btn.setIcon(QIcon(asset_path("icons", "action_add")))
-                add_btn.setIconSize(QSize(16, 16))
+                set_button_icon(add_btn, "action_add", 16)
                 add_btn.setStyleSheet(
                     f"QPushButton {{ background-color: transparent; "
                     f"color: {EDGE_DANGLING}; border: 2px solid {EDGE_DANGLING}; "

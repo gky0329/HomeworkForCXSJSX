@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QComboBox, QSizePolicy, QScrollArea,
     QFileDialog, QMessageBox,
 )
-from PySide6.QtCore import Qt, QTimer, QSize
-from PySide6.QtGui import QTextDocument, QIcon
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QTextDocument
 
 from app.services import error_store
 from app.services import export_service
@@ -18,9 +18,9 @@ import shiboken6
 from app.ui.theme.colors import (
     CANVAS_BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     STACK_BORDER, HEAP_BORDER, ACCENT, EDGE_DANGLING, SUCCESS, SUCCESS_BG,
-    TEXT_INVERSE, TEXT_BUTTON_PRIMARY, ERROR_BG, WARN, WARN_BG, INFO, INFO_BG,
+    TEXT_BUTTON_PRIMARY, ERROR_BG, WARN, WARN_BG, INFO, INFO_BG,
 )
-from app.ui.theme.minecraft_assets import asset_path
+from app.ui.theme.icon_helpers import set_button_icon
 
 
 def _fmt_interval(days: float) -> str:
@@ -154,8 +154,7 @@ class ReviewPage(QWidget):
 
         self._add_btn = QPushButton(tr("+ Add"))
         self._add_btn.setProperty("variant", "secondary")
-        self._add_btn.setIcon(QIcon(asset_path("icons", "action_add")))
-        self._add_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._add_btn, "action_add")
         self._add_btn.clicked.connect(self._on_add_error)
         header.addWidget(self._add_btn)
 
@@ -383,8 +382,7 @@ class ReviewPage(QWidget):
         v.addSpacing(12)
 
         hint_btn = QPushButton(tr("Hint"))
-        hint_btn.setIcon(QIcon(asset_path("icons", "action_hint")))
-        hint_btn.setIconSize(QSize(18, 18))
+        set_button_icon(hint_btn, "action_hint")
         hint_btn.setStyleSheet(
             f"QPushButton {{ background-color: transparent; "
             f"color: {ACCENT}; border: 2px solid {ACCENT}; "
@@ -476,7 +474,7 @@ class ReviewPage(QWidget):
     def _preferred_content_width(self) -> int:
         preferred = 620
         if self._answer_revealed and self._answer_text:
-            preferred = max(preferred, self._estimate_answer_width())
+            preferred = max(preferred, min(self._estimate_answer_width(), 800))
         return min(preferred, 1800)
 
     def _estimate_answer_width(self) -> int:

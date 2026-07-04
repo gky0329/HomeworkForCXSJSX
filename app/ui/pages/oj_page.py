@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QGraphicsView, QGraphicsScene,
     QSplitter, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QRectF, QSize
-from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QIcon
+from PySide6.QtCore import Qt, QThread, Signal, QRectF
+from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent
 
 from app.core.memory_model import ExecutionTrace
 from app.core.state_diff import StateDiffEngine
@@ -28,7 +28,7 @@ from app.ui.theme.colors import (
     ACCENT, STACK_BORDER, HEAP_BORDER, HIGHLIGHT, EDGE_DANGLING,
     TEXT_INVERSE, TEXT_BUTTON_PRIMARY, SUCCESS, SUCCESS_BG,
 )
-from app.ui.theme.minecraft_assets import asset_path
+from app.ui.theme.icon_helpers import set_button_icon
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +160,7 @@ class OJPage(QWidget):
 
         toolbar = QHBoxLayout()
         self._run_btn = QPushButton(tr("Run Analysis"))
-        self._run_btn.setIcon(QIcon(asset_path("icons", "action_run")))
-        self._run_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._run_btn, "action_run")
         self._run_btn.clicked.connect(self._on_run)
         toolbar.addWidget(self._run_btn)
 
@@ -517,8 +516,7 @@ class OJPage(QWidget):
         self._test_expected.setMaximumHeight(50)
         self._test_expected.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", 11))
         self._add_case_btn = QPushButton(tr("Add Case"))
-        self._add_case_btn.setIcon(QIcon(asset_path("icons", "action_add")))
-        self._add_case_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._add_case_btn, "action_add")
         self._add_case_btn.clicked.connect(self._on_add_test_case)
         test_header.addWidget(self._test_input)
         test_header.addWidget(self._test_expected)
@@ -531,8 +529,7 @@ class OJPage(QWidget):
 
         run_row = QHBoxLayout()
         self._run_tests_btn = QPushButton(tr("Run Tests"))
-        self._run_tests_btn.setIcon(QIcon(asset_path("icons", "action_run")))
-        self._run_tests_btn.setIconSize(QSize(18, 18))
+        set_button_icon(self._run_tests_btn, "action_run")
         self._run_tests_btn.clicked.connect(self._on_compile_run)
         self._run_tests_btn.setVisible(False)
         run_row.addWidget(self._run_tests_btn)

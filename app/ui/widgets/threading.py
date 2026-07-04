@@ -1,8 +1,7 @@
 from collections.abc import Iterable
 
 
-def retire_worker(owner, worker, disconnect: Iterable[tuple[object, object]] = (), timeout_ms: int = 1000):
-    """Detach a QThread-like worker without destroying it while it is still running."""
+def retire_worker(owner, worker, disconnect: Iterable[tuple[object, object]] = (), timeout_ms: int = 0):
     if worker is None:
         return
 
@@ -32,10 +31,8 @@ def retire_worker(owner, worker, disconnect: Iterable[tuple[object, object]] = (
     try:
         if worker.isRunning():
             worker.requestInterruption()
-            worker.quit()
-            if not worker.wait(timeout_ms):
-                retired.append(worker)
-                return
+            retired.append(worker)
+            return
         worker.deleteLater()
     except Exception:
         retired.append(worker)
