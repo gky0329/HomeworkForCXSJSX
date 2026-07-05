@@ -153,7 +153,9 @@ class ApiKeyDialog(QDialog):
         self._add_labeled_widget(ui_form, tr("UI Theme"), self._theme_combo)
 
         self._font_spin = QSpinBox()
+        self._font_spin.setObjectName("codeFontSpin")
         self._font_spin.setRange(8, 32)
+        self._font_spin.setMinimumWidth(112)
         self._font_spin.setValue(int(self._config.get("ui", {}).get("code_font_size", 14)))
         self._add_labeled_widget(ui_form, tr("Code Font Size"), self._font_spin)
 

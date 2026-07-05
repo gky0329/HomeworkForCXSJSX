@@ -272,7 +272,7 @@ QLineEdit, QSpinBox {{
     background-color: {EDITOR_BG};
     {border_image("inputs", "text_input_frame", 8)}
     border-width: 8px;
-    padding: 6px 10px;
+    padding: 6px 30px 6px 10px;
     min-height: 24px;
     selection-background-color: {EDITOR_SELECTION};
     placeholder-text-color: {TEXT_PLACEHOLDER};
@@ -457,6 +457,18 @@ QDialog > QWidget, QMessageBox > QWidget {{
 
 QDialogButtonBox QPushButton {{
     min-width: 86px;
+}}
+
+QSpinBox#codeFontSpin {{
+    min-width: 96px;
+}}
+
+QSpinBox::up-button, QSpinBox::down-button {{
+    background: transparent;
+    background-image: none;
+    border: none;
+    width: 18px;
+    subcontrol-origin: border;
 }}
 
 QDialog QLabel#settingsTitle {{
