@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
+from app.ui.theme.colors import set_active_theme
 from app.ui.theme.fonts import load_theme_fonts
+from app.ui.theme.icon_helpers import clear_theme_icon_cache
 from app.ui.theme.minecraft_assets import asset_path, asset_url, bg_image, border_image
 from app.ui.theme.styles import stylesheet_for_theme
 from app.utils.startup_profiler import StartupProfiler
@@ -15,8 +17,8 @@ THEME_END_CITY = "mc_end_city"
 THEME_MINIMAL_DARK = "minimal_dark"
 
 THEME_LABELS = {
-    THEME_MINECRAFT: "Minecraft",
-    THEME_END_CITY: "Minecraft End City",
+    THEME_MINECRAFT: "Minecraft Dark",
+    THEME_END_CITY: "Minecraft Light",
     THEME_MINIMAL_DARK: "Minimal Black",
 }
 
@@ -64,6 +66,21 @@ class ThemeManager:
     """Single entry point for app-wide UI theme selection."""
 
     @staticmethod
+    def repolish(app: QApplication) -> None:
+        """Force Qt to drop cached widget polish after a runtime theme switch."""
+        style = app.style()
+        for widget in app.allWidgets():
+            try:
+                style.unpolish(widget)
+                style.polish(widget)
+                QWidget.update(widget)
+                viewport = getattr(widget, "viewport", lambda: None)()
+                if viewport is not None:
+                    viewport.update()
+            except RuntimeError:
+                continue
+
+    @staticmethod
     def apply(
         app: QApplication,
         profiler: StartupProfiler | None = None,
@@ -72,16 +89,25 @@ class ThemeManager:
         theme: str | None = None,
     ) -> list[str]:
         active_theme = normalize_theme(theme) if theme is not None else theme_from_config(config_path)
+        previous_theme = str(app.property("cppraftingTheme") or "")
+        theme_changed = previous_theme != active_theme
+        set_active_theme(active_theme)
         if profiler is not None:
             with profiler.span("fonts"):
                 loaded_fonts = load_theme_fonts()
             with profiler.span("qss"):
                 app.setProperty("cppraftingTheme", active_theme)
-                app.setStyleSheet(stylesheet_for_theme(active_theme))
+                if theme_changed or not app.styleSheet():
+                    clear_theme_icon_cache()
+                    app.setStyleSheet(stylesheet_for_theme(active_theme))
+                    ThemeManager.repolish(app)
             return loaded_fonts
         loaded_fonts = load_theme_fonts()
         app.setProperty("cppraftingTheme", active_theme)
-        app.setStyleSheet(stylesheet_for_theme(active_theme))
+        if theme_changed or not app.styleSheet():
+            clear_theme_icon_cache()
+            app.setStyleSheet(stylesheet_for_theme(active_theme))
+            ThemeManager.repolish(app)
         return loaded_fonts
 
     @staticmethod

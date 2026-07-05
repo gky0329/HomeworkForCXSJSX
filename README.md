@@ -12,7 +12,7 @@ C++rafting Table combines a PySide6 desktop UI, AI-assisted execution traces, an
 - **Course workflow support**: import PDF/DOCX/PPTX/Markdown/C++ files, extract knowledge points and quizzes, and send code snippets to the visualizer.
 - **OJ analysis**: paste a problem statement and reference code to generate guided explanations and runnable visualizations.
 - **Knowledge loop**: local JSON storage for knowledge points, spaced-repetition review, activity, scores, and graph-based concept browsing.
-- **Configurable UI**: Settings supports AI provider, proxy, language, code font size, and theme selection: MC, MC End City, or Minimal Black.
+- **Configurable UI**: Settings supports AI provider, proxy, language, code font size, and theme selection: MC Dark, MC Light, or Minimal Black.
 
 ## Requirements
 

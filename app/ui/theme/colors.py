@@ -121,10 +121,67 @@ _DARK = {
     "EDITOR_SELECTION": "#2A2A2A",
 }
 
+
+_END_CITY = {
+    "CANVAS_BG": "#F4E8C2",
+    "CANVAS_BG_LIGHTER": "#FAF0CF",
+    "SURFACE": "#F7EBD1",
+    "SURFACE_HOVER": "#FFF3DA",
+    "BORDER": "#C9B0C9",
+    "BORDER_FOCUS": "#E85BFF",
+    "TEXT_PRIMARY": "#2A2031",
+    "TEXT_SECONDARY": "#5F5262",
+    "TEXT_MUTED": "#7C6F7D",
+    "TEXT_INVERSE": "#FFFFFF",
+    "TEXT_TITLE": "#24172C",
+    "TEXT_TITLE_WARM": "#3D2548",
+    "TEXT_DISABLED": "#958896",
+    "TEXT_PLACEHOLDER": "#867787",
+    "TEXT_BUTTON_PRIMARY": "#2A2031",
+    "TEXT_BUTTON_WOOD": "#2A2031",
+    "PARCHMENT_TEXT": "#2A2031",
+    "PARCHMENT_MUTED": "#6A5A65",
+    "STACK_BORDER": "#8E3FB0",
+    "STACK_BG": "#F8EBD1",
+    "STACK_TITLE": "#4A3158",
+    "STACK_VAR_TEXT": "#2A2031",
+    "STACK_AREA_BG": "#FFF6DA",
+    "HEAP_BORDER": "#9E5EAE",
+    "HEAP_BG": "#F4E3BE",
+    "HEAP_TEXT": "#5A3A62",
+    "HEAP_AREA_BG": "#FFF2D6",
+    "ACCENT": "#A040BF",
+    "ACCENT_TEXT": "#8E3FB0",
+    "ACCENT_HOVER": "#C35DDA",
+    "ACCENT_PRESSED": "#7B2A98",
+    "SECONDARY": "#F1E4CF",
+    "SECONDARY_HOVER": "#FFF0D9",
+    "ERROR": "#A6384B",
+    "ERROR_BG": "#F7D9DF",
+    "SUCCESS": "#2E7D45",
+    "SUCCESS_BG": "#DDEFD9",
+    "WARN": "#8C5B00",
+    "WARN_BG": "#F4E5BC",
+    "INFO": "#8E3FB0",
+    "INFO_BG": "#F0DDF5",
+    "EDGE_SOLID": "#6A5A65",
+    "EDGE_DANGLING": "#A6384B",
+    "EDGE_REF": "#2E7D45",
+    "HIGHLIGHT": "#D84CFF",
+    "HIGHLIGHT_BG": "#F6DCF9",
+    "EDITOR_BG": "#FFF6DA",
+    "EDITOR_TEXT": "#211827",
+    "EDITOR_LINE_NUM": "#7C6F7D",
+    "EDITOR_CURSOR": "#8E3FB0",
+    "EDITOR_SELECTION": "#EAC8F3",
+}
+
 def _normalize_theme(theme: object) -> str:
     key = str(theme or "").strip().lower().replace("-", "_")
     if key in {"", "dark", "mc", "minecraft", "minecraft_dark"}:
         return "mc"
+    if key in {"end", "end_city", "mc_end_city", "minecraft_end_city"}:
+        return "mc_end_city"
     if key in {"minimal_dark", "minimal_black", "black"}:
         return "minimal_dark"
     return "mc"
@@ -134,6 +191,8 @@ def palette_for_theme(theme: object) -> dict[str, str]:
     key = _normalize_theme(theme)
     if key == "mc":
         return dict(_MINECRAFT)
+    if key == "mc_end_city":
+        return dict(_END_CITY)
     return dict(_DARK)
 
 
@@ -158,8 +217,15 @@ def active_theme() -> str:
     return ACTIVE_THEME
 
 
+def set_active_theme(theme: object) -> None:
+    """Update theme globals for lazily imported pages after runtime switching."""
+    global ACTIVE_THEME
+    ACTIVE_THEME = _normalize_theme(theme)
+    globals().update(palette_for_theme(ACTIVE_THEME))
+
+
 def use_minecraft_assets() -> bool:
-    return ACTIVE_THEME in {"mc", "minecraft", "minecraft_dark"}
+    return ACTIVE_THEME in {"mc", "mc_end_city", "minecraft", "minecraft_dark", "end_city", "minecraft_end_city"}
 
 
 globals().update(palette_for_theme(ACTIVE_THEME))

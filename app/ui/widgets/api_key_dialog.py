@@ -4,13 +4,13 @@ from pathlib import Path
 
 import yaml
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from app.services.ai_service import DEFAULT_PROVIDERS
 from app.services.i18n import LANGUAGE_LABELS, get_language, load_language, tr
-from app.ui.theme.colors import TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
 from app.ui.theme.manager import THEME_LABELS, normalize_theme
 
 logger = logging.getLogger(__name__)
@@ -36,10 +36,11 @@ class ApiKeyDialog(QDialog):
             self._provider = "deepseek"
 
         self.setWindowTitle(tr("AI Settings"))
-        self.setMinimumWidth(520)
+        self.setMinimumSize(640, 520)
         self.setModal(True)
         self._setup_ui()
         self._load_provider_fields(self._provider)
+        self._fit_to_screen()
 
     def _load_config(self) -> dict:
         if not self._config_path.exists():
@@ -66,16 +67,24 @@ class ApiKeyDialog(QDialog):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 14)
+        layout.setSpacing(12)
 
         title = QLabel(tr("AI Settings"))
-        title.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {TEXT_PRIMARY};")
+        title.setObjectName("settingsTitle")
         layout.addWidget(title)
 
-        input_style = ""
-        combo_style = ""
-        label_style = f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: bold; margin-top: 6px;"
-        hint_style = f"color: {TEXT_MUTED}; font-size: 13px; font-weight: 600;"
+        tabs = QTabWidget()
+        tabs.setObjectName("settingsTabs")
+        layout.addWidget(tabs, 1)
+
+        ai_page, ai_form = self._tab_page()
+        ui_page, ui_form = self._tab_page()
+        advanced_page, advanced_form = self._tab_page()
+
+        tabs.addTab(ai_page, tr("AI"))
+        tabs.addTab(ui_page, tr("Interface"))
+        tabs.addTab(advanced_page, tr("Advanced"))
 
         self._provider_combo = QComboBox()
         for provider in DEFAULT_PROVIDERS:
@@ -83,48 +92,46 @@ class ApiKeyDialog(QDialog):
         provider_index = self._provider_combo.findData(self._provider)
         if provider_index >= 0:
             self._provider_combo.setCurrentIndex(provider_index)
-        self._provider_combo.setStyleSheet(combo_style)
         self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        self._add_labeled_widget(layout, tr("Provider"), self._provider_combo, label_style)
+        self._add_labeled_widget(ai_form, tr("Provider"), self._provider_combo)
 
         self._model_input = QLineEdit()
         self._model_input.setPlaceholderText("model")
-        self._model_input.setStyleSheet(input_style)
-        self._add_labeled_widget(layout, tr("Model"), self._model_input, label_style)
+        self._add_labeled_widget(ai_form, tr("Model"), self._model_input)
 
         self._base_input = QLineEdit()
         self._base_input.setPlaceholderText("https://...")
-        self._base_input.setStyleSheet(input_style)
-        self._add_labeled_widget(layout, tr("API Base"), self._base_input, label_style)
+        self._add_labeled_widget(ai_form, tr("API Base"), self._base_input)
 
         self._key_input = QLineEdit()
         self._key_input.setPlaceholderText(tr("API Key"))
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._key_input.setStyleSheet(input_style)
-        self._add_labeled_widget(layout, tr("API Key"), self._key_input, label_style)
 
-        show_layout = QHBoxLayout()
+        key_row = QWidget()
+        show_layout = QHBoxLayout(key_row)
+        show_layout.setContentsMargins(0, 0, 0, 0)
+        show_layout.setSpacing(8)
+        show_layout.addWidget(self._key_input, 1)
         self._show_btn = QPushButton(tr("Show"))
+        self._show_btn.setProperty("variant", "secondary")
         self._show_btn.setCheckable(True)
         self._show_btn.toggled.connect(self._toggle_visibility)
         show_layout.addWidget(self._show_btn)
-        show_layout.addStretch()
-        layout.addLayout(show_layout)
+        self._add_labeled_widget(ai_form, tr("API Key"), key_row)
 
         self._env_hint = QLabel("")
         self._env_hint.setWordWrap(True)
-        self._env_hint.setStyleSheet(hint_style)
-        layout.addWidget(self._env_hint)
+        self._env_hint.setProperty("muted", True)
+        ai_form.addRow("", self._env_hint)
 
         self._proxy_input = QLineEdit()
         self._proxy_input.setPlaceholderText("http://127.0.0.1:7890")
-        self._proxy_input.setStyleSheet(input_style)
-        self._add_labeled_widget(layout, tr("Proxy (optional)"), self._proxy_input, label_style)
+        self._add_labeled_widget(ai_form, tr("Proxy (optional)"), self._proxy_input)
 
         proxy_hint = QLabel(tr("Leave empty if no proxy."))
         proxy_hint.setWordWrap(True)
-        proxy_hint.setStyleSheet(hint_style)
-        layout.addWidget(proxy_hint)
+        proxy_hint.setProperty("muted", True)
+        ai_form.addRow("", proxy_hint)
 
         self._language_combo = QComboBox()
         for value, label in LANGUAGE_LABELS.items():
@@ -134,8 +141,7 @@ class ApiKeyDialog(QDialog):
         )
         if lang_index >= 0:
             self._language_combo.setCurrentIndex(lang_index)
-        self._language_combo.setStyleSheet(combo_style)
-        self._add_labeled_widget(layout, tr("Language"), self._language_combo, label_style)
+        self._add_labeled_widget(ui_form, tr("Language"), self._language_combo)
 
         self._theme_combo = QComboBox()
         for value, label_key in THEME_LABELS.items():
@@ -144,28 +150,27 @@ class ApiKeyDialog(QDialog):
         theme_index = self._theme_combo.findData(active_theme)
         if theme_index >= 0:
             self._theme_combo.setCurrentIndex(theme_index)
-        self._theme_combo.setStyleSheet(combo_style)
-        self._add_labeled_widget(layout, tr("UI Theme"), self._theme_combo, label_style)
+        self._add_labeled_widget(ui_form, tr("UI Theme"), self._theme_combo)
 
         self._font_spin = QSpinBox()
         self._font_spin.setRange(8, 32)
         self._font_spin.setValue(int(self._config.get("ui", {}).get("code_font_size", 14)))
-        self._font_spin.setStyleSheet(input_style.replace("QLineEdit", "QSpinBox"))
-        self._add_labeled_widget(layout, tr("Code Font Size"), self._font_spin, label_style)
+        self._add_labeled_widget(ui_form, tr("Code Font Size"), self._font_spin)
 
         debugger_cfg = self._config.get("debugger", {})
         self._pdb_check = QCheckBox(tr("Enable experimental MSVC/PDB native debugger"))
         self._pdb_check.setChecked(bool(debugger_cfg.get("enable_experimental_pdb", False)))
-        layout.addWidget(self._pdb_check)
+        advanced_form.addRow("", self._pdb_check)
         pdb_hint = QLabel(
             tr("Requires Windows, Visual Studio Build Tools, and Windows Debugging Tools.")
         )
         pdb_hint.setWordWrap(True)
-        pdb_hint.setStyleSheet(hint_style)
-        layout.addWidget(pdb_hint)
+        pdb_hint.setProperty("muted", True)
+        advanced_form.addRow("", pdb_hint)
 
         btn_layout = QHBoxLayout()
         cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.setProperty("variant", "secondary")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         btn_layout.addStretch()
@@ -176,11 +181,47 @@ class ApiKeyDialog(QDialog):
         btn_layout.addWidget(save_btn)
         layout.addLayout(btn_layout)
 
-    def _add_labeled_widget(self, layout: QVBoxLayout, text: str, widget, label_style: str):
+    def _tab_page(self) -> tuple[QScrollArea, QFormLayout]:
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(10, 10, 10, 10)
+        wrapper_layout.setSpacing(0)
+
+        content = QFrame()
+        content.setObjectName("settingsPanel")
+        form = QFormLayout(content)
+        self._setup_form(form)
+        wrapper_layout.addWidget(content, 0)
+        wrapper_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(wrapper)
+        return scroll, form
+
+    def _setup_form(self, layout: QFormLayout) -> None:
+        layout.setContentsMargins(56, 32, 42, 30)
+        layout.setHorizontalSpacing(22)
+        layout.setVerticalSpacing(18)
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+    def _add_labeled_widget(self, layout: QFormLayout, text: str, widget):
         label = QLabel(text)
-        label.setStyleSheet(label_style)
-        layout.addWidget(label)
-        layout.addWidget(widget)
+        label.setProperty("role", "formLabel")
+        label.setMinimumWidth(96)
+        layout.addRow(label, widget)
+
+    def _fit_to_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            self.resize(720, 620)
+            return
+        available = screen.availableGeometry()
+        width = min(760, max(620, available.width() - 120))
+        height = min(660, max(500, available.height() - 120))
+        self.resize(width, height)
+        self.setMaximumSize(available.width() - 40, available.height() - 40)
 
     def _on_provider_changed(self):
         provider = self._provider_combo.currentData()

@@ -7,24 +7,55 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QListWidgetItem, 
 from app.ui.theme.colors import use_minecraft_assets
 from app.ui.theme.minecraft_assets import asset_path
 
+_ICON_CACHE: dict[str, QIcon] = {}
+_PIXMAP_CACHE: dict[str, QPixmap] = {}
+
+
+def _active_theme() -> str:
+    app = QApplication.instance()
+    if app is None:
+        return ""
+    theme = app.property("cppraftingTheme")
+    return str(theme or "").strip().lower().replace("-", "_")
+
 
 def theme_uses_icons() -> bool:
-    app = QApplication.instance()
-    if app is not None:
-        theme = app.property("cppraftingTheme")
-        if theme is not None:
-            return str(theme).strip().lower().replace("-", "_") in {
-                "mc",
-                "minecraft",
-                "minecraft_dark",
-            }
+    theme = _active_theme()
+    if theme:
+        return theme in {
+            "mc",
+            "mc_end_city",
+            "minecraft",
+            "minecraft_dark",
+            "end_city",
+            "minecraft_end_city",
+        }
     return use_minecraft_assets()
+
+
+def theme_icon_path(name: str) -> str:
+    theme = _active_theme()
+    if theme in {"mc_end_city", "end_city", "minecraft_end_city"}:
+        themed_path = asset_path("themes/mc_end_city/icons", name)
+        if not themed_path.endswith(".svg"):
+            return themed_path
+    return asset_path("icons", name)
 
 
 def theme_icon(name: str) -> QIcon:
     if not theme_uses_icons():
         return QIcon()
-    return QIcon(asset_path("icons", name))
+    path = theme_icon_path(name)
+    icon = _ICON_CACHE.get(path)
+    if icon is None:
+        icon = QIcon(path)
+        _ICON_CACHE[path] = icon
+    return icon
+
+
+def clear_theme_icon_cache() -> None:
+    _ICON_CACHE.clear()
+    _PIXMAP_CACHE.clear()
 
 
 def set_button_icon(button: QPushButton, name: str, size: int = 18) -> None:
@@ -51,7 +82,12 @@ def icon_label(name: str, icon_size: int, fixed_size: int | None = None) -> QLab
     if fixed_size is not None:
         label.setFixedSize(fixed_size, fixed_size)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    label.setPixmap(QPixmap(asset_path("icons", name)).scaled(
+    path = theme_icon_path(name)
+    pixmap = _PIXMAP_CACHE.get(path)
+    if pixmap is None:
+        pixmap = QPixmap(path)
+        _PIXMAP_CACHE[path] = pixmap
+    label.setPixmap(pixmap.scaled(
         icon_size,
         icon_size,
         Qt.AspectRatioMode.KeepAspectRatio,

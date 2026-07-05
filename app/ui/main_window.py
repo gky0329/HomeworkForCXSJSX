@@ -1,5 +1,7 @@
 import time
 import logging
+import importlib
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,7 @@ from PySide6.QtGui import QFont, QColor, QPainter, QWheelEvent, QMouseEvent, QIc
 from app.ui.theme.colors import (
     BORDER, CANVAS_BG, EDITOR_BG, EDITOR_SELECTION, HIGHLIGHT, SURFACE,
     TEXT_PRIMARY, TEXT_SECONDARY,
+    palette_for_theme, active_theme,
 )
 from app.ui.theme.icon_helpers import set_button_icon, theme_icon, theme_uses_icons
 from app.ui.pages.home_page import HomePage
@@ -537,14 +540,11 @@ class MainWindow(QMainWindow):
         splitter.setHandleWidth(2)
 
         self.code_editor = QPlainTextEdit()
+        self.code_editor.setObjectName("codeEditor")
         self.code_editor.setPlainText(EXAMPLE_CODES[DEFAULT_EXAMPLE_KEY])
         font_size = self._read_config_font_size()
         self.code_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", font_size))
         self.code_editor.setPlaceholderText(tr("// Enter C++ code here..."))
-        self.code_editor.setStyleSheet(
-            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
-            f"selection-background-color: {EDITOR_SELECTION}; border: none; padding: 6px; }}"
-        )
 
         left_pane = QWidget()
         left_layout = QVBoxLayout(left_pane)
@@ -560,13 +560,10 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.stdin_label, 0)
 
         self.stdin_editor = QPlainTextEdit()
+        self.stdin_editor.setObjectName("stdinEditor")
         self.stdin_editor.setFixedHeight(92)
         self.stdin_editor.setFont(QFont("JetBrains Mono, Menlo, SF Mono, Courier New, monospace", max(13, font_size - 1)))
         self.stdin_editor.setPlaceholderText(tr("Optional stdin for cin / scanf, one sample input block"))
-        self.stdin_editor.setStyleSheet(
-            f"QPlainTextEdit {{ background-color: {EDITOR_BG}; color: {TEXT_PRIMARY}; "
-            f"border: none; border-top: 1px solid {BORDER}; padding: 6px; }}"
-        )
         left_layout.addWidget(self.stdin_editor, 0)
 
         self.canvas_view = CanvasView()
@@ -881,8 +878,118 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             ThemeManager.apply(app, config_path=self._config_path)
-        self.statusBar().showMessage(tr("Settings saved. Restart the app to update every page."))
+        self._rebuild_theme_sensitive_pages()
+        self._refresh_theme_assets()
+        self.statusBar().showMessage(tr("Settings saved."))
         self._retranslate()
+
+    def _sync_theme_color_globals(self) -> None:
+        palette = palette_for_theme(active_theme())
+        for name in (
+            "BORDER", "CANVAS_BG", "EDITOR_BG", "EDITOR_SELECTION",
+            "HIGHLIGHT", "SURFACE", "TEXT_PRIMARY", "TEXT_SECONDARY",
+        ):
+            globals()[name] = palette[name]
+
+    def _reload_theme_sensitive_modules(self) -> None:
+        # These modules cache color tokens at import time for inline Qt styles.
+        module_names = [
+            "app.ui.widgets.helpers",
+            "app.ui.widgets.empty_state",
+            "app.ui.pages.home_page",
+            "app.ui.pages.file_import_page",
+            "app.ui.pages.oj_page",
+            "app.ui.pages.review_page",
+            "app.ui.pages.knowledge_page",
+        ]
+        for module_name in module_names:
+            module = sys.modules.get(module_name)
+            if module is not None:
+                importlib.reload(module)
+        home_module = sys.modules.get("app.ui.pages.home_page")
+        if home_module is not None and hasattr(home_module, "HomePage"):
+            globals()["HomePage"] = home_module.HomePage
+
+    def _replace_tab_for_theme(self, index: int, widget: QWidget, icon_name: str, label_key: str) -> None:
+        old_widget = self._tabs.widget(index)
+        self._replacing_lazy_tab = True
+        self._tabs.removeTab(index)
+        if self._use_theme_assets:
+            self._tabs.insertTab(index, widget, theme_icon(icon_name), tr(label_key))
+        else:
+            self._tabs.insertTab(index, widget, tr(label_key))
+        self._replacing_lazy_tab = False
+        if old_widget is not None:
+            old_widget.deleteLater()
+
+    def _rebuild_theme_sensitive_pages(self) -> None:
+        current_index = self._tabs.currentIndex()
+        self._sync_theme_color_globals()
+        self._reload_theme_sensitive_modules()
+        self._use_theme_assets = theme_uses_icons()
+
+        self._home_tab = self._build_home_tab()
+        self._replace_tab_for_theme(self._home_tab_index, self._home_tab, "nav_home", "Home")
+
+        rebuilders = [
+            ("_file_tab", "_file_tab_index", self._build_file_tab, "nav_file", "File Import"),
+            ("_oj_tab", "_oj_tab_index", self._build_oj_tab, "nav_oj", "OJ Analysis"),
+            ("_review_tab", "_review_tab_index", self._build_review_tab, "nav_review", "Review"),
+            ("_kb_tab", "_kb_tab_index", self._build_kb_tab, "nav_knowledge", "Knowledge Base"),
+        ]
+        for tab_attr, index_attr, builder, icon_name, label_key in rebuilders:
+            if getattr(self, tab_attr, None) is None:
+                continue
+            old_page = getattr(self, tab_attr, None)
+            shutdown = getattr(old_page, "shutdown_workers", None)
+            if callable(shutdown):
+                shutdown()
+            widget = builder()
+            self._replace_tab_for_theme(getattr(self, index_attr), widget, icon_name, label_key)
+
+        if self._code_tab is not None:
+            self._refresh_code_tab_theme()
+        self._tabs.setCurrentIndex(min(current_index, self._tabs.count() - 1))
+
+    def _refresh_theme_assets(self) -> None:
+        self._use_theme_assets = theme_uses_icons()
+        icon_size = QSize(28, 28) if self._use_theme_assets else QSize(0, 0)
+        self._tabs.setIconSize(icon_size)
+        tab_icons = {
+            self._home_tab_index: "nav_home",
+            self._code_tab_index: "nav_code",
+            self._oj_tab_index: "nav_oj",
+            self._file_tab_index: "nav_file",
+            self._review_tab_index: "nav_review",
+            self._kb_tab_index: "nav_knowledge",
+        }
+        for index, icon_name in tab_icons.items():
+            self._tabs.setTabIcon(index, theme_icon(icon_name) if self._use_theme_assets else QIcon())
+        if self._use_theme_assets:
+            self._settings_btn.setIcon(theme_icon("nav_settings"))
+            self._settings_btn.setIconSize(QSize(24, 24))
+        else:
+            self._settings_btn.setIcon(QIcon())
+        if self._code_tab is not None:
+            set_button_icon(self.btn_run, "action_run")
+            set_button_icon(self.btn_canvas_fullscreen, "action_fullscreen")
+            if not self._use_theme_assets:
+                self.btn_canvas_fullscreen.setText("FS")
+            else:
+                self.btn_canvas_fullscreen.setText("")
+
+    def _refresh_code_tab_theme(self) -> None:
+        self.canvas_scene.setBackgroundBrush(QColor(CANVAS_BG))
+        self.step_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 14px; font-weight: 600; padding: 0 4px;"
+        )
+        self.stdin_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 13px; font-weight: 600; padding: 4px 8px; "
+            f"background-color: {SURFACE}; border-top: 1px solid {BORDER};"
+        )
+        self._speed_label.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: 12px; font-weight: 600;"
+        )
 
     def _retranslate(self):
         self.setWindowTitle(tr("C++rafting Table"))

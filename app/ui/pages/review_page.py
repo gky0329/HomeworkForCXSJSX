@@ -346,26 +346,19 @@ class ReviewPage(QWidget):
         kp = card.get("knowledge_point", "")
         if kp:
             kpl = QLabel(kp)
+            kpl.setProperty("role", "reviewKnowledge")
             kpl.setWordWrap(True)
             kpl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-            kpl.setStyleSheet(
-                f"color: {HEAP_BORDER}; font-size: 14px; font-weight: bold; "
-                f"background-color: {WARN_BG}; "
-                f"padding: 6px 14px;"
-            )
             v.addWidget(kpl, alignment=Qt.AlignmentFlag.AlignCenter)
 
         qtext = card.get("question", "")
         ql = QLabel(qtext)
         self._question_label = ql
+        ql.setProperty("role", "reviewQuestion")
         ql.setWordWrap(True)
         ql.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ql.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         ql.setMargin(10)
-        ql.setStyleSheet(
-            f"color: {TEXT_PRIMARY}; font-size: 22px; font-weight: 700; "
-            f"padding: 0;"
-        )
         v.addWidget(ql)
 
         user_ans = card.get("user_answer", "")
