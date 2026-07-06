@@ -2,6 +2,10 @@
 
 **A cross-platform desktop learning workbench for visualizing C++ memory state step by step.**
 
+> 📹 **演示视频**：[北大网盘 (4分钟)](https://disk.pku.edu.cn/link/AA3EAF2F8C287A4226877484AC1EA38BAE)  
+> 📄 **作业报告**：[79-作业报告.pdf](./79-作业报告.pdf)  
+> 📝 **源代码**：[GitHub](https://github.com/gky0329/HomeworkForCXSJSX) | [79-源代码.txt](./79-源代码.txt)
+
 C++rafting Table combines a PySide6 desktop UI, AI-assisted execution traces, and a pure QGraphicsView memory canvas. Students can write or import C++ code, run it line by line, and inspect stack frames, heap blocks, object fields, arrays, pointers, dangling edges, and review materials in one local-first app.
 
 ## Highlights
