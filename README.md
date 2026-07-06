@@ -98,6 +98,8 @@ app/
   core/       Engine, execution worker, memory models, state diff, native debugger
   services/   AI service, file extraction, prompts, local JSON stores, i18n
   ui/         Main window, QGraphicsView canvas, pages, widgets, themes
+assets/       UI theme assets (icons, buttons, backgrounds, fonts)
+font/         Minecraft and CJK font files
 data/user/    Local user data, gitignored
 docs/         Roadshow, Windows, canvas, feature, and design notes
 tests/unit/   Regression and smoke-style unit tests
